@@ -19,6 +19,8 @@ import { createScreen } from './ui/screens';
 import { SettingsPanel } from './ui/settings';
 import { Shell } from './ui/shell';
 import type { Overlay, Screen, Tab, UI } from './ui/types';
+import { MODES } from './content/modes';
+import type { ModeId } from './save';
 
 export class App implements UI {
   save: SaveData;
@@ -423,6 +425,21 @@ export class App implements UI {
       },
       root: this.root,
     };
+  }
+
+  /** Main-menu entry: remembers the mode, then starts it (Trials opens its course list). */
+  startMode(mode: ModeId): void {
+    if (MODES[mode].locked(this.save)) return;
+    if (this.save.prefs.lastMode !== mode) this.commit({ ...this.save, prefs: { ...this.save.prefs, lastMode: mode } });
+    if (mode === 'rush') this.startRush();
+    else if (mode === 'arena') this.startArena();
+    else if (mode === 'trials') this.go('play', 'trials');
+    else this.startAscent();
+  }
+
+  /** Aether Ascent (Update 5) — implemented by the Ascent mode integration. */
+  startAscent(): void {
+    this.go('play', 'ascent');
   }
 
   startRush(): void {

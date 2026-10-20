@@ -31,7 +31,7 @@ export type SpeciesId =
   | 'astralux';
 
 export type RegionId = 'isles' | 'canyon' | 'coast' | 'frost' | 'storm';
-export type ModeId = 'rush' | 'trials' | 'arena';
+export type ModeId = 'rush' | 'trials' | 'arena' | 'ascent';
 
 export interface Palette {
   body: string;

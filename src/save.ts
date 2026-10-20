@@ -10,7 +10,7 @@ export const SAVE_KEY = 'emberwild.dragonRush.save';
 export const BACKUP_KEY = 'emberwild.dragonRush.save.backup';
 export const SAVE_VERSION = 3;
 
-export type ModeId = 'rush' | 'trials' | 'arena';
+export type ModeId = 'rush' | 'trials' | 'arena' | 'ascent';
 
 export interface DragonStats {
   runs: number;
@@ -131,6 +131,8 @@ export interface Settings {
   lowEffects: boolean;
   autoAbility: boolean;
   showHitboxes: boolean;
+  /** Update 5: camera shake on hits (separate from reduced motion, which also disables it). */
+  screenShake: boolean;
 }
 
 export interface ActiveContract {
@@ -163,6 +165,8 @@ export interface SaveData {
   migratedFrom: number | null;
   /** View preferences (Update 4, optional in older saves; defaults when absent). */
   prefs: Prefs;
+  /** Update 5: Aether Ascent records (defaults when absent). */
+  ascent: AscentRecord;
 }
 
 export type CollectionSortPref = 'favorites' | 'name' | 'level' | 'rarity' | 'recent';
@@ -172,10 +176,32 @@ export interface Prefs {
   observatoryPose: ObservatoryPose;
   /** Shorter hatch reveal (every stage kept). */
   quickReveal: boolean;
+  /** Update 5: the mode the main Play button starts (first-time players: Rush). */
+  lastMode: ModeId;
+  /** Update 5: id of a next-goal suggestion the player dismissed (shown again when it changes). */
+  dismissedGoal: string | null;
+  /** Update 5: contextual tutorial steps already shown (ids like "rush.steer"). */
+  tutorials: string[];
 }
 
 export function defaultPrefs(): Prefs {
-  return { collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false };
+  return { collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false, lastMode: 'rush', dismissedGoal: null, tutorials: [] };
+}
+
+// --- Aether Ascent records (Update 5) -------------------------------------------------------------
+// Owned by the Ascent mode: personal bests are kept separately with and without assist.
+export interface AscentRecord {
+  /** Best distance in metres (standard rules). */
+  best: number;
+  /** Best distance with the assist option on (kept separate). */
+  bestAssist: number;
+  runs: number;
+  /** Furthest region reached (standard rules). */
+  bestRegion: RegionId | null;
+}
+
+export function defaultAscent(): AscentRecord {
+  return { best: 0, bestAssist: 0, runs: 0, bestRegion: null };
 }
 
 // --- defaults -------------------------------------------------------------------------------------
@@ -252,7 +278,7 @@ export function defaultLifetime(): Lifetime {
 }
 
 export function defaultSettings(): Settings {
-  return { master: 0.8, music: 0.5, sfx: 0.85, muted: false, reducedMotion: false, lowEffects: false, autoAbility: false, showHitboxes: false };
+  return { master: 0.8, music: 0.5, sfx: 0.85, muted: false, reducedMotion: false, lowEffects: false, autoAbility: false, showHitboxes: false, screenShake: true };
 }
 
 export function defaultSave(): SaveData {
@@ -281,6 +307,7 @@ export function defaultSave(): SaveData {
     settled: [],
     migratedFrom: null,
     prefs: defaultPrefs(),
+    ascent: defaultAscent(),
   };
 }
 
@@ -392,6 +419,7 @@ export function sanitize(raw: unknown): SaveData {
     lowEffects: bool(s.lowEffects, false),
     autoAbility: bool(s.autoAbility, false),
     showHitboxes: bool(s.showHitboxes, false),
+    screenShake: bool(s.screenShake, true),
   };
   const lt = r.lifetime ?? {};
   for (const k of Object.keys(d.lifetime) as (keyof Lifetime)[]) {
@@ -445,7 +473,7 @@ export function sanitize(raw: unknown): SaveData {
     ? r.recent.filter((x: any) => x && typeof x.text === 'string').slice(0, 6).map((x: any) => ({ text: x.text.slice(0, 120), at: int(x.at) }))
     : [];
   const a = r.activeRun;
-  if (a && typeof a.id === 'string' && speciesId(a.dragon) && ['rush', 'trials', 'arena'].includes(a.mode)) {
+  if (a && typeof a.id === 'string' && speciesId(a.dragon) && ['rush', 'trials', 'arena', 'ascent'].includes(a.mode)) {
     d.activeRun = {
       id: a.id,
       mode: a.mode,
@@ -478,7 +506,12 @@ export function sanitize(raw: unknown): SaveData {
     collectionSort: sorts.includes(pf.collectionSort) ? pf.collectionSort : 'favorites',
     observatoryPose: poses.includes(pf.observatoryPose) ? pf.observatoryPose : 'idle',
     quickReveal: bool(pf.quickReveal, false),
+    lastMode: ['rush', 'trials', 'arena', 'ascent'].includes(pf.lastMode) ? pf.lastMode : 'rush',
+    dismissedGoal: typeof pf.dismissedGoal === 'string' ? pf.dismissedGoal.slice(0, 80) : null,
+    tutorials: strList(pf.tutorials, 60).map((t) => t.slice(0, 40)),
   };
+  const asc = r.ascent ?? {};
+  d.ascent = { best: int(asc.best), bestAssist: int(asc.bestAssist), runs: int(asc.runs), bestRegion: regionId(asc.bestRegion) ?? null };
   return d;
 }
 

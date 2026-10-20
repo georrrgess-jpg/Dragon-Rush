@@ -109,7 +109,11 @@ export class Sfx {
     return true;
   }
 
-  private tone(freq: number, dur: number, type: Wave, vol: number, when = 0, slideTo?: number, bus?: GainNode) {
+  /**
+   * Building blocks for mode-specific sound modules (e.g. src/audio/*.ts): one enveloped
+   * oscillator voice on the effects bus, respecting mute, volumes and the voice limiter.
+   */
+  tone(freq: number, dur: number, type: Wave, vol: number, when = 0, slideTo?: number, bus?: GainNode) {
     const ctx = this.ready();
     if (!ctx) return;
     const out = bus ?? this.fxBus!;
@@ -128,7 +132,8 @@ export class Sfx {
     o.stop(t + dur + 0.02);
   }
 
-  private noiseBurst(dur: number, vol: number, filterFreq: number, type: BiquadFilterType = 'bandpass', when = 0, sweepTo?: number) {
+  /** Filtered noise burst on the effects bus (see tone()). */
+  noiseBurst(dur: number, vol: number, filterFreq: number, type: BiquadFilterType = 'bandpass', when = 0, sweepTo?: number) {
     const ctx = this.ready();
     if (!ctx || !this.noise || !this.claim(dur + when)) return;
     const t = ctx.currentTime + when;

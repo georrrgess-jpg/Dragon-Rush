@@ -1,5 +1,5 @@
 import type { ProgressEvents } from '../economy';
-import type { SaveData } from '../save';
+import type { ModeId, SaveData } from '../save';
 
 export type Tab = 'home' | 'play' | 'dragons' | 'hatchery' | 'journal';
 
@@ -15,6 +15,8 @@ export interface UI {
   startRush(): void;
   startTrial(id: string, practice: boolean): void;
   startArena(): void;
+  /** Update 5: starts a mode from the main menu (remembers it as the menu's mode). */
+  startMode(mode: ModeId): void;
   openSettings(): void;
   /** Toasts for contracts, milestones, mastery and new species from a transaction. */
   announce(ev: ProgressEvents): void;
