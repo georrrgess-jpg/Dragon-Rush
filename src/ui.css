@@ -1479,3 +1479,5 @@ kbd {
 /* toasts use the empty middle of the top bar first, then stack downward; they never take clicks */
 #toast-root { left: 652px; right: auto; top: 6px; bottom: auto; width: 310px; transform: none; align-items: stretch; flex-direction: column; gap: 6px; }
 #toast-root .toast { max-width: none; font-size: 14px; line-height: 1.25; padding: 6px 12px; background: rgba(8, 44, 50, 0.96); border: 1px solid rgba(246, 196, 69, 0.5); }
+/* the boss bar sits above the bottom HUD so wave hints never cover it */
+.boss-bar { top: auto; bottom: 96px; }

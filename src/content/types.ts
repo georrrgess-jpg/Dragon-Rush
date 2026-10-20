@@ -53,8 +53,8 @@ export interface Palette {
 export interface Look {
   head: 'round' | 'long' | 'blunt' | 'snub' | 'sleek' | 'wedge';
   horns: 'curved' | 'branch' | 'swept' | 'crown' | 'nubs' | 'crystal' | 'antlers' | 'ears' | 'spikes' | 'none';
-  frill: 'none' | 'fin' | 'petal' | 'mane' | 'whiskers' | 'plume';
-  wings: 'broad' | 'fin' | 'leaf' | 'swept' | 'fan' | 'kite' | 'round' | 'crystal' | 'charged' | 'petal' | 'starry' | 'stub';
+  frill: 'none' | 'fin' | 'petal' | 'mane' | 'whiskers' | 'plume' | 'sunburst' | 'aurora';
+  wings: 'broad' | 'fin' | 'leaf' | 'swept' | 'fan' | 'kite' | 'round' | 'crystal' | 'charged' | 'petal' | 'starry' | 'stub' | 'icicle' | 'storm';
   tail: 'flame' | 'fluke' | 'leaf' | 'ribbon' | 'spade' | 'club' | 'puff' | 'crystal' | 'bolt' | 'star' | 'thorn' | 'pearl';
   ridge: 'spikes' | 'fin' | 'leaves' | 'plumes' | 'plates' | 'thorns' | 'crystals' | 'mane' | 'none';
   marking: 'chevrons' | 'dots' | 'veins' | 'swirls' | 'cracks' | 'stars' | 'stripes' | 'bolts' | 'facets' | 'pearls' | 'lava' | 'none';
@@ -63,6 +63,10 @@ export interface Look {
   neck: number;
   wingSpan: number;
   tailLen: number;
+  /** Long fangs below the muzzle. */
+  fangs?: boolean;
+  /** Snow caps on back plates. */
+  snowcaps?: boolean;
 }
 
 // --- abilities -----------------------------------------------------------------------------

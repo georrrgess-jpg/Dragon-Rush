@@ -150,7 +150,8 @@ export type ArenaEvent =
   | { type: 'telegraph'; x: number; y: number }
   | { type: 'victory' }
   | { type: 'defeat' }
-  | { type: 'bossLeft' };
+  | { type: 'bossLeft' }
+  | { type: 'hint'; text: string };
 
 export interface ArenaOptions {
   stats: ArenaStats;
@@ -226,6 +227,9 @@ export class ArenaSim {
   private spawnT = 1;
   bossArrivedAt = -1;
   eliteSpawned = false;
+  private flankerShown = false;
+  /** Zephyr: extra dashes left in the strike window (they skip the cooldown). */
+  private strikeDashes = 0;
   victory = false;
   endless = false;
   endlessSeconds = 0;
@@ -298,15 +302,17 @@ export class ArenaSim {
     const l = Math.hypot(x, y);
     const nx = l > 1 ? x / l : x;
     const ny = l > 1 ? y / l : y;
-    if ((nx !== this.inputX || ny !== this.inputY) && (nx || ny)) this.engage();
+    if (nx || ny) this.engage(); // moving counts as active play; standing idle does not
     this.inputX = nx;
     this.inputY = ny;
   }
   requestDash(): void {
     this.dashRequested = true;
+    this.engage();
   }
   requestAbility(): void {
     this.abilityRequested = true;
+    this.engage();
   }
   drainEvents(): ArenaEvent[] {
     const e = this.events;
@@ -430,7 +436,10 @@ export class ArenaSim {
           this.dashDirY = this.faceY;
         }
         this.dashT = ARENA.dashTime;
-        this.dashCd = this.dashCooldown;
+        if (this.strikeDashes > 0 && this.dashStrikeT > 0) {
+          this.strikeDashes -= 1;
+          this.dashCd = this.strikeDashes > 0 ? 0 : this.dashCooldown;
+        } else this.dashCd = this.dashCooldown;
         this.dashHit.clear();
         this.engage();
         this.events.push({ type: 'dash' });
@@ -505,7 +514,7 @@ export class ArenaSim {
       return;
     }
     const power = this.abilityScale * this.stats.abilityPower;
-    this.abilityCharge = 0;
+    this.abilityCharge = this.abilityCharge >= 2 - 1e-9 ? 0.35 : 0;
     this.abilityUses += 1;
     this.engage();
     this.fireAbility(this.stats.ability.arena, power);
@@ -615,6 +624,7 @@ export class ArenaSim {
       case 'dashStrike':
         this.dashStrikeT = 3;
         this.dashCd = 0;
+        this.strikeDashes = 2;
         this.dashRequested = true;
         break;
       case 'trail':
@@ -754,6 +764,10 @@ export class ArenaSim {
     const t = this.waveT;
     let kind: EnemyKind = 'chaser';
     if (w === 1) kind = t > 18 && r < 0.4 ? 'flanker' : 'chaser';
+    if (kind === 'flanker' && !this.flankerShown) {
+      this.flankerShown = true;
+      this.events.push({ type: 'hint', text: 'Dart Wisps: fast and fragile. They curve in from the side' });
+    }
     else if (w === 2) kind = r < 0.35 ? 'chaser' : r < 0.6 ? 'flanker' : r < 0.82 ? 'shooter' : 'runner';
     else if (w === 3) kind = r < 0.3 ? 'chaser' : r < 0.5 ? 'flanker' : r < 0.65 ? 'shooter' : r < 0.85 ? 'charger' : 'runner';
     else kind = r < 0.3 ? 'chaser' : r < 0.5 ? 'flanker' : r < 0.68 ? 'shooter' : r < 0.86 ? 'charger' : 'runner';
@@ -764,9 +778,17 @@ export class ArenaSim {
   }
 
   private breakWave() {
-    // Minor enemies scatter; their drops and loose pickups fly to the player.
-    for (const e of this.enemies) if (e.kind !== 'elite') this.events.push({ type: 'telegraph', x: e.x, y: e.y });
-    this.enemies = this.enemies.filter((e) => e.kind === 'elite');
+    // Everything scatters; loose pickups fly to the player. An elite that is still standing
+    // retreats and drops part of its treasure, so it never stacks with the boss.
+    for (const e of this.enemies) {
+      this.events.push({ type: 'telegraph', x: e.x, y: e.y });
+      if (e.kind === 'elite') {
+        this.gold += 15;
+        this.fruit += 5;
+        this.events.push({ type: 'hint', text: 'The elite retreats, dropping 15 gold and 5 Emberfruit' });
+      }
+    }
+    this.enemies = [];
     this.shots = this.shots.filter((s) => !s.hostile);
     this.hazards = [];
     for (const p of this.pickups) this.collect(p);
@@ -1040,11 +1062,17 @@ export class ArenaSim {
   }
 
   private updateZones(dt: number) {
+    // Overlapping trail patches burn an enemy once per step, not once per patch.
+    const burned = new Set<number>();
     for (const z of this.zones) {
       z.t -= dt;
       for (const e of [...this.enemies]) {
         const d = Math.hypot(e.x - z.x, e.y - z.y);
         if (d > z.r + e.r) continue;
+        if (z.kind === 'trail') {
+          if (burned.has(e.id)) continue;
+          burned.add(e.id);
+        }
         if (z.kind === 'pull' && d > 8) {
           const k = (z.strength * (e.kind === 'boss' ? 0.1 : e.kind === 'elite' ? 0.3 : 1) * dt) / d;
           e.x += (z.x - e.x) * k;
@@ -1064,7 +1092,6 @@ export class ArenaSim {
     const dmg = raw * this.damageMult * armor;
     e.hp -= dmg;
     e.hitFlash = 0.12;
-    this.engage();
     if (!quiet) this.events.push({ type: 'enemyHit', x: e.x, y: e.y, dmg: Math.round(dmg), kind: e.kind, crit: false });
     if (e.hp <= 0) this.killEnemy(e);
   }
@@ -1133,7 +1160,6 @@ export class ArenaSim {
     else this.hp = Math.min(this.maxHp, this.hp + 1);
     this.pickupsCollected += 1;
     this.pickupCount += 1;
-    this.engage();
     this.addCharge(this.stats.ability.chargeFrom.pickup ?? 0);
     const every = this.stats.passive.healPerPickups;
     if (every && this.pickupCount % every === 0) this.hp = Math.min(this.maxHp, this.hp + 1);

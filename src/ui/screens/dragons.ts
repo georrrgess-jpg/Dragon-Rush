@@ -97,7 +97,7 @@ export class DragonsScreen implements Screen {
           return;
         }
         this.feedBusy = true;
-        setTimeout(() => (this.feedBusy = false), 250);
+        setTimeout(() => (this.feedBusy = false), 120);
         ui.commit(r.save);
         sfx.feed();
         this.hero.feed();

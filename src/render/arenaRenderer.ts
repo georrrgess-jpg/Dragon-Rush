@@ -328,6 +328,17 @@ export class ArenaRenderer {
       }
     }
 
+    // player ground ring: keeps the dragon readable on any floor
+    ctx.save();
+    ctx.strokeStyle = 'rgba(20,30,40,0.55)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(sim.x, sim.y + 6, 34, 24, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
     // player
     const blink = sim.iT > 0 && sim.dashT <= 0 ? 0.55 + 0.45 * Math.cos(t * 22) : 1;
     ctx.globalAlpha = blink;

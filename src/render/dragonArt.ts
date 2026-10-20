@@ -153,7 +153,7 @@ const FAMILY: Record<Family, FamilyRig> = {
   serpent: { legs: 'tiny', shoulders: [[14, -18], [22, -22]], wingScale: 0.78, headPivot: (l, s) => [58 + l.neck * 0.6 + s.neck, -44 - (l.neck + s.neck) * 0.3], chest: [30, -24] },
   drake: { legs: 'heavy', shoulders: [[4, -22], [12, -26]], wingScale: 0.92, headPivot: (l, s) => [60 + l.neck + s.neck, -30 - (l.neck + s.neck) * 0.3], chest: [30, -16] },
   cloud: { legs: 'stubby', shoulders: [[2, -24], [10, -28]], wingScale: 0.9, headPivot: (l, s) => [46 + l.neck + s.neck, -40 - (l.neck + s.neck) * 0.4], chest: [24, -22] },
-  crystal: { legs: 'four', shoulders: [[8, -22], [16, -26]], wingScale: 1, headPivot: (l, s) => [56 + l.neck + s.neck, -46 - (l.neck + s.neck) * 0.4], chest: [24, -22] },
+  crystal: { legs: 'four', shoulders: [[6, -29], [14, -32]], wingScale: 1.04, headPivot: (l, s) => [54 + l.neck * 0.7 + s.neck, -58 - (l.neck + s.neck) * 0.55], chest: [24, -24] },
 };
 
 /** Mouth position relative to the drawing origin at scale 1 (used for feeding effects). */
@@ -370,6 +370,7 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
     ctx.fill();
   }
 
+  RIM = luminance(c.body) < 0.16 ? 'rgba(205,220,255,0.55)' : null;
   const body = buildBody(sp.family, look, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, true);
   drawLegs(ctx, fam.legs, c, pose, body, true);
@@ -378,12 +379,26 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   drawLegs(ctx, fam.legs, c, pose, body, false);
   drawNeckHead(ctx, sp.family, look, c, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, false);
+  RIM = null;
   ctx.restore();
 }
 
 // --- torso ---------------------------------------------------------------------------------------
 
+/** Rim-light color for dark palettes (set per draw), so navy/charcoal dragons read on dark skies. */
+let RIM: string | null = null;
+
+function luminance(hex: string): number {
+  const [r, g, b] = hexRgb(hex).map((v) => v / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 function outlineFill(ctx: Ctx, path: Path2D, fill: string | CanvasGradient, outline: string, width = 6) {
+  if (RIM) {
+    ctx.lineWidth = width + 5;
+    ctx.strokeStyle = RIM;
+    ctx.stroke(path);
+  }
   ctx.lineWidth = width;
   ctx.strokeStyle = outline;
   ctx.stroke(path);
@@ -696,6 +711,14 @@ function drawRidge(ctx: Ctx, look: Look, c: Palette, st: StageRig, body: Body) {
         ctx.strokeStyle = c.outline;
         ctx.lineWidth = 2;
         ctx.stroke();
+        if (look.snowcaps) {
+          ctx.beginPath();
+          ctx.ellipse(0, -s * 0.62, s * 0.8, s * 0.38, 0, Math.PI, Math.PI * 2);
+          ctx.quadraticCurveTo(s * 0.3, -s * 0.45, 0, -s * 0.5);
+          ctx.quadraticCurveTo(-s * 0.4, -s * 0.4, -s * 0.8, -s * 0.62);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+        }
         ctx.restore();
         break;
       case 'thorns':
@@ -1123,12 +1146,39 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   const [cx, cy] = fam.chest;
   const neckW = family === 'drake' ? 1.25 : family === 'serpent' ? 0.85 : 1;
   const neck = new Path2D();
-  neck.moveTo(cx, cy);
-  neck.bezierCurveTo(cx + 10, cy - 12, hx - 12, hy - 2, hx + 2, hy - 4);
-  neck.lineTo(hx + 14 * neckW, hy + 10 * neckW);
-  neck.bezierCurveTo(hx + 2, hy + 16 * neckW, cx + 26, cy + 8, cx + 18, cy + 28);
-  neck.closePath();
-  outlineFill(ctx, neck, c.body, c.outline);
+  if (family === 'crystal') {
+    // angular, segmented neck
+    const m1: Pt = [cx + (hx - cx) * 0.4, cy + (hy - cy) * 0.45];
+    const m2: Pt = [cx + (hx - cx) * 0.72, cy + (hy - cy) * 0.78];
+    neck.moveTo(cx, cy);
+    neck.lineTo(m1[0] - 4, m1[1] - 4);
+    neck.lineTo(m2[0] - 6, m2[1] - 4);
+    neck.lineTo(hx + 2, hy - 4);
+    neck.lineTo(hx + 14, hy + 10);
+    neck.lineTo(m2[0] + 12, m2[1] + 12);
+    neck.lineTo(m1[0] + 14, m1[1] + 14);
+    neck.lineTo(cx + 18, cy + 28);
+    neck.closePath();
+    outlineFill(ctx, neck, c.body, c.outline);
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 2;
+    for (const [p, q] of [
+      [[m1[0] - 4, m1[1] - 4], [m1[0] + 14, m1[1] + 14]],
+      [[m2[0] - 6, m2[1] - 4], [m2[0] + 12, m2[1] + 12]],
+    ] as [Pt, Pt][]) {
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(q[0], q[1]);
+      ctx.stroke();
+    }
+  } else {
+    neck.moveTo(cx, cy);
+    neck.bezierCurveTo(cx + 10, cy - 12, hx - 12, hy - 2, hx + 2, hy - 4);
+    neck.lineTo(hx + 14 * neckW, hy + 10 * neckW);
+    neck.bezierCurveTo(hx + 2, hy + 16 * neckW, cx + 26, cy + 8, cx + 18, cy + 28);
+    neck.closePath();
+    outlineFill(ctx, neck, c.body, c.outline);
+  }
   ctx.beginPath();
   ctx.moveTo(cx + 20, cy + 22);
   ctx.bezierCurveTo(cx + 26, cy + 10, hx - 2, hy + 14, hx + 10, hy + 12);
@@ -1137,6 +1187,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   ctx.fillStyle = c.belly;
   ctx.fill();
   if (look.frill === 'mane') mane(ctx, c, hx, hy, st, true);
+  if (look.frill === 'aurora') aurora(ctx, c, hx, hy, st, pose);
 
   ctx.save();
   ctx.translate(hx, hy);
@@ -1144,6 +1195,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   ctx.scale(st.head, st.head);
   const h = headShape(look.head);
   // far-side parts
+  if (look.frill === 'sunburst') sunburst(ctx, c, st, pose);
   drawHorns(ctx, look, c, st, true);
   if (look.frill === 'fin') frill(ctx, c, -4, -8, 0.85, true);
   if (look.frill === 'plume') plumes(ctx, c, true);
@@ -1166,8 +1218,9 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   if (look.frill === 'plume') plumes(ctx, c, false);
   if (look.frill === 'petal') petals(ctx, c, st, false);
   if (look.frill === 'whiskers') whiskers(ctx, c, h, st, pose);
-  if (look.frill === 'mane') mane(ctx, c, 0, 0, st, false);
-  if (st === STAGE_RIG.elder) beard(ctx, c, h);
+  if (look.frill === 'mane' || look.frill === 'aurora') mane(ctx, c, 0, 0, st, false);
+  if (look.fangs) fangs(ctx, h);
+  if (st === STAGE_RIG.elder) elderTrait(ctx, family, c, h, pose);
   ctx.restore();
 }
 
@@ -1469,6 +1522,125 @@ function mane(ctx: Ctx, c: Palette, x: number, y: number, st: StageRig, onNeck: 
   }
 }
 
+function sunburst(ctx: Ctx, c: Palette, st: StageRig, pose: DragonPose) {
+  const n = 14;
+  const r0 = 14;
+  const r1 = 40 + 16 * st.horn;
+  ctx.save();
+  ctx.translate(-14, -12);
+  ctx.rotate(pose.time * 0.15);
+  ctx.shadowColor = `rgba(${c.glow},0.8)`;
+  ctx.shadowBlur = 10;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const len = i % 2 ? r1 * 0.75 : r1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a - 0.12) * r0, Math.sin(a - 0.12) * r0);
+    ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+    ctx.lineTo(Math.cos(a + 0.12) * r0, Math.sin(a + 0.12) * r0);
+    ctx.closePath();
+    ctx.fillStyle = i % 2 ? c.accent : c.mark;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Glacielle's aurora: two translucent ribbons flowing back from the mane. */
+function aurora(ctx: Ctx, c: Palette, hx: number, hy: number, st: StageRig, pose: DragonPose) {
+  const len = 90 + 40 * st.horn;
+  for (const [k, col] of [
+    [0, '#5fe8c0'],
+    [1, '#a77bff'],
+  ] as const) {
+    const w = Math.sin(pose.time * 2 + k) * 8;
+    const g = ctx.createLinearGradient(hx, hy, hx - len, hy + 40);
+    g.addColorStop(0, col);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.beginPath();
+    ctx.moveTo(hx - 6, hy - 6 + k * 6);
+    ctx.bezierCurveTo(hx - len * 0.35, hy - 30 + w, hx - len * 0.65, hy + 4 - w, hx - len, hy + 12 + k * 14 + w);
+    ctx.bezierCurveTo(hx - len * 0.6, hy + 26 - w, hx - len * 0.35, hy + 12 + w, hx - 4, hy + 10 + k * 6);
+    ctx.closePath();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  void c;
+}
+
+function fangs(ctx: Ctx, h: HeadShape) {
+  ctx.fillStyle = '#fbfbf2';
+  ctx.strokeStyle = '#3a4048';
+  ctx.lineWidth = 1.4;
+  for (const x of [h.tipX - 10, h.tipX - 20]) {
+    ctx.beginPath();
+    ctx.moveTo(x - 3, 10);
+    ctx.lineTo(x, 22);
+    ctx.lineTo(x + 3, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** Each family shows its age differently. */
+function elderTrait(ctx: Ctx, family: Family, c: Palette, h: HeadShape, pose: DragonPose) {
+  switch (family) {
+    case 'drake':
+      // bony jaw plates
+      ctx.fillStyle = mixHex(c.bone, '#ffffff', 0.25);
+      ctx.strokeStyle = c.outline;
+      ctx.lineWidth = 1.6;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(h.tipX - 14 - i * 9, 15, 5, 3.5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    case 'serpent': {
+      // long barbels
+      ctx.strokeStyle = mixHex(c.mark, '#ffffff', 0.2);
+      ctx.lineWidth = 2.2;
+      for (const k of [0, 1]) {
+        const w = Math.sin(pose.time * 2.2 + k) * 6;
+        ctx.beginPath();
+        ctx.moveTo(h.tipX - 4, 6 + k * 3);
+        ctx.bezierCurveTo(h.tipX + 10, 20 + w, h.tipX - 20, 34 - w, h.tipX - 46, 40 + k * 8 + w);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'crystal':
+      shard(ctx, 2, 8, 2.4, 18, 4, c);
+      shard(ctx, -4, 2, 2.8, 14, 3.5, c);
+      break;
+    case 'cloud':
+      for (const [x, y, r] of [
+        [-10, 4, 9],
+        [-14, -8, 8],
+        [-4, 14, 7],
+      ]) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+        ctx.fillStyle = c.outline;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+      break;
+    case 'wyvern':
+      // cheek spurs
+      for (let i = 0; i < 2; i++) horn(ctx, 2 - i * 6, 6 + i * 4, -14 - i * 6, 14 + i * 6, mixHex(c.accent, '#ffffff', 0.2), c.outline);
+      break;
+    default:
+      beard(ctx, c, h);
+  }
+}
+
 /** Elders grow soft flowing chin strands in their marking color. */
 function beard(ctx: Ctx, c: Palette, h: HeadShape) {
   ctx.save();
@@ -1495,7 +1667,7 @@ interface WingStyle {
   len: number;
   f3: number;
   scallop: number;
-  edge: 'scallop' | 'leaf' | 'round' | 'petal' | 'straight' | 'jagged';
+  edge: 'scallop' | 'leaf' | 'round' | 'petal' | 'straight' | 'jagged' | 'icicle' | 'ragged';
   spine: number;
 }
 
@@ -1512,6 +1684,8 @@ const WINGS: Record<Look['wings'], WingStyle> = {
   petal: { spread: 1.32, len: 0.94, f3: 0.86, scallop: 0, edge: 'petal', spine: 1.6 },
   starry: { spread: 1.12, len: 1.06, f3: 0.8, scallop: 0.22, edge: 'scallop', spine: 2 },
   stub: { spread: 0.95, len: 0.62, f3: 0.8, scallop: 0.2, edge: 'scallop', spine: 2.6 },
+  icicle: { spread: 1.0, len: 1.06, f3: 0.74, scallop: 0, edge: 'icicle', spine: 2 },
+  storm: { spread: 1.0, len: 1.1, f3: 0.74, scallop: 0, edge: 'ragged', spine: 2.4 },
 };
 
 function dirv(a: number): Pt {
@@ -1530,9 +1704,10 @@ export function wingGeometry(family: Family, look: Look, st: StageRig, pose: Pic
   const elev = Math.max(-0.8, Math.min(1, pose.wing));
   const a = ((-106 + ((elev - 1) / 1.8) * 108) * Math.PI) / 180 - pose.dash * 0.25;
   const span = look.wingSpan * fam.wingScale * st.wing * (far ? 0.9 : 1);
-  const fold = Math.min(1, Math.max(0, pose.fold));
-  const ext = 1 - 0.42 * fold;
-  const spread = ws.spread * (1 - 0.45 * fold);
+  // Folds are clamped and kept partly open so the membrane never collapses into slats.
+  const fold = Math.min(0.72, Math.max(0, pose.fold));
+  const ext = 1 - 0.34 * fold;
+  const spread = Math.max(0.42, ws.spread * (1 - 0.32 * fold));
   const down = (1 - elev) / 1.8;
   const armLen = 40 * span * (1 - 0.15 * fold);
   const W: Pt = [S[0] + dirv(a)[0] * armLen, S[1] + dirv(a)[1] * armLen];
@@ -1601,6 +1776,39 @@ function drawWing(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig
           const off = i === steps ? 0 : i % 2 ? 0.12 : -0.05;
           path.lineTo(px + (W[0] - px) * off, py + (W[1] - py) * off);
         }
+        break;
+      }
+      case 'icicle': {
+        // saw-tooth icicles hanging off the trailing edge
+        const steps = 6;
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const px = a[0] + (b[0] - a[0]) * t;
+          const py = a[1] + (b[1] - a[1]) * t;
+          if (i % 2) {
+            const tx = a[0] + (b[0] - a[0]) * (t - 0.5 / steps);
+            const ty = a[1] + (b[1] - a[1]) * (t - 0.5 / steps);
+            path.lineTo(tx + (tx - W[0]) * 0.22, ty + (ty - W[1]) * 0.22 + 4);
+          }
+          path.lineTo(px, py);
+        }
+        break;
+      }
+      case 'ragged': {
+        // tattered storm-cloud edge: uneven notches
+        const notches = [0.18, 0.37, 0.6, 0.81];
+        let prev = 0;
+        for (const t of notches) {
+          const mt = (prev + t) / 2;
+          const qx = a[0] + (b[0] - a[0]) * mt;
+          const qy = a[1] + (b[1] - a[1]) * mt;
+          const px = a[0] + (b[0] - a[0]) * t;
+          const py = a[1] + (b[1] - a[1]) * t;
+          path.quadraticCurveTo(qx + (qx - W[0]) * 0.1, qy + (qy - W[1]) * 0.1, px, py);
+          path.lineTo(px + (W[0] - px) * 0.16, py + (W[1] - py) * 0.16);
+          prev = t;
+        }
+        path.lineTo(b[0], b[1]);
         break;
       }
       default: {

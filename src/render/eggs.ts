@@ -124,13 +124,12 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
       }
       break;
     case 'air':
-      ctx.lineWidth = h * 0.035;
-      for (const [sx, sy, r] of [
-        [-0.12, -0.1, 0.12],
-        [0.16, 0.16, 0.1],
-      ]) {
+      // S-curve gusts
+      ctx.lineWidth = h * 0.032;
+      for (const yy of [-0.08, 0.14]) {
         ctx.beginPath();
-        ctx.arc(w * sx, h * sy, h * r, Math.PI * 0.1, Math.PI * 1.7);
+        ctx.moveTo(-w * 0.42, h * yy);
+        ctx.bezierCurveTo(-w * 0.15, h * (yy - 0.12), w * 0.05, h * (yy + 0.12), w * 0.42, h * (yy - 0.02));
         ctx.stroke();
       }
       break;
@@ -151,6 +150,32 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
       ctx.lineWidth = h * 0.045;
       ctx.stroke();
       break;
+  }
+  // species motif from its markings, in the upper half
+  speciesMotif(ctx, sp.look.marking, w, h, c.accent);
+  // rarity trim: a band whose style matches the plaque (dashed rare, dotted epic, gold legendary)
+  if (sp.rarity !== 'common') {
+    ctx.save();
+    ctx.strokeStyle = sp.rarity === 'legendary' ? '#f6c445' : '#ffffff';
+    ctx.globalAlpha = sp.rarity === 'legendary' ? 1 : 0.85;
+    ctx.lineWidth = h * (sp.rarity === 'legendary' ? 0.05 : 0.03);
+    if (sp.rarity === 'rare') ctx.setLineDash([h * 0.06, h * 0.04]);
+    if (sp.rarity === 'epic') ctx.setLineDash([h * 0.015, h * 0.04]);
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.3, w * 0.52, h * 0.06, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    if (sp.rarity === 'legendary') {
+      ctx.fillStyle = '#fff6c8';
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 ? h * 0.025 : h * 0.06;
+        ctx.lineTo(Math.cos(a) * r, h * 0.3 + Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
   }
   // speckles in the accent color, and a highlight
   ctx.fillStyle = c.accent;
@@ -177,6 +202,72 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
     ctx.moveTo(-w * 0.45, -h * 0.02);
     for (let i = 1; i <= steps; i++) ctx.lineTo(-w * 0.45 + (w * 0.9 * i) / 6, (i % 2 ? -h * 0.08 : h * 0.04) - h * 0.02);
     ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function speciesMotif(ctx: Ctx, marking: string, w: number, h: number, color: string) {
+  const spots: [number, number][] = [
+    [-0.18, -0.3],
+    [0.12, -0.36],
+    [0.22, -0.18],
+  ];
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = h * 0.022;
+  for (const [sx, sy] of spots) {
+    const x = w * sx;
+    const y = h * sy;
+    const r = h * 0.045;
+    ctx.beginPath();
+    switch (marking) {
+      case 'stars':
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          const rr = i % 2 ? r * 0.4 : r;
+          ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+        }
+        ctx.fill();
+        break;
+      case 'pearls':
+      case 'dots':
+        ctx.arc(x, y, r * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'cracks':
+      case 'bolts':
+        ctx.moveTo(x - r, y - r);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x - r * 0.4, y + r * 0.3);
+        ctx.lineTo(x + r, y + r);
+        ctx.stroke();
+        break;
+      case 'facets':
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r * 0.7, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r * 0.7, y);
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      case 'chevrons':
+      case 'stripes':
+        ctx.moveTo(x - r, y - r * 0.6);
+        ctx.lineTo(x, y + r * 0.4);
+        ctx.lineTo(x + r, y - r * 0.6);
+        ctx.stroke();
+        break;
+      case 'lava':
+        ctx.ellipse(x, y, r, r * 0.6, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'veins':
+      case 'swirls':
+        ctx.arc(x, y, r * 0.8, 0.2, Math.PI * 1.6);
+        ctx.stroke();
+        break;
+    }
   }
   ctx.restore();
 }

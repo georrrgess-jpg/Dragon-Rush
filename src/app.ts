@@ -8,7 +8,7 @@ import { TRIAL_BY_ID, medalFor, trialCourse, trialUnlocked } from './content/tri
 import * as eco from './economy';
 import { rewardText } from './economy';
 import { unrevealed } from './hatchery';
-import { browserStore, loadSaveDetailed, writeSave, type KeyValueStore, type SaveData } from './save';
+import { SAVE_KEY, browserStore, loadSaveDetailed, writeSave, type KeyValueStore, type SaveData } from './save';
 import type { RunSummary } from './sim/flight';
 import { arenaStats, flightStats } from './stats';
 import { ArenaScreen, type ArenaReport } from './ui/arenaScreen';
@@ -68,7 +68,6 @@ export class App implements UI {
     this.resize();
     this.bindInput();
     this.go('home');
-    if (loaded.notice) this.toast(loaded.notice, 7000);
     if (!this.store) this.toast('Saving is unavailable in this browser window; progress will reset on reload.', 6000);
     if (stale.abandoned) {
       const what = stale.mode === 'arena' ? 'Your Arena session was interrupted; anything already banked at a checkpoint is kept.' : stale.mode === 'trials' ? 'Your last Sky Trial attempt was interrupted, so it did not count.' : 'Your last flight was interrupted by a reload, so its unbanked haul was lost.';
@@ -76,6 +75,8 @@ export class App implements UI {
     }
     if (unrevealed(save).length) this.toast('An egg you opened is waiting to be revealed in the Hatchery.', 5000);
     this.announce(ev);
+    // Shown last so other toasts can't push it out.
+    if (loaded.notice) this.toast(loaded.notice, 9000);
     requestAnimationFrame(this.frame);
   }
 
@@ -99,13 +100,32 @@ export class App implements UI {
   }
 
   /** Replaces the whole save (import): backed up first, then persisted in one write. */
-  replaceSave(next: SaveData): void {
+  /** Replaces the whole save (import). Returns false (and changes nothing) if it can't be written. */
+  replaceSave(next: SaveData): boolean {
+    const save = ensureContracts(next);
+    if (!writeSave(this.store, save)) return false;
     this.readOnly = false;
-    this.save = ensureContracts(next);
-    writeSave(this.store, this.save);
+    this.staleTab = false;
+    this.save = save;
     this.applySettings();
     this.go('home');
+    return true;
   }
+
+  /** Another tab wrote the save: stop writing here so neither tab overwrites the other. */
+  staleTab = false;
+  private onStorage = (e: StorageEvent) => {
+    if (e.key !== SAVE_KEY || this.readOnly || this.staleTab) return;
+    this.staleTab = true;
+    this.readOnly = true;
+    this.flight?.focusLost();
+    this.arena?.focusLost();
+    this.toast('Emberwild was changed in another tab. This tab stopped saving so nothing is overwritten. Reload the page to continue here.', 12000);
+    this.shell?.render();
+    if (this.shell && !this.root.querySelector('.readonly-banner')) {
+      this.shell.el.insertBefore(el('<div class="readonly-banner" role="alert">Open in another tab: this tab is not saving. Reload to continue here.</div>'), this.shell.content);
+    }
+  };
 
   get storeRef(): KeyValueStore | null {
     return this.store;
@@ -150,6 +170,7 @@ export class App implements UI {
 
   private bindInput() {
     window.addEventListener('resize', this.resize);
+    window.addEventListener('storage', this.onStorage);
     document.addEventListener('fullscreenchange', this.resize);
     window.addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
     window.addEventListener('pointermove', (e) => {
@@ -339,6 +360,7 @@ export class App implements UI {
   }
 
   announce(ev: eco.ProgressEvents): void {
+    if (this.readOnly && !this.staleTab) return; // nothing earned in a read-only session is kept
     for (const c of ev.contracts) this.toast(`Contract complete: ${c.title} (+${rewardText(c.reward)})`);
     for (const m of ev.milestones) {
       const g = ev.rewards.find((r) => r.source === `Milestone: ${m.title}`);

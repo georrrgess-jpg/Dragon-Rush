@@ -9,6 +9,7 @@ import {
   BACKUP_KEY,
   SAVE_KEY,
   SAVE_VERSION,
+  backupBeforeImport,
   defaultSave,
   exportSave,
   importSave,
@@ -56,10 +57,11 @@ function play(s: SaveData, id: string, r: Partial<eco.RunReport>, opts: eco.Star
 }
 
 describe('levels and XP', () => {
-  it('uses 40 + 12L + L² per level and caps at 30', () => {
+  it('uses 40 + 12L + L² per level (3L² from 15) and caps at 30', () => {
     expect(xpToNext(1)).toBe(53);
     expect(xpToNext(10)).toBe(260);
-    expect(xpToNext(29)).toBe(40 + 12 * 29 + 29 * 29);
+    expect(xpToNext(14)).toBe(40 + 12 * 14 + 14 * 14);
+    expect(xpToNext(29)).toBe(40 + 12 * 29 + 3 * 29 * 29); // adult levels are slower
     expect(xpToNext(30)).toBe(0);
     const r = addXp(29, 0, 1e9);
     expect(r).toMatchObject({ level: 30, xp: 0 });
@@ -102,8 +104,8 @@ describe('levels and XP', () => {
   it('reaching level 30 grants the elder title once', () => {
     const s = fresh();
     s.dragons.ember.level = 29;
-    s.wallet.fruit = 2000;
-    const r = eco.feed(s, 'ember', 20);
+    s.wallet.fruit = 4000;
+    const r = eco.feed(s, 'ember', 40);
     expect(r.ok && r.save.dragons.ember.level).toBe(MAX_LEVEL);
     if (r.ok) expect(r.save.dragons.ember.title).toBe(SPECIES.ember.elderTitle);
   });
@@ -459,6 +461,43 @@ describe('save format v3', () => {
     expect(newer.ok).toBe(false);
     const legacy = importSave(JSON.stringify(v2));
     expect(legacy.ok && legacy.save.dragons.ember.level).toBe(11);
+  });
+
+  it('imported hatchery history ids are validated (no markup survives)', () => {
+    const bad = defaultSave() as unknown as Record<string, any>;
+    bad.hatchery.history = [
+      { tx: '<img src=x onerror="alert(1)">', at: 1, species: 'ember', rarity: 'common', duplicate: true, essence: 5, pityBefore: { sinceEpic: 0, sinceLegendary: 0 }, rule: 'base', revealed: true },
+      { tx: 'egg-abc#1', at: 1, species: 'ember', rarity: 'common', duplicate: true, essence: 5, pityBefore: { sinceEpic: 0, sinceLegendary: 0 }, rule: 'base', revealed: true },
+    ];
+    const r = importSave(JSON.stringify(bad));
+    expect(r.ok && r.save.hatchery.history.map((h) => h.tx)).toEqual(['egg-abc#1']);
+  });
+
+  it('a second, different unreadable save is also kept', () => {
+    const store = storeWith('{broken one');
+    loadSaveDetailed(store);
+    store.setItem(SAVE_KEY, '{broken two');
+    loadSaveDetailed(store);
+    const kept = [...store.data.entries()].filter(([k]) => k.startsWith(`${BACKUP_KEY}.corrupt`)).map(([, v]) => v);
+    expect(kept).toEqual(expect.arrayContaining(['{broken one', '{broken two']));
+  });
+
+  it('a v3 save with a string or missing version is not downgraded', () => {
+    const s = fresh();
+    s.wallet.essence = 77;
+    s.dragons.leviara.owned = true;
+    const asString = loadSaveDetailed(storeWith({ ...s, version: '3' }));
+    expect(asString.save.wallet.essence).toBe(77);
+    expect(asString.save.dragons.leviara.owned).toBe(true);
+    const missing = { ...s } as Record<string, unknown>;
+    delete missing.version;
+    expect(loadSave(storeWith(missing)).dragons.leviara.owned).toBe(true);
+  });
+
+  it('backup before import reports failure when storage is full', () => {
+    const full: KeyValueStore = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
+    expect(backupBeforeImport(full, fresh())).toBe(false);
+    expect(backupBeforeImport(new MemStore(), fresh())).toBe(true);
   });
 
   it('each settlement is one storage write', () => {

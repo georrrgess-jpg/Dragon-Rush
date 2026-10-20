@@ -285,16 +285,18 @@ const ISLES: FloorStyle = {
     }
   },
   ground(ctx, rng) {
-    ctx.fillStyle = '#69a85a';
+    // Grass is kept a little lighter and less saturated than the mid-green creatures
+    // (Bramble Grubs) so they stand out; variation is gentle, without big dark blotches.
+    ctx.fillStyle = '#8cb276';
     ctx.fillRect(-EXT - 20, -EXT - 20, ARENA_W + 2 * EXT + 40, ARENA_H + 2 * EXT + 40);
-    softNoise(ctx, rng, ['rgba(130,192,104,0.5)', 'rgba(80,146,78,0.5)', 'rgba(120,180,96,0.4)', 'rgba(76,140,90,0.4)'], 0.5, 60);
-    softNoise(ctx, rng, ['rgba(140,200,110,0.35)', 'rgba(70,130,70,0.35)'], 0.4, 14);
+    softNoise(ctx, rng, ['rgba(166,198,134,0.45)', 'rgba(118,158,100,0.32)', 'rgba(156,190,124,0.4)', 'rgba(124,160,110,0.28)'], 0.5, 60);
+    softNoise(ctx, rng, ['rgba(170,204,140,0.3)', 'rgba(110,150,96,0.25)'], 0.4, 14);
     // grass strokes
     ctx.lineCap = 'round';
     for (let i = 0; i < 5000; i++) {
       const x = rng.range(0, ARENA_W);
       const y = rng.range(0, ARENA_H);
-      ctx.strokeStyle = rng.chance(0.5) ? 'rgba(60,120,60,0.3)' : 'rgba(170,220,140,0.28)';
+      ctx.strokeStyle = rng.chance(0.5) ? 'rgba(92,132,78,0.24)' : 'rgba(196,224,166,0.26)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -350,7 +352,7 @@ const ISLES: FloorStyle = {
         const a = rng.range(0, TAU);
         const lx = px + Math.cos(a) * rx * 0.6;
         const ly = py + Math.sin(a) * ry * 0.6;
-        ctx.fillStyle = '#6fb06a';
+        ctx.fillStyle = '#86b07a';
         ctx.beginPath();
         ctx.moveTo(lx, ly);
         ctx.arc(lx, ly, rng.range(7, 11), a + 0.4, a + TAU - 0.4);
@@ -363,7 +365,7 @@ const ISLES: FloorStyle = {
     for (let i = 0; i < 26; i++) {
       const [fx, fy] = spot(rng, 120, avoid);
       const c = petals[i % petals.length];
-      ctx.fillStyle = 'rgba(90,150,80,0.35)';
+      ctx.fillStyle = 'rgba(120,160,100,0.18)';
       ctx.beginPath();
       ctx.ellipse(fx, fy, 44, 30, rng.range(0, Math.PI), 0, TAU);
       ctx.fill();
@@ -383,23 +385,23 @@ const ISLES: FloorStyle = {
       const inset = rng.range(70, 120);
       const x = side < 2 ? t * ARENA_W : side === 2 ? inset : ARENA_W - inset;
       const y = side === 0 ? inset : side === 1 ? ARENA_H - inset : t * ARENA_H;
-      const r = rng.range(16, 30);
-      ctx.fillStyle = 'rgba(30,70,40,0.25)';
+      const r = rng.range(12, 22);
+      ctx.fillStyle = 'rgba(50,80,40,0.18)';
       ctx.beginPath();
-      ctx.ellipse(x + 6, y + 8, r, r * 0.85, 0, 0, TAU);
+      ctx.ellipse(x + 5, y + 6, r, r * 0.85, 0, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = rng.chance(0.5) ? '#3f8e54' : '#4a9a5a';
+      ctx.fillStyle = rng.chance(0.5) ? '#6f9a5c' : '#7aa264';
       ctx.beginPath();
       ctx.arc(x, y, r, 0, TAU);
       ctx.fill();
-      ctx.fillStyle = 'rgba(170,230,150,0.35)';
+      ctx.fillStyle = 'rgba(200,228,170,0.35)';
       ctx.beginPath();
       ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, TAU);
       ctx.fill();
     }
   },
   rim(ctx, rng, rim) {
-    strokeRim(ctx, rim, '#5b9a4e', 'rgba(150,205,120,0.85)', 'rgba(30,60,30,0.28)');
+    strokeRim(ctx, rim, '#729a5e', 'rgba(170,208,140,0.85)', 'rgba(40,64,34,0.26)');
     for (let i = 0; i < 70; i++) {
       const side = i % 4;
       const t = rng.range(0.04, 0.96);
@@ -525,18 +527,18 @@ const CANYON: FloorStyle = {
       }
       ctx.restore();
     }
-    // desert scrub
+    // dry desert scrub: small, flat, olive-brown (clearly not the green of the grubs)
     for (let i = 0; i < 70; i++) {
       const [x, y] = spot(rng, 70, avoid);
-      const r = rng.range(8, 16);
-      ctx.fillStyle = 'rgba(110,70,40,0.25)';
+      const r = rng.range(5, 9);
+      ctx.fillStyle = 'rgba(110,74,48,0.14)';
       ctx.beginPath();
-      ctx.ellipse(x + 4, y + 5, r * 1.3, r, 0, 0, TAU);
+      ctx.ellipse(x + 2, y + 2, r * 1.4, r * 0.8, 0, 0, TAU);
       ctx.fill();
-      for (let k = 0; k < 5; k++) {
-        ctx.fillStyle = k % 2 ? '#8f9a55' : '#7d8b4a';
+      for (let k = 0; k < 4; k++) {
+        ctx.fillStyle = k % 2 ? 'rgba(150,132,88,0.85)' : 'rgba(136,116,76,0.85)';
         ctx.beginPath();
-        ctx.arc(x + rng.range(-r, r), y + rng.range(-r * 0.7, r * 0.7), r * rng.range(0.4, 0.7), 0, TAU);
+        ctx.ellipse(x + rng.range(-r, r), y + rng.range(-r * 0.5, r * 0.5), r * rng.range(0.4, 0.65), r * rng.range(0.25, 0.4), rng.range(0, Math.PI), 0, TAU);
         ctx.fill();
       }
     }
@@ -988,77 +990,73 @@ const STORM: FloorStyle = {
       ctx.ellipse(px - rx * 0.2, py - ry * 0.2, rx * 0.45, ry * 0.12, -0.15, 0, TAU);
       ctx.fill();
     }
-    // glowing rune lines
-    ctx.save();
-    ctx.shadowColor = 'rgba(120,150,255,0.9)';
-    ctx.shadowBlur = 18;
-    ctx.strokeStyle = 'rgba(150,175,255,0.7)';
-    ctx.lineCap = 'round';
-    ctx.lineWidth = 3;
+    // Rune circles, hexagram, glyphs, channels and corner sigils are carved grooves:
+    // darker than the stone, no glow and low alpha, so they never read as luminous
+    // (beneficial) rings or as gameplay telegraphs.
+    const runes = new Path2D();
     for (const r of [230, 290]) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, TAU);
-      ctx.stroke();
+      runes.moveTo(cx + r, cy);
+      runes.arc(cx, cy, r, 0, TAU);
     }
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
     for (let k = 0; k < 2; k++) {
       for (let i = 0; i <= 3; i++) {
         const a = (i / 3) * TAU + k * (Math.PI / 3) - Math.PI / 2;
         const px = cx + Math.cos(a) * 220;
         const py = cy + Math.sin(a) * 220;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+        if (i === 0) runes.moveTo(px, py);
+        else runes.lineTo(px, py);
       }
     }
-    ctx.stroke();
-    // glyphs between the rings
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * TAU;
       const gx = cx + Math.cos(a) * 260;
       const gy = cy + Math.sin(a) * 260;
-      ctx.beginPath();
-      ctx.moveTo(gx - 6, gy - 8);
-      ctx.lineTo(gx + 6, gy - 2);
-      ctx.lineTo(gx - 4, gy + 8);
-      ctx.stroke();
+      runes.moveTo(gx - 6, gy - 8);
+      runes.lineTo(gx + 6, gy - 2);
+      runes.lineTo(gx - 4, gy + 8);
     }
-    // channels running out to the rim
-    ctx.lineWidth = 2.5;
     for (const [ax, ay, bx, by] of [
       [cx + 290, cy, ARENA_W - 80, cy],
       [cx - 290, cy, 80, cy],
       [cx, cy - 290, cx, 80],
       [cx, cy + 290, cx, ARENA_H - 80],
     ]) {
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(bx, by, 16, 0, TAU);
-      ctx.stroke();
+      runes.moveTo(ax, ay);
+      runes.lineTo(bx, by);
+      runes.moveTo(bx + 16, by);
+      runes.arc(bx, by, 16, 0, TAU);
     }
-    // corner sigils
     for (const [sx, sy] of [
       [300, 260],
       [ARENA_W - 300, 260],
       [300, ARENA_H - 260],
       [ARENA_W - 300, ARENA_H - 260],
     ]) {
-      ctx.beginPath();
-      ctx.arc(sx, sy, 60, 0, TAU);
-      ctx.stroke();
-      ctx.beginPath();
+      runes.moveTo(sx + 60, sy);
+      runes.arc(sx, sy, 60, 0, TAU);
       for (let i = 0; i <= 4; i++) {
         const a = (i / 4) * TAU + Math.PI / 4;
         const px = sx + Math.cos(a) * 52;
         const py = sy + Math.sin(a) * 52;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+        if (i === 0) runes.moveTo(px, py);
+        else runes.lineTo(px, py);
       }
-      ctx.stroke();
     }
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // soft shadowed bevel, then the groove itself
+    ctx.strokeStyle = 'rgba(10,10,22,0.12)';
+    ctx.lineWidth = 6;
+    ctx.stroke(runes);
+    ctx.strokeStyle = 'rgba(8,8,18,0.25)';
+    ctx.lineWidth = 2.6;
+    ctx.stroke(runes);
+    // faint worn lower lip (dim, neutral grey: no glow)
+    ctx.translate(0, 2);
+    ctx.strokeStyle = 'rgba(120,122,146,0.07)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke(runes);
     ctx.restore();
     // wet sheen streaks
     for (let i = 0; i < 120; i++) {

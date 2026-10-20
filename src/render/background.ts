@@ -376,8 +376,8 @@ function floatingIsland(ctx: Ctx, rng: Rng, x: number, y: number, w: number, pal
       ctx.quadraticCurveTo(x, yy + rng.range(-10, 14), x + w / 2, yy + rng.range(-6, 6));
       ctx.stroke();
     }
-    // moss drips under the lip
-    ctx.fillStyle = 'rgba(70,150,100,0.7)';
+    // earthy root drips under the lip (green-on-grey is reserved for real hazards)
+    ctx.fillStyle = 'rgba(128,104,78,0.5)';
     for (let i = 0; i < Math.floor(w / 18); i++) {
       const mx = x - w / 2 + 8 + rng.range(0, w - 16);
       const ml = rng.range(6, 22);
@@ -430,6 +430,65 @@ function floatingIsland(ctx: Ctx, rng: Rng, x: number, y: number, w: number, pal
     ctx.beginPath();
     ctx.ellipse(tx - th * 0.1, ty - th * 0.86, th * 0.16, th * 0.14, 0, 0, TAU);
     ctx.fill();
+  }
+}
+
+/** Little timber hut on stilts, standing on a far isle's cap at (x, y). */
+function islandHut(ctx: Ctx, x: number, y: number, s: number) {
+  const wood = '#a56a3e';
+  const dark = '#7a4a2c';
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - 7 * s, y - 6 * s, 1.6 * s, 6 * s);
+  ctx.fillRect(x + 5.4 * s, y - 6 * s, 1.6 * s, 6 * s);
+  ctx.fillStyle = wood;
+  ctx.fillRect(x - 8 * s, y - 16 * s, 16 * s, 10 * s);
+  ctx.fillStyle = 'rgba(255,230,190,0.35)';
+  ctx.fillRect(x - 8 * s, y - 16 * s, 5 * s, 10 * s);
+  ctx.fillStyle = dark;
+  ctx.fillRect(x + 1 * s, y - 13 * s, 3.5 * s, 7 * s);
+  ctx.fillStyle = '#8c5434';
+  ctx.beginPath();
+  ctx.moveTo(x - 11 * s, y - 15 * s);
+  ctx.lineTo(x, y - 24 * s);
+  ctx.lineTo(x + 11 * s, y - 15 * s);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** Sagging rope-and-plank bridge between two isle lips. */
+function ropeBridge(ctx: Ctx, ax: number, ay: number, bx: number, by: number, sag: number) {
+  const pt = (t: number, off: number): Pt => [ax + (bx - ax) * t, ay + (by - ay) * t + sag * 4 * t * (1 - t) * (off === 0 ? 1 : 0.7) - off];
+  // posts
+  ctx.fillStyle = '#7a4a2c';
+  ctx.fillRect(ax - 1.5, ay - 11, 3, 12);
+  ctx.fillRect(bx - 1.5, by - 11, 3, 12);
+  // planks
+  const n = Math.max(6, Math.round(Math.hypot(bx - ax, by - ay) / 6));
+  ctx.fillStyle = '#a56a3e';
+  for (let i = 1; i < n; i++) {
+    const [px, py] = pt(i / n, 0);
+    ctx.fillRect(px - 1.6, py - 1, 3.2, 3.4);
+  }
+  // ropes: deck line and hand rail
+  ctx.strokeStyle = 'rgba(120,84,54,0.9)';
+  ctx.lineWidth = 1.2;
+  for (const off of [0, 9]) {
+    ctx.beginPath();
+    for (let i = 0; i <= 16; i++) {
+      const [px, py] = pt(i / 16, off);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.lineWidth = 0.8;
+  for (let i = 2; i < n; i += 2) {
+    const [px, py] = pt(i / n, 0);
+    const [qx, qy] = pt(i / n, 9);
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(qx, qy);
+    ctx.stroke();
   }
 }
 
@@ -493,15 +552,29 @@ function buildIsles(): Scene {
       cloudBank(ctx, rng, 640, 'rgba(255,252,240,0.55)', 16, 1.3, 2.1);
       cloudBank(ctx, rng, 700, 'rgba(255,255,250,0.75)', 14, 1.5, 2.4);
     }),
-    // far islands
+    // far islands, a few with warm timber: huts and rope bridges to small companion isles
     band(0.1, 0, H, 23, (ctx, rng) => {
       for (let i = 0; i < 7; i++) {
         const x = 120 + i * (TILE_W / 7) + rng.range(-60, 60);
         const w = rng.range(90, 170);
         const y = i % 2 ? rng.range(420, 520) : rng.range(230, 330);
-        wrapped(x, w, (xx) => floatingIsland(ctx, createRng(i * 31 + 5), xx, y, w, ISLE_FAR, false, i % 2 ? 1 : 2));
+        const hut = i % 3 === 0 ? rng.range(-0.25, 0.25) : null;
+        const companion = i === 1 || i === 4;
+        const gap = rng.range(70, 100);
+        const w2 = rng.range(50, 68);
+        const dy = rng.range(-26, 8);
+        wrapped(x, w / 2 + (companion ? gap + w2 + 20 : 20), (xx) => {
+          floatingIsland(ctx, createRng(i * 31 + 5), xx, y, w, ISLE_FAR, false, i % 2 ? 1 : 2);
+          if (hut !== null) islandHut(ctx, xx + w * hut, y - 3, 1);
+          if (companion) {
+            const cx = xx + w / 2 + gap + w2 / 2;
+            floatingIsland(ctx, createRng(i * 31 + 77), cx, y + dy, w2, ISLE_FAR, false, 0);
+            islandHut(ctx, cx + w2 * 0.1, y + dy - 3, 0.8);
+            ropeBridge(ctx, xx + w / 2 - 2, y - 4, cx - w2 / 2 + 2, y + dy - 4, 14);
+          }
+        });
       }
-      haze(ctx, '214,238,232', 0.25, 0.42);
+      haze(ctx, '214,238,232', 0.22, 0.38);
     }),
     // mid islands: hung along the top and bottom bands, with waterfalls
     band(0.3, 0, H, 37, (ctx, rng) => {
@@ -552,7 +625,7 @@ function mesa(ctx: Ctx, x: number, base: number, w: number, h: number, color: st
   // sun-catching cap and shadowed right flank give the silhouettes some form
   ctx.fillStyle = 'rgba(255,214,170,0.22)';
   ctx.fillRect(x - w / 2, base - h, w, 5);
-  ctx.fillStyle = 'rgba(90,40,70,0.14)';
+  ctx.fillStyle = 'rgba(112,46,36,0.14)';
   ctx.beginPath();
   ctx.moveTo(x + w * 0.2, base - h);
   ctx.lineTo(x + w / 2, base - h);
@@ -565,17 +638,18 @@ function mesa(ctx: Ctx, x: number, base: number, w: number, h: number, color: st
 function ruin(ctx: Ctx, rng: Rng, x: number, base: number, s: number, color: string) {
   ctx.fillStyle = color;
   if (rng.chance(0.5)) {
-    // broken arch
+    // a small complete gateway arch
     ctx.beginPath();
     ctx.moveTo(x - 30 * s, base);
-    ctx.lineTo(x - 30 * s, base - 50 * s);
-    ctx.arc(x, base - 50 * s, 30 * s, Math.PI, Math.PI * 1.75);
-    ctx.lineTo(x + 8 * s, base - 64 * s);
-    ctx.arc(x, base - 50 * s, 18 * s, Math.PI * 1.7, Math.PI, true);
+    ctx.lineTo(x - 30 * s, base - 40 * s);
+    ctx.arc(x, base - 40 * s, 30 * s, Math.PI, TAU);
+    ctx.lineTo(x + 30 * s, base);
+    ctx.lineTo(x + 18 * s, base);
+    ctx.lineTo(x + 18 * s, base - 40 * s);
+    ctx.arc(x, base - 40 * s, 18 * s, 0, Math.PI, true);
     ctx.lineTo(x - 18 * s, base);
     ctx.closePath();
     ctx.fill();
-    ctx.fillRect(x + 18 * s, base - 40 * s, 12 * s, 40 * s);
   } else {
     // a row of columns, some broken
     for (let i = 0; i < 4; i++) {
@@ -589,6 +663,7 @@ function ruin(ctx: Ctx, rng: Rng, x: number, base: number, s: number, color: str
 function canyonCliff(ctx: Ctx, rng: Rng, x: number, w: number, fromTop: boolean, depth: number) {
   const top = fromTop ? 0 : H - depth;
   const edgeY = fromTop ? depth : H - depth;
+  const rim: Pt[] = [];
   ctx.save();
   ctx.beginPath();
   if (fromTop) {
@@ -598,8 +673,9 @@ function canyonCliff(ctx: Ctx, rng: Rng, x: number, w: number, fromTop: boolean,
     ctx.lineTo(x + w / 2, -2);
   } else {
     ctx.moveTo(x - w / 2, H + 2);
-    ctx.lineTo(x - w / 2 + w * 0.1, edgeY + 30);
-    for (let i = 1; i <= 6; i++) ctx.lineTo(x - w / 2 + (w * i) / 6 - w * 0.05, edgeY + rng.range(-20, 26));
+    rim.push([x - w / 2 + w * 0.1, edgeY + 30]);
+    for (let i = 1; i <= 6; i++) rim.push([x - w / 2 + (w * i) / 6 - w * 0.05, edgeY + rng.range(-14, 26)]);
+    for (const [px, py] of rim) ctx.lineTo(px, py);
     ctx.lineTo(x + w / 2, H + 2);
   }
   ctx.closePath();
@@ -617,32 +693,94 @@ function canyonCliff(ctx: Ctx, rng: Rng, x: number, w: number, fromTop: boolean,
   }
   ctx.restore();
   if (fromTop) {
-    // hanging vegetation along the overhang
-    for (let i = 0; i < Math.floor(w / 40); i++) {
-      const vx = x - w / 2 + 20 + i * 40 + rng.range(-8, 8);
-      const len = rng.range(30, 90);
-      ctx.strokeStyle = 'rgba(80,120,60,0.75)';
-      ctx.lineWidth = 2.5;
+    // dry, sun-bleached roots trailing from the overhang (no green: that reads as a hazard)
+    ctx.strokeStyle = 'rgba(170,110,74,0.55)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < Math.floor(w / 46); i++) {
+      const vx = x - w / 2 + 24 + i * 46 + rng.range(-8, 8);
+      const len = rng.range(18, 52);
       ctx.beginPath();
-      ctx.moveTo(vx, edgeY - 12);
-      ctx.quadraticCurveTo(vx + 6, edgeY + len * 0.5, vx - 2, edgeY + len);
+      ctx.moveTo(vx, edgeY - 10);
+      ctx.quadraticCurveTo(vx + 5, edgeY + len * 0.5, vx - 2, edgeY + len);
       ctx.stroke();
-      ctx.fillStyle = 'rgba(110,160,80,0.8)';
-      for (let k = 0; k < 4; k++) {
-        ctx.beginPath();
-        ctx.ellipse(vx + (k % 2 ? 4 : -3), edgeY + (len * (k + 1)) / 5, 4, 2.5, k % 2 ? 0.6 : -0.6, 0, TAU);
-        ctx.fill();
-      }
     }
   } else {
-    // scrub on the rim
-    ctx.fillStyle = 'rgba(120,140,70,0.7)';
-    for (let i = 0; i < Math.floor(w / 60); i++) {
-      ctx.beginPath();
-      ctx.ellipse(x - w / 2 + 30 + i * 60, edgeY + 2, 12, 7, 0, 0, TAU);
-      ctx.fill();
+    // soft sandy rim catching the low sun
+    ctx.save();
+    ctx.translate(0, -3);
+    ctx.strokeStyle = 'rgba(255,226,182,0.55)';
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 1; i < rim.length; i++) {
+      if (i === 1) ctx.moveTo(rim[i][0], rim[i][1]);
+      else ctx.lineTo(rim[i][0], rim[i][1]);
     }
+    ctx.stroke();
+    ctx.restore();
   }
+}
+
+/**
+ * A full natural sandstone arch with strata. `crownY` is the top of the span, `footY`
+ * where the legs meet the ground; `span` is the opening's width.
+ */
+function sandArch(ctx: Ctx, rng: Rng, x: number, crownY: number, footY: number, span: number, leg: number, thick: number) {
+  const ri = span / 2;
+  const ro = ri + leg;
+  const springY = crownY + thick + ri * 0.42;
+  const flare = leg * 0.7;
+  const path = new Path2D();
+  path.moveTo(x - ro - flare, footY);
+  path.lineTo(x - ro - flare * 0.2, springY + (footY - springY) * 0.5);
+  path.lineTo(x - ro, springY);
+  path.ellipse(x, springY, ro, springY - crownY, 0, Math.PI, TAU);
+  path.lineTo(x + ro + flare * 0.2, springY + (footY - springY) * 0.5);
+  path.lineTo(x + ro + flare, footY);
+  path.closePath();
+  path.moveTo(x - ri + flare * 0.3, footY);
+  path.lineTo(x - ri, springY);
+  path.ellipse(x, springY, ri, springY - crownY - thick, 0, Math.PI, TAU);
+  path.lineTo(x + ri - flare * 0.3, footY);
+  path.closePath();
+  const g = ctx.createLinearGradient(0, crownY, 0, footY);
+  g.addColorStop(0, '#d9824c');
+  g.addColorStop(0.5, '#c86e44');
+  g.addColorStop(1, '#b65c3c');
+  ctx.fillStyle = g;
+  ctx.fill(path, 'evenodd');
+  ctx.save();
+  ctx.clip(path, 'evenodd');
+  // horizontal strata
+  let yy = crownY;
+  let k = 0;
+  while (yy < footY) {
+    const bh = rng.range(10, 26);
+    ctx.fillStyle = k % 2 ? 'rgba(255,206,150,0.2)' : 'rgba(140,58,40,0.16)';
+    ctx.fillRect(x - ro - flare - 4, yy, (ro + flare) * 2 + 8, bh * 0.6);
+    yy += bh;
+    k++;
+  }
+  // sunlit left faces, shadowed right faces and the shaded underside of the span
+  ctx.fillStyle = 'rgba(255,220,170,0.18)';
+  ctx.fillRect(x - ro - flare, crownY, leg * 0.5, footY - crownY);
+  ctx.fillRect(x + ri - flare * 0.3, crownY, leg * 0.35, footY - crownY);
+  ctx.fillStyle = 'rgba(110,40,36,0.18)';
+  ctx.fillRect(x - ri - leg * 0.3, crownY, leg * 0.3, footY - crownY);
+  ctx.fillRect(x + ro - leg * 0.35, crownY, leg * 0.35 + flare, footY - crownY);
+  ctx.strokeStyle = 'rgba(110,40,36,0.22)';
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.ellipse(x, springY + 4, ri + 3, springY - crownY - thick + 4, 0, Math.PI * 1.05, Math.PI * 1.95);
+  ctx.stroke();
+  ctx.restore();
+  // sandy cap
+  ctx.fillStyle = 'rgba(255,222,176,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(x, springY, ro - 2, springY - crownY + 1, 0, Math.PI * 1.15, Math.PI * 1.85);
+  ctx.ellipse(x, springY + 4, ro - 6, springY - crownY - 3, 0, Math.PI * 1.85, Math.PI * 1.15, true);
+  ctx.fill();
 }
 
 function buildCanyon(): Scene {
@@ -678,11 +816,11 @@ function buildCanyon(): Scene {
         const x = rng.range(0, TILE_W);
         const w = rng.range(140, 320);
         const h = rng.range(50, 120);
-        wrapped(x, w, (xx) => mesa(ctx, xx, 600, w, h, 'rgba(150,90,130,0.55)'));
+        wrapped(x, w, (xx) => mesa(ctx, xx, 600, w, h, 'rgba(194,108,92,0.55)'));
       }
       const fg = ctx.createLinearGradient(0, 598, 0, H);
-      fg.addColorStop(0, 'rgba(150,90,130,0.55)');
-      fg.addColorStop(1, 'rgba(170,100,120,0.7)');
+      fg.addColorStop(0, 'rgba(194,108,92,0.55)');
+      fg.addColorStop(1, 'rgba(188,104,90,0.7)');
       ctx.fillStyle = fg;
       ctx.fillRect(0, 598, TILE_W, H);
       // distant birds over the mesas
@@ -691,7 +829,7 @@ function buildCanyon(): Scene {
         const y = rng.range(400, 470);
         const gs = rng.range(0.6, 0.9);
         const flap = rng.range(-1, 1);
-        wrapped(x, 10, (xx) => gull(ctx, xx, y, gs, 'rgba(110,60,90,0.4)', flap));
+        wrapped(x, 10, (xx) => gull(ctx, xx, y, gs, 'rgba(120,60,52,0.4)', flap));
       }
     }),
     band(0.13, 380, H, 63, (ctx, rng) => {
@@ -703,28 +841,64 @@ function buildCanyon(): Scene {
         const rx = rng.range(-30, 30);
         const rs = rng.range(0.7, 1);
         wrapped(x, w, (xx) => {
-          mesa(ctx, xx, base, w, h, 'rgba(176,104,104,0.75)');
-          ruin(ctx, createRng(i * 13 + 2), xx + rx, base - h + 1, rs, 'rgba(150,84,90,0.85)');
+          mesa(ctx, xx, base, w, h, 'rgba(184,100,80,0.75)');
+          ruin(ctx, createRng(i * 13 + 2), xx + rx, base - h + 1, rs, 'rgba(158,82,66,0.85)');
         });
       }
       const ng = ctx.createLinearGradient(0, 638, 0, H);
-      ng.addColorStop(0, 'rgba(186,112,104,0.78)');
-      ng.addColorStop(1, 'rgba(160,90,96,0.85)');
+      ng.addColorStop(0, 'rgba(192,108,84,0.78)');
+      ng.addColorStop(1, 'rgba(166,90,76,0.85)');
       ctx.fillStyle = ng;
       ctx.fillRect(0, 638, TILE_W, H);
       ctx.fillStyle = 'rgba(255,200,160,0.12)';
       for (let i = 0; i < 4; i++) ctx.fillRect(0, 650 + i * 18 + rng.range(-4, 4), TILE_W, 3);
     }),
     band(0.34, 0, H, 77, (ctx, rng) => {
-      for (let i = 0; i < 5; i++) {
-        const x = 240 + i * (TILE_W / 5) + rng.range(-60, 60);
-        const fromTop = i % 2 === 0;
-        const w = rng.range(260, 380);
-        const depth = fromTop ? rng.range(70, 120) : rng.range(90, 140);
-        wrapped(x, w, (xx) => canyonCliff(ctx, createRng(i * 71 + 4), xx, w, fromTop, depth));
-      }
-      // haze keeps the cliffs behind the gameplay layer
-      ctx.fillStyle = 'rgba(255,214,170,0.3)';
+      // Full sandstone arches: one tall span whose crown hugs the top edge and whose legs
+      // dissolve into the dust haze through the play band, and one low span kept below
+      // y ≈ 600. Both sit behind the cliffs.
+      hazedGroup(
+        ctx,
+        '255,212,168',
+        [
+          [0, 0.22],
+          [140, 0.34],
+          [300, 0.45],
+          [540, 0.45],
+          [660, 0.32],
+          [H, 0.28],
+        ],
+        (g) => {
+          const ax = 1700 + rng.range(-40, 40);
+          const span = rng.range(500, 560);
+          wrapped(ax, span / 2 + 130, (xx) => sandArch(g, createRng(907), xx, -6, H + 10, span, 68, 58));
+        },
+        [
+          [0, 1],
+          [130, 0.95],
+          [300, 0.4],
+          [520, 0.4],
+          [660, 0.85],
+          [H, 0.9],
+        ],
+      );
+      hazedGroup(ctx, '255,212,168', 0.26, (g) => {
+        const ax = 300 + rng.range(-40, 40);
+        wrapped(ax, 200, (xx) => sandArch(g, createRng(911), xx, 606, H + 10, 190, 40, 30));
+      });
+      // Cliffs: the bottom ledges stay low and the overhangs are tinted toward the dusty
+      // air (≈35% with the veil), with sandy rims instead of green scrub.
+      hazedGroup(ctx, '255,212,168', 0.2, (g) => {
+        for (let i = 0; i < 5; i++) {
+          const x = 240 + i * (TILE_W / 5) + rng.range(-60, 60);
+          const fromTop = i % 2 === 0;
+          const w = rng.range(260, 380);
+          const depth = fromTop ? rng.range(70, 120) : rng.range(84, 124);
+          wrapped(x, w, (xx) => canyonCliff(g, createRng(i * 71 + 4), xx, w, fromTop, depth));
+        }
+      });
+      // light veil keeps the whole layer behind the gameplay layer
+      ctx.fillStyle = 'rgba(255,214,170,0.18)';
       ctx.fillRect(0, 0, TILE_W, H);
     }),
     band(0.8, 60, H - 20, 89, (ctx, rng) => {
@@ -784,45 +958,63 @@ function seaStack(ctx: Ctx, rng: Rng, x: number, topY: number, w: number) {
     ctx.ellipse(x + rng.range(-w * 0.3, w * 0.3), rng.range(topY + 30, base), rng.range(5, 10), rng.range(18, 40), 0, 0, TAU);
     ctx.fill();
   }
-  ctx.strokeStyle = 'rgba(120,130,135,0.2)';
-  ctx.lineWidth = 2;
+  // soft weathering bands (filled, not stroked, so nothing reads as a crack line)
   for (let i = 0; i < 3; i++) {
-    const yy = topY + 30 + i * rng.range(40, 70);
-    ctx.beginPath();
-    ctx.moveTo(x - w, yy);
-    ctx.quadraticCurveTo(x, yy + rng.range(-8, 8), x + w, yy + rng.range(-6, 6));
-    ctx.stroke();
-  }
-  ctx.strokeStyle = 'rgba(110,120,130,0.25)';
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i < 2; i++) {
-    let cx = x + rng.range(-w * 0.3, w * 0.3);
-    let cy = topY + rng.range(20, 60);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    for (let k = 0; k < 5; k++) {
-      cx += rng.range(-6, 6);
-      cy += rng.range(12, 24);
-      ctx.lineTo(cx, cy);
-    }
-    ctx.stroke();
+    const yy = topY + 34 + i * rng.range(44, 70);
+    ctx.fillStyle = i % 2 ? 'rgba(255,250,238,0.12)' : 'rgba(150,150,140,0.08)';
+    ctx.fillRect(x - w, yy, w * 2, rng.range(6, 12));
   }
   ctx.restore();
-  // grassy crown with drips
-  ctx.fillStyle = '#9cc89a';
+  // pale, sandy crown: no moss and no drips (green-on-grey is reserved for real hazards)
+  paleCap(ctx, x, topY - w * 0.05, w * 0.42, w * 0.07 + 3);
+}
+
+/** Bleached sandy top used on decorative rock that sits inside the flight band. */
+function paleCap(ctx: Ctx, x: number, y: number, rx: number, ry: number) {
+  ctx.fillStyle = '#ece2cb';
   ctx.beginPath();
-  ctx.ellipse(x, topY - w * 0.05, w * 0.44, w * 0.09 + 4, 0, 0, TAU);
+  ctx.ellipse(x, y, rx, ry, 0, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = '#b9dcb0';
+  ctx.fillStyle = 'rgba(255,250,236,0.8)';
   ctx.beginPath();
-  ctx.ellipse(x - w * 0.1, topY - w * 0.08, w * 0.22, w * 0.035 + 2, 0, 0, TAU);
+  ctx.ellipse(x - rx * 0.22, y - ry * 0.3, rx * 0.5, ry * 0.4, 0, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = '#9cc89a';
-  for (let i = 0; i < 5; i++) {
-    ctx.beginPath();
-    ctx.ellipse(x - w * 0.34 + i * w * 0.17, topY + 4, 2.5, rng.range(5, 14), 0, 0, TAU);
-    ctx.fill();
+}
+
+/**
+ * Draws a group of shapes on a scratch canvas, tints them toward an atmosphere colour
+ * (`a` is a uniform alpha or [screen y, alpha] gradient stops), then composites the
+ * result onto `ctx`. Used for decorative rock that reaches into the flight band so it
+ * sits clearly behind gameplay hazards.
+ */
+function hazedGroup(ctx: Ctx, rgb: string, a: number | [number, number][], draw: (g: Ctx) => void, keep?: [number, number][]) {
+  const c = makeCanvas(ctx.canvas.width, ctx.canvas.height);
+  const g = c.getContext('2d')!;
+  const m = ctx.getTransform();
+  g.setTransform(m);
+  draw(g);
+  g.setTransform(m);
+  g.globalCompositeOperation = 'source-atop';
+  if (typeof a === 'number') {
+    g.fillStyle = `rgba(${rgb},${a})`;
+  } else {
+    const lg = g.createLinearGradient(0, 0, 0, H);
+    for (const [y, al] of a) lg.addColorStop(Math.min(1, Math.max(0, y / H)), `rgba(${rgb},${al})`);
+    g.fillStyle = lg;
   }
+  g.fillRect(-10, -H, c.width + 20, H * 3);
+  if (keep) {
+    // optional opacity profile: lets parts of the group dissolve into the air
+    g.globalCompositeOperation = 'destination-in';
+    const kg = g.createLinearGradient(0, 0, 0, H);
+    for (const [y, al] of keep) kg.addColorStop(Math.min(1, Math.max(0, y / H)), `rgba(0,0,0,${al})`);
+    g.fillStyle = kg;
+    g.fillRect(-10, -H, c.width + 20, H * 3);
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(c, 0, 0);
+  ctx.restore();
 }
 
 function stoneArch(ctx: Ctx, rng: Rng, x: number, archY: number, span: number, thick: number) {
@@ -865,15 +1057,7 @@ function stoneArch(ctx: Ctx, rng: Rng, x: number, archY: number, span: number, t
   }
   ctx.restore();
   const crownY = archY - thick * 0.15 - r - thick * 1.15;
-  ctx.fillStyle = '#a3c99e';
-  ctx.beginPath();
-  ctx.ellipse(x, crownY + 4, r * 0.55, 8, 0, 0, TAU);
-  ctx.fill();
-  for (let i = 0; i < 4; i++) {
-    ctx.beginPath();
-    ctx.ellipse(x - r * 0.4 + i * r * 0.27, crownY + 10, 2.5, rng.range(5, 12), 0, 0, TAU);
-    ctx.fill();
-  }
+  paleCap(ctx, x, crownY + 5, r * 0.52, 7);
 }
 
 function headland(ctx: Ctx, rng: Rng, x: number, w: number, h: number, falls: number) {
@@ -917,7 +1101,7 @@ function headland(ctx: Ctx, rng: Rng, x: number, w: number, h: number, falls: nu
   ctx.fillStyle = 'rgba(140,170,185,0.35)';
   ctx.fillRect(x + w * 0.25, hz - h - 10, w, h + 10);
   ctx.restore();
-  ctx.fillStyle = 'rgba(166,206,176,0.85)';
+  ctx.fillStyle = 'rgba(206,214,184,0.85)';
   ctx.beginPath();
   ctx.moveTo(tops[0][0] - 4, tops[0][1] + 4);
   for (const [tx, ty] of tops) ctx.lineTo(tx, ty - 3);
@@ -1062,7 +1246,7 @@ function buildCoast(): Scene {
           ctx.fill();
           ctx.fillStyle = 'rgba(255,252,244,0.5)';
           ctx.fillRect(xx - w / 2, -4, w * 0.35, 10);
-          ctx.strokeStyle = 'rgba(110,170,110,0.75)';
+          ctx.strokeStyle = 'rgba(150,180,150,0.6)';
           ctx.lineWidth = 2;
           for (const [t, len] of vines) {
             const k = Math.round(t * n);
@@ -1075,19 +1259,24 @@ function buildCoast(): Scene {
           }
         });
       }
-      for (let i = 0; i < 7; i++) {
-        const x = 160 + i * (TILE_W / 7) + rng.range(-60, 60);
-        if (i % 3 === 1) {
-          const span = rng.range(150, 220);
-          const ay = rng.range(600, 640);
-          const th = rng.range(30, 40);
-          wrapped(x, span, (xx) => stoneArch(ctx, createRng(i * 5 + 1), xx, ay, span, th));
-        } else {
-          const w = rng.range(70, 120);
-          const top = rng.range(520, 600);
-          wrapped(x, w, (xx) => seaStack(ctx, createRng(i * 19 + 7), xx, top, w));
+      haze(ctx, '226,244,244', 0.06, 0.34);
+      // Stacks and arches rise into the flight band, so they get a uniform atmospheric
+      // tint (≈35% with the veil below) and pale tops: they must never read as hazards.
+      hazedGroup(ctx, '222,242,244', 0.3, (g) => {
+        for (let i = 0; i < 7; i++) {
+          const x = 160 + i * (TILE_W / 7) + rng.range(-60, 60);
+          if (i % 3 === 1) {
+            const span = rng.range(150, 220);
+            const ay = rng.range(600, 640);
+            const th = rng.range(30, 40);
+            wrapped(x, span, (xx) => stoneArch(g, createRng(i * 5 + 1), xx, ay, span, th));
+          } else {
+            const w = rng.range(70, 120);
+            const top = rng.range(520, 600);
+            wrapped(x, w, (xx) => seaStack(g, createRng(i * 19 + 7), xx, top, w));
+          }
         }
-      }
+      });
       for (let i = 0; i < 12; i++) {
         const x = rng.range(0, TILE_W);
         const y = rng.chance(0.5) ? rng.range(610, 700) : rng.range(10, 60);
@@ -1095,7 +1284,8 @@ function buildCoast(): Scene {
         const r = rng.range(4, 7);
         wrapped(x, 10, (xx) => sparkle(ctx, xx, y, r, `${c}0.7)`));
       }
-      haze(ctx, '226,244,244', 0.06, 0.34, 0, 0.12);
+      ctx.fillStyle = bandGradient(ctx, '226,244,244', 0, 0.12);
+      ctx.fillRect(0, 0, TILE_W, H);
     }),
     // near spray mist along the bottom
     band(0.7, 620, H, 149, (ctx, rng) => {

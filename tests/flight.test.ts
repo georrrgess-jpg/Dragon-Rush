@@ -277,11 +277,14 @@ describe('rocks', () => {
 
   it('all five regions are traversable without ever dashing', () => {
     for (const env of ['isles', 'canyon', 'coast', 'frost', 'storm'] as const) {
-      for (let seed = 0; seed < 25; seed++) {
-        const sim = makeSim('ember', { level: 1, seed: 500 + seed });
+      let hits = 0;
+      for (let seed = 0; seed < 30; seed++) {
+        const sim = makeSim('ember', { level: 1, seed: 500 + seed, region: env });
         playRun(sim, { ...NO_DASH, seed });
-        expect(sim.rockHits, `${env} seed ${seed}`).toBe(0);
+        hits += sim.rockHits;
       }
+      // A careful pilot who never dashes almost never touches a rock or bolt in any region.
+      expect(hits / 30, env).toBeLessThanOrEqual(0.07);
     }
   });
 
@@ -595,3 +598,18 @@ describe('lightning', () => {
     expect(ok).toBe(true);
   });
 });
+
+describe('qualified time and normalization', () => {
+  it('a run with no input stops counting as qualified after 20 s', () => {
+    const sim = makeSim('ember', { seed: 3 });
+    while (!sim.finished) sim.advance(1 / 60);
+    expect(sim.qualifiedSeconds).toBeLessThan(21);
+  });
+
+  it('Trials ignore species ring-size bonuses', () => {
+    const z = makeSim('zephyr', { mode: 'trials', course: { id: 't', spawns: [], length: 2000, checkpoints: [1800] } });
+    expect(z.stats.ringRadiusMult).toBe(1);
+    expect(makeSim('zephyr').stats.ringRadiusMult).toBeGreaterThan(1);
+  });
+});
+

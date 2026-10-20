@@ -40,6 +40,8 @@ export class HeroView {
   private floats: Float[] = [];
   private anim = new DragonAnimator(true);
   private key = '';
+  /** Mouth position on screen from the last draw (feeding hearts start there). */
+  private mouth: [number, number] | null = null;
 
   constructor(
     readonly w: number,
@@ -70,7 +72,8 @@ export class HeroView {
       this.feedT += dt;
       if (before < 0.55 && this.feedT >= 0.55) {
         this.anim.feed();
-        for (let i = 0; i < 5; i++) this.floats.push({ x: this.w * 0.55 + (Math.random() - 0.5) * 80, y: this.h * 0.45, vy: -50 - Math.random() * 30, life: 1.2, kind: 'heart' });
+        const m = this.mouth ?? [this.w * 0.55, this.h * 0.45];
+        for (let i = 0; i < 5; i++) this.floats.push({ x: m[0] + (Math.random() - 0.5) * 40, y: m[1] - 10, vy: -50 - Math.random() * 30, life: 1.2, kind: 'heart' });
       }
       if (this.feedT > 2) this.feedT = -1;
     }
@@ -101,11 +104,12 @@ export class HeroView {
     const dy = baseY - 62 * scale * st;
     drawDragon(ctx, s.species, cx - 10 * scale, dy, scale, this.anim.pose(), { stage: s.stage, marking: s.marking });
     this.drawPerch(ctx, s.perch, cx, baseY, true);
+    const [mx, my] = mouthPoint(s.species, s.stage);
+    this.mouth = [cx - 10 * scale + mx * scale, dy + my * scale];
     if (this.feedT >= 0 && this.feedT < 0.55) {
       const k = this.feedT / 0.55;
-      const [mx, my] = mouthPoint(s.species, s.stage);
-      const tx = cx - 10 * scale + mx * scale;
-      const ty = dy + my * scale;
+      const tx = this.mouth[0];
+      const ty = this.mouth[1];
       const x = w * 0.95 + (tx - w * 0.95) * k;
       const y = h * 0.2 + (ty - h * 0.2) * k - Math.sin(k * Math.PI) * 60;
       drawFruitSlice(ctx, x, y, 14);

@@ -405,7 +405,7 @@ export function sanitize(raw: unknown): SaveData {
   d.hatchery.sinceLegendary = int(h.sinceLegendary);
   d.hatchery.history = Array.isArray(h.history)
     ? h.history
-        .filter((o: any) => o && typeof o.tx === 'string' && speciesId(o.species) && RARITY_IDS.includes(o.rarity))
+        .filter((o: any) => o && typeof o.tx === 'string' && /^[\w#.-]{1,64}$/.test(o.tx) && speciesId(o.species) && RARITY_IDS.includes(o.rarity))
         .slice(0, HATCHERY.historySize)
         .map((o: any) => ({
           tx: o.tx,
@@ -465,7 +465,7 @@ export function sanitize(raw: unknown): SaveData {
  * small allowance from the runs v1 did count (never from the wallet).
  */
 export function migrateLegacy(r: Record<string, any>): SaveData {
-  const version = typeof r.version === 'number' ? r.version : 1;
+  const version = Math.min(2, detectVersion(r));
   const d = defaultSave();
   d.wallet.gold = int(r.wallet?.gold);
   d.wallet.fruit = int(r.wallet?.fruit);
@@ -535,13 +535,45 @@ export interface LoadResult {
   notice: string | null;
 }
 
+/**
+ * Keeps a copy of `text` under `…backup.<suffix>`. An existing different copy is never
+ * overwritten: the new one gets a timestamped key instead, so no unreadable or pre-migration
+ * save is ever lost.
+ */
 function backupOnce(store: KeyValueStore, suffix: string, text: string) {
   const key = `${BACKUP_KEY}.${suffix}`;
   try {
-    if (store.getItem(key) === null) store.setItem(key, text);
+    const existing = store.getItem(key);
+    if (existing === null) store.setItem(key, text);
+    else if (existing !== text) store.setItem(`${key}.${Date.now()}`, text);
   } catch {
     /* storage full: still load */
   }
+}
+
+/** Version of a stored save. Accepts numeric strings and recognizes v3 saves by shape. */
+export function detectVersion(raw: Record<string, unknown>): number {
+  const v = raw.version;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim())) return Number(v);
+  const w = raw.wallet as Record<string, unknown> | undefined;
+  if (w && typeof w === 'object' && ('essence' in w || 'keys' in w)) return 3;
+  return 1;
+}
+
+/** Unreadable-save copies kept in storage (newest first), for download from Settings. */
+export function recoveryCopies(store: (KeyValueStore & { length?: number; key?(i: number): string | null }) | null): { key: string; text: string }[] {
+  if (!store || typeof store.length !== 'number' || !store.key) return [];
+  const out: { key: string; text: string }[] = [];
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (k && k.startsWith(`${BACKUP_KEY}.corrupt`)) out.push({ key: k, text: store.getItem(k) ?? '' });
+    }
+  } catch {
+    return out;
+  }
+  return out.sort((a, b) => (a.key < b.key ? 1 : -1));
 }
 
 export function loadSaveDetailed(store: KeyValueStore | null): LoadResult {
@@ -564,7 +596,7 @@ export function loadSaveDetailed(store: KeyValueStore | null): LoadResult {
     backupOnce(store, 'corrupt', text);
     return fresh("Your save couldn't be read. A copy was kept: you can download it from Settings → Save data.", text);
   }
-  const version = typeof raw.version === 'number' ? raw.version : 1;
+  const version = detectVersion(raw);
   if (version > SAVE_VERSION) {
     backupOnce(store, `v${version}`, text);
     return {
@@ -623,7 +655,7 @@ export function importSave(text: string): ImportResult {
   if (!data || typeof data !== 'object' || !data.wallet || typeof data.wallet !== 'object') {
     return { ok: false, error: 'That file does not look like an Emberwild save.' };
   }
-  const version = typeof data.version === 'number' ? data.version : 1;
+  const version = detectVersion(data);
   if (version > SAVE_VERSION) return { ok: false, error: `That save is from a newer version (v${version}); this game reads up to v${SAVE_VERSION}.` };
   const save = version < SAVE_VERSION ? migrateLegacy(data) : sanitize(data);
   save.activeRun = null;
@@ -632,12 +664,13 @@ export function importSave(text: string): ImportResult {
 }
 
 /** Saves the current save under a backup key before an import replaces it. */
-export function backupBeforeImport(store: KeyValueStore | null, current: SaveData): void {
-  if (!store) return;
+export function backupBeforeImport(store: KeyValueStore | null, current: SaveData): boolean {
+  if (!store) return false;
   try {
     store.setItem(`${BACKUP_KEY}.beforeImport`, JSON.stringify(current));
+    return true;
   } catch {
-    /* ignore */
+    return false;
   }
 }
 

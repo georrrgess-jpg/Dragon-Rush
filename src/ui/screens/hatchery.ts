@@ -245,7 +245,7 @@ export class HatcheryScreen implements Screen {
         </div>`;
     } else if (this.panel === 'history') {
       body = s.hatchery.history.length
-        ? `<ul class="history" data-scroll="hist">${s.hatchery.history.map((o) => `<li class="r-${o.rarity}"><span>${new Date(o.at).toLocaleString()}</span><b>${RARITIES[o.rarity].symbol} ${SPECIES[o.species].name}</b><span>${o.duplicate ? `duplicate → +${o.essence} Essence` : 'new'}${o.rule !== 'base' ? ` · ${o.rule.replace('-', ' ')}` : ''}</span><small class="muted">${o.tx}</small></li>`).join('')}</ul>`
+        ? `<ul class="history" data-scroll="hist">${s.hatchery.history.map((o) => `<li class="r-${o.rarity}"><span>${new Date(o.at).toLocaleString()}</span><b>${RARITIES[o.rarity].symbol} ${SPECIES[o.species].name}</b><span>${o.duplicate ? `duplicate → +${o.essence} Essence` : 'new'}${o.rule !== 'base' ? ` · ${o.rule.replace('-', ' ')}` : ''}</span><small class="muted">${esc(o.tx)}</small></li>`).join('')}</ul>`
         : '<p class="muted">No eggs opened yet. You start with one welcome key.</p>';
     } else {
       const unowned = SPECIES_IDS.filter((id) => !s.dragons[id].owned).sort((a, b) => RARITIES[SPECIES[a].rarity].order - RARITIES[SPECIES[b].rarity].order);
@@ -335,13 +335,42 @@ export class HatcheryScreen implements Screen {
         drawEgg(ctx, o.species, cx, REEL_H / 2 - 10, 150, { crack: k / 0.75, wobble: wob, glow: k });
       } else {
         const a = reduced ? k : Math.min(1, (k - 0.75) / 0.25);
+        if (!reduced && this.phase === 'hatch') {
+          // the shell splits along the crack: halves fly apart, shards and a flash ring
+          const e = Math.min(1, (k - 0.75) / 0.25);
+          for (const side of [-1, 1]) {
+            ctx.save();
+            ctx.globalAlpha = 1 - e;
+            ctx.translate(cx + side * 90 * e, REEL_H / 2 - 10 + (side < 0 ? -60 : 40) * e);
+            ctx.rotate(side * 1.2 * e);
+            ctx.beginPath();
+            if (side < 0) ctx.rect(-90, -110, 180, 100);
+            else ctx.rect(-90, -10, 180, 120);
+            ctx.clip();
+            drawEgg(ctx, o.species, 0, 0, 150, { crack: 1 });
+            ctx.restore();
+          }
+          ctx.strokeStyle = `rgba(255,255,255,${1 - e})`;
+          ctx.lineWidth = 6 * (1 - e) + 1;
+          ctx.beginPath();
+          ctx.arc(cx, REEL_H / 2, 40 + 200 * e, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = SPECIES[o.species].palette.body;
+          for (let i = 0; i < 10; i++) {
+            const ang = (i / 10) * Math.PI * 2;
+            ctx.globalAlpha = 1 - e;
+            ctx.fillRect(cx + Math.cos(ang) * 160 * e, REEL_H / 2 + Math.sin(ang) * 110 * e, 8, 5);
+          }
+          ctx.globalAlpha = 1;
+        }
         const glow = ctx.createRadialGradient(cx, REEL_H / 2, 10, cx, REEL_H / 2, 220);
         glow.addColorStop(0, `rgba(${sp.palette.glow},${0.55 * a})`);
         glow.addColorStop(1, `rgba(${sp.palette.glow},0)`);
         ctx.fillStyle = glow;
         ctx.fillRect(0, 0, REEL_W, REEL_H);
-        ctx.globalAlpha = a;
-        drawDragon(ctx, o.species, cx - 10, REEL_H / 2 + 20, 0.95, { wing: 0.8 + 0.2 * Math.sin(this.t * 8), happy: 1, rush: 0.6, time: this.t, tailWave: this.t * 2 }, { stage: stageOf(this.ui.save.dragons[o.species].level), marking: this.ui.save.dragons[o.species].marking });
+        ctx.globalAlpha = reduced ? a : Math.min(1, a * 2);
+        const pop = reduced || this.phase === 'result' ? 1 : a < 0.5 ? 0.6 + a : a < 0.8 ? 1.1 - (a - 0.5) * 0.33 : 1;
+        drawDragon(ctx, o.species, cx - 10, REEL_H / 2 + 20, 0.95 * pop, { wing: 0.8 + 0.2 * Math.sin(this.t * 8), happy: 1, rush: 0.6, time: this.t, tailWave: this.t * 2 }, { stage: stageOf(this.ui.save.dragons[o.species].level), marking: this.ui.save.dragons[o.species].marking });
         ctx.globalAlpha = 1;
         drawRarityPlaque(ctx, o.rarity, cx, REEL_H - 26, 150);
       }

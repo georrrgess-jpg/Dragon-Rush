@@ -70,10 +70,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
       primitive: 'pulse',
       chargeSeconds: 12,
       chargeFrom: { container: 1.5, dashBreak: 0.8 },
-      flight: { kind: 'pulse', radius: 150 },
+      flight: { kind: 'pulse', radius: 200 },
       arena: { kind: 'pulse', radius: 140, damage: 45, knockback: 90 },
       text: {
-        rush: 'A burst around you breaks every container and gathers every pickup within 150 px.',
+        rush: 'A burst around you breaks every container and gathers every pickup within 200 px.',
         trials: 'A burst that gathers nearby pickups.',
         arena: 'A burst deals 45 damage to enemies within 140 px and pushes them back.',
       },
@@ -109,7 +109,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'shield', hits: 1, duration: 6 },
       arena: { kind: 'shield', hits: 2, duration: 5 },
       text: {
-        rush: 'A molten barrier absorbs your next rock hit within 6 s: no slowdown.',
+        rush: 'A molten barrier absorbs your next rock or lightning hit within 6 s (+2 gold and 40% of the meter back); pickup reach +35% while it lasts.',
         trials: 'Absorbs your next collision within 6 s; it is not counted against your medal.',
         arena: 'A barrier blocks the next 2 hits within 5 s.',
       },
@@ -130,7 +130,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       body: '#f7c948', shade: '#d9a227', belly: '#fff2c4', outline: '#7a4a08', membrane: '#ffd76a',
       membraneLight: '#fff7d6', bone: '#e08a1e', accent: '#ff7a1a', mark: '#fff1a0', glow: '255,230,140', eye: '#5a2a05',
     },
-    look: { head: 'sleek', horns: 'crown', frill: 'plume', wings: 'fan', tail: 'flame', ridge: 'plumes', marking: 'stripes', bodyLen: 1.05, bodyThick: 0.95, neck: 4, wingSpan: 1.22, tailLen: 1.1 },
+    look: { head: 'sleek', horns: 'crown', frill: 'sunburst', wings: 'fan', tail: 'flame', ridge: 'plumes', marking: 'stripes', bodyLen: 1.05, bodyThick: 0.95, neck: 4, wingSpan: 1.22, tailLen: 1.25 },
     passive: {
       name: 'Sunlight',
       text: {
@@ -151,7 +151,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       text: {
         rush: 'A solar flare gathers pickups and breaks containers within 200 px, up to 340 px with full stored Sunlight.',
         trials: 'A flare gathers pickups within 200 px.',
-        arena: 'A flare deals 60 damage within 180 px, up to 102 damage and 306 px with full stored Sunlight.',
+        arena: 'A flare deals 60 damage within 180 px, up to 102 damage and 288 px with full stored Sunlight.',
       },
     },
     acquisition: { kind: 'hatchery' },
@@ -222,7 +222,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'ghost', duration: 3 },
       arena: { kind: 'buff', duration: 2.5, moveMult: 1.25, pickupMult: 1, invulnerable: 2 },
       text: {
-        rush: 'For 3 s, rocks only nudge you aside: no slowdown, no knockback.',
+        rush: 'For 3 s, rocks you touch burst harmlessly (+1 gold each) and pickup reach grows 35%.',
         trials: 'For 3 s, collisions only nudge you and are not counted.',
         arena: '2 s of invulnerability and 25% faster movement for 2.5 s.',
       },
@@ -300,7 +300,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       text: {
         rush: 'For 4 s, a current draws every pickup in a 230 px band ahead and breaks containers in it (wider with stored Flow).',
         trials: 'For 4 s, draws pickups in a band ahead.',
-        arena: 'A great wave rolls across the arena in your facing direction: 50 damage (up to 80 with stored Flow) and a strong push.',
+        arena: 'A great wave rolls toward the nearest enemy: 50 damage (up to 80 with stored Flow) in a wide band, with a strong push.',
       },
     },
     acquisition: { kind: 'hatchery' },
@@ -407,7 +407,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'shield', hits: 1, duration: 6, pull: 150 },
       arena: { kind: 'shield', hits: 2, duration: 5 },
       text: {
-        rush: 'A petal veil absorbs one rock hit within 6 s and draws in pickups within 150 px.',
+        rush: 'A petal veil absorbs one hit within 6 s (+2 gold, 40% of the meter back), draws in pickups within 150 px and widens pickup reach 35% while it lasts.',
         trials: 'Absorbs your next collision within 6 s; it is not counted.',
         arena: 'A veil blocks the next 2 hits within 5 s.',
       },
@@ -431,9 +431,9 @@ export const SPECIES_LIST: SpeciesDef[] = [
     look: { head: 'blunt', horns: 'antlers', frill: 'none', wings: 'leaf', tail: 'club', ridge: 'plates', marking: 'veins', bodyLen: 1.15, bodyThick: 1.15, neck: -6, wingSpan: 0.85, tailLen: 0.85 },
     passive: {
       name: 'Bark armor',
-      text: { flight: 'Rock hits slow you less and grant 0.5 s more grace.', arena: '+1 maximum health, but 10% lower attack damage.' },
+      text: { flight: 'Rock hits slow you less and grant 0.5 s more grace.', arena: '+1 maximum health.' },
       flight: { rockSlowMult: 0.7, graceBonus: 0.5 },
-      arena: { maxHpBonus: 1, damageMult: 0.9 },
+      arena: { maxHpBonus: 1 },
     },
     active: {
       name: 'Rootguard',
@@ -443,7 +443,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'shield', hits: 1, duration: 10 },
       arena: { kind: 'shield', hits: 1, duration: 8, push: 160 },
       text: {
-        rush: 'Roots absorb your next rock hit within 10 s.',
+        rush: 'Roots absorb your next hit within 10 s (+2 gold and 40% of the meter back); pickup reach +35% while they last.',
         trials: 'Absorbs your next collision within 10 s; it is not counted.',
         arena: 'Blocks the next hit within 8 s and shoves nearby enemies away.',
       },
@@ -477,10 +477,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
       primitive: 'field',
       chargeSeconds: 15,
       chargeFrom: { dashBreak: 0.8, ring: 1 },
-      flight: { kind: 'handling', duration: 5, steerMult: 1.3, reachMult: 1.4 },
+      flight: { kind: 'handling', duration: 6, steerMult: 1.35, reachMult: 1.75 },
       arena: { kind: 'buff', duration: 4, moveMult: 1.3, pickupMult: 1.5 },
       text: {
-        rush: 'For 5 s, steering responds 30% faster and pickup reach grows 40%. Scroll speed is unchanged.',
+        rush: 'For 6 s, steering responds 35% faster and pickup reach grows 75%. Scroll speed is unchanged.',
         trials: 'For 5 s, steering responds 30% faster.',
         arena: 'For 4 s, move 30% faster with 50% more pickup range.',
       },
@@ -514,11 +514,11 @@ export const SPECIES_LIST: SpeciesDef[] = [
       chargeSeconds: 9,
       chargeFrom: { ring: 1.5, dashBreak: 0.5 },
       flight: { kind: 'airdash' },
-      arena: { kind: 'dashStrike', damage: 18 },
+      arena: { kind: 'dashStrike', damage: 45 },
       text: {
         rush: 'One extra dash right now, without touching your normal dash cooldown.',
         trials: 'One extra dash right now, without touching your normal dash cooldown.',
-        arena: 'An extra dash in your movement direction that deals 18 damage to enemies it passes.',
+        arena: 'Two quick dashes that skip the cooldown; each deals 45 damage to enemies it passes.',
       },
     },
     acquisition: { kind: 'milestone', milestone: 'rings-60' },
@@ -552,7 +552,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'soften', duration: 4, reachMult: 1.6 },
       arena: { kind: 'field', radius: 200, duration: 4, slow: 0.4, dps: 0, blockShots: true },
       text: {
-        rush: 'For 4 s, rocks cannot slow you and pickup reach grows 60%.',
+        rush: 'For 4 s, rocks you touch burst harmlessly (+1 gold each) and pickup reach grows 60%.',
         trials: 'For 4 s, collisions only nudge you and are not counted.',
         arena: 'For 4 s, a cloud around you (200 px) destroys enemy shots and slows enemies inside by 40%.',
       },
@@ -573,7 +573,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       body: '#6a72a8', shade: '#4a5088', belly: '#c8ccef', outline: '#1c2050', membrane: '#8a92d0',
       membraneLight: '#d6dbff', bone: '#3a3f78', accent: '#f6e27a', mark: '#e6eaff', glow: '210,215,255', eye: '#10143a',
     },
-    look: { head: 'wedge', horns: 'swept', frill: 'none', wings: 'kite', tail: 'spade', ridge: 'spikes', marking: 'stripes', bodyLen: 0.95, bodyThick: 0.85, neck: 4, wingSpan: 1.15, tailLen: 1.15 },
+    look: { head: 'wedge', horns: 'swept', frill: 'none', wings: 'storm', tail: 'spade', ridge: 'spikes', marking: 'stripes', bodyLen: 0.95, bodyThick: 0.85, neck: 4, wingSpan: 1.15, tailLen: 1.15 },
     passive: {
       name: 'Gathering storm',
       text: { flight: 'Moving up and down and dash breaks build ability charge.', arena: 'Moving around builds ability charge.' },
@@ -585,10 +585,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
       primitive: 'pulse',
       chargeSeconds: 16,
       chargeFrom: { move: 1, dashBreak: 1 },
-      flight: { kind: 'pulse', radius: 170, clearRocks: 2 },
+      flight: { kind: 'pulse', radius: 210, clearRocks: 2 },
       arena: { kind: 'pulse', radius: 170, damage: 40, knockback: 200 },
       text: {
-        rush: 'A cyclone breaks containers, gathers pickups and shatters up to 2 rocks within 170 px.',
+        rush: 'A cyclone breaks containers, gathers pickups and shatters up to 2 rocks within 210 px.',
         trials: 'A cyclone gathers pickups and shatters up to 2 rocks within 170 px.',
         arena: 'A cyclone deals 40 damage within 170 px, flings enemies away and destroys enemy shots.',
       },
@@ -625,7 +625,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       flight: { kind: 'shield', hits: 1, duration: 8 },
       arena: { kind: 'shield', hits: 1, duration: 8 },
       text: {
-        rush: 'A frost ward absorbs your next rock hit within 8 s.',
+        rush: 'A frost ward absorbs your next hit within 8 s (+2 gold and 40% of the meter back); pickup reach +35% while it lasts.',
         trials: 'Absorbs your next collision within 8 s; it is not counted.',
         arena: 'Blocks the next hit within 8 s.',
       },
@@ -643,10 +643,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
     personality: 'A stocky white dragon with rounded antlers who rewards a steady pace.',
     lines: ['Slow and sure.', 'Freeze!', 'Snow day.'],
     palette: {
-      body: '#f2f5f8', shade: '#d0dae4', belly: '#ffffff', outline: '#4a5a6a', membrane: '#dbe8f2',
-      membraneLight: '#ffffff', bone: '#9aaabb', accent: '#b8d8f0', mark: '#cfe6ff', glow: '220,240,255', eye: '#1a2a3a',
+      body: '#8fa4b8', shade: '#6a7f94', belly: '#e8eef4', outline: '#2a3644', membrane: '#a8bccd',
+      membraneLight: '#e8f2fa', bone: '#f4f8fc', accent: '#dfe9f2', mark: '#ffffff', glow: '220,240,255', eye: '#1a2a3a',
     },
-    look: { head: 'blunt', horns: 'antlers', frill: 'mane', wings: 'round', tail: 'puff', ridge: 'mane', marking: 'facets', bodyLen: 1.05, bodyThick: 1.15, neck: -4, wingSpan: 0.9, tailLen: 0.85 },
+    look: { head: 'blunt', horns: 'antlers', frill: 'none', wings: 'stub', tail: 'club', ridge: 'plates', marking: 'facets', bodyLen: 1.1, bodyThick: 1.15, neck: -4, wingSpan: 0.85, tailLen: 0.85, snowcaps: true },
     passive: {
       name: 'Patient frost',
       text: {
@@ -661,10 +661,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
       primitive: 'field',
       chargeSeconds: 16,
       chargeFrom: { container: 0.6 },
-      flight: { kind: 'freeze', radius: 230, duration: 4 },
+      flight: { kind: 'freeze', radius: 280, duration: 4 },
       arena: { kind: 'field', radius: 200, duration: 4, slow: 0.5, dps: 10 },
       text: {
-        rush: 'Rocks within 230 px freeze into cracked ice for 4 s: touch them to shatter them safely (+1 gold).',
+        rush: 'Rocks within 280 px freeze into cracked ice for 4 s (touch them to shatter them safely, +1 gold) and nearby pickups fly to you.',
         trials: 'Rocks within 230 px freeze into cracked ice for 4 s and shatter safely on contact.',
         arena: 'A frost field (200 px) slows enemies inside by 50% for 4 s and chills them (10 damage per second).',
       },
@@ -685,7 +685,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       body: '#7fc4e6', shade: '#4f98c4', belly: '#dff4ff', outline: '#12304a', membrane: '#a8dcf4',
       membraneLight: '#effbff', bone: '#3a7aa8', accent: '#e8fbff', mark: '#ffffff', glow: '200,240,255', eye: '#0a1e30',
     },
-    look: { head: 'wedge', horns: 'swept', frill: 'none', wings: 'crystal', tail: 'crystal', ridge: 'crystals', marking: 'stripes', bodyLen: 1.0, bodyThick: 0.8, neck: 6, wingSpan: 1.1, tailLen: 1.2 },
+    look: { head: 'wedge', horns: 'swept', frill: 'none', wings: 'icicle', tail: 'crystal', ridge: 'crystals', marking: 'stripes', bodyLen: 1.0, bodyThick: 0.8, neck: 6, wingSpan: 1.1, tailLen: 1.2, fangs: true },
     passive: {
       name: 'Precision',
       text: { flight: 'Each dash break adds +1 gold and refunds 0.4 s of dash cooldown.', arena: '+20% damage against enemies more than 200 px away.' },
@@ -697,10 +697,10 @@ export const SPECIES_LIST: SpeciesDef[] = [
       primitive: 'projectile',
       chargeSeconds: 14,
       chargeFrom: { dashBreak: 1.2, kill: 0.4 },
-      flight: { kind: 'line', length: 520, width: 50, clearRocks: 1 },
+      flight: { kind: 'line', length: 700, width: 70, clearRocks: 1 },
       arena: { kind: 'projectiles', count: 1, spread: 0, damage: 55, pierce: 5, speed: 900, range: 620 },
       text: {
-        rush: 'An ice lance pierces 520 px ahead: breaks containers, gathers pickups and shatters 1 rock.',
+        rush: 'An ice lance pierces 700 px ahead: breaks containers, gathers pickups and shatters 1 rock.',
         trials: 'An ice lance gathers pickups in a line and shatters 1 rock ahead.',
         arena: 'A lance pierces up to 5 enemies in a line for 55 damage each.',
       },
@@ -721,7 +721,7 @@ export const SPECIES_LIST: SpeciesDef[] = [
       body: '#d4e6f8', shade: '#a8c4e8', belly: '#f6fbff', outline: '#3a4a7a', membrane: '#e8f4ff',
       membraneLight: '#ffffff', bone: '#9ab0e0', accent: '#9ff0d8', mark: '#c8a8ff', glow: '200,230,255', eye: '#2a2a5a',
     },
-    look: { head: 'sleek', horns: 'crystal', frill: 'mane', wings: 'crystal', tail: 'crystal', ridge: 'crystals', marking: 'facets', bodyLen: 1.05, bodyThick: 0.85, neck: 8, wingSpan: 1.2, tailLen: 1.2 },
+    look: { head: 'sleek', horns: 'crystal', frill: 'aurora', wings: 'crystal', tail: 'crystal', ridge: 'crystals', marking: 'facets', bodyLen: 1.05, bodyThick: 0.85, neck: 18, wingSpan: 1.25, tailLen: 1.2 },
     passive: {
       name: 'Shards',
       text: {
@@ -887,11 +887,11 @@ export const SPECIES_LIST: SpeciesDef[] = [
       chargeFrom: { container: 1.5, ring: 1.5, kill: 0.8 },
       overcharge: { label: 'Stars', maxScale: 1.6 },
       flight: { kind: 'chain', targets: 6, range: 700 },
-      arena: { kind: 'chain', targets: 6, range: 520, damage: 40 },
+      arena: { kind: 'chain', targets: 6, range: 520, damage: 28 },
       text: {
-        rush: 'Starlight links up to 6 pickups or containers on screen (up to 9 with stored stars), gathering or breaking them.',
+        rush: 'Starlight links up to 6 pickups or containers on screen (up to 10 with stored stars), gathering or breaking them.',
         trials: 'Starlight links up to 6 pickups on screen.',
-        arena: 'Starlight links up to 6 enemies for 40 damage each (up to 9 enemies with stored stars).',
+        arena: 'Starlight links up to 6 enemies for 28 damage each (up to 10 enemies with stored stars).',
       },
     },
     acquisition: { kind: 'hatchery' },

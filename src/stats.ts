@@ -68,7 +68,8 @@ export function flightStats(l: Loadout, mode: 'rush' | 'trials'): FlightStats {
     precisionGold: p.precisionGold ?? 0,
     precisionCenter: !!p.precisionCenter,
     ringCharge: p.ringCharge ?? 0,
-    ringRadiusMult: p.ringRadiusMult ?? 1,
+    // Ring openings decide medals, so Trials use the standard size for everyone.
+    ringRadiusMult: normalized ? 1 : p.ringRadiusMult ?? 1,
     safeChargeMult: p.safeChargeMult ?? 1,
     fruitPerTen: p.fruitPerTen ?? 0,
     dashRefund: p.dashRefund ?? 0,

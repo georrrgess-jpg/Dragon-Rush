@@ -78,6 +78,41 @@ describe('Dragon Arena', () => {
     expect(gpm).toBeLessThan(110);
   });
 
+  it("Ember's trail burns at its stated rate (overlapping patches don't stack)", () => {
+    const sim = make('ember');
+    const e = sim.spawn('elite', { x: sim.x + 60, y: sim.y });
+    e.hp = e.maxHp = 1e6;
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    for (let i = 0; i < 60 * 3; i++) {
+      e.x = sim.x;
+      e.y = sim.y; // keep it inside the trail
+      sim.advance(1 / 60);
+    }
+    // trail lasts 2.5 s at 30/s (scaled by armor 0.75 and level-1 power): well under ~120 total
+    const dealt = 1e6 - e.hp;
+    expect(dealt).toBeLessThan(160);
+  });
+
+  it('standing idle stops counting as qualified time after 20 s', () => {
+    const sim = make('ember', 1, 4);
+    for (let i = 0; i < 60 * 40 && sim.state === 'play'; i++) sim.advance(1 / 60);
+    expect(sim.qualifiedSeconds).toBeLessThan(21);
+  });
+
+  it('an elite still alive at the wave break retreats with a partial drop', () => {
+    const sim = make('ember', 1, 6);
+    sim.wave = 4;
+    sim.waveT = 44.9;
+    sim.eliteSpawned = true;
+    sim.spawn('elite');
+    const g = sim.gold;
+    for (let i = 0; i < 20 && sim.state === 'play'; i++) sim.advance(1 / 60);
+    expect(sim.state).toBe('choosing');
+    expect(sim.enemies.length).toBe(0);
+    expect(sim.gold).toBe(g + 15);
+  });
+
   it('endless continuation records survival time', { timeout: 60000 }, () => {
     const sim = make('ember', 15, 3);
     playArena(sim, { ...ARENA_SKILLED, seed: 9 }, { endlessSeconds: 30 });

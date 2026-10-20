@@ -2,7 +2,7 @@
 // when nothing changes) so callers persist exactly once per action — one logical transaction.
 import { settleContracts, type CompletedContract } from './contracts';
 import { MASTERY, MASTERY_BY_SPECIES, MASTERY_COMPLETE_KEYS, type MasteryDef } from './content/mastery';
-import { MAX_LEVEL, TALENTS, TALENT_SLOTS, XP, addXp, haulBonusPercent, stageOf, type Stage, type TalentId, type TalentSlot } from './content/progression';
+import { MAX_LEVEL, TALENTS, xpToNext, TALENT_SLOTS, XP, addXp, haulBonusPercent, stageOf, type Stage, type TalentId, type TalentSlot } from './content/progression';
 import { SPECIES, SPECIES_IDS } from './content/species';
 import type { RegionId, SpeciesId } from './content/types';
 import { COSMETIC_BY_ID, HATCHERY, MARKINGS, MILESTONES, REGIONS, REGION_IDS, type MarkingId, type MilestoneDef, type MilestoneMetric, type Reward } from './content/world';
@@ -801,5 +801,5 @@ export function nextGoal(s: SaveData, screen: 'home' | 'play' | 'dragons' | 'hat
 }
 
 function xpTo(level: number) {
-  return 40 + 12 * level + level * level;
+  return Math.max(1, xpToNext(level));
 }

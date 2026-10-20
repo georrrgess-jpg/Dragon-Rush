@@ -11,9 +11,11 @@ export const XP = {
   feedXp: 100,
 } as const;
 
-/** XP needed to go from level L to L + 1. */
+/** XP needed to go from level L to L + 1: 40 + 12L + L² (three times L² from level 15). */
 export function xpToNext(level: number): number {
-  return level >= MAX_LEVEL ? 0 : 40 + 12 * level + level * level;
+  if (level >= MAX_LEVEL) return 0;
+  // Adult levels (15+) are a long-term goal: the quadratic term triples.
+  return 40 + 12 * level + (level >= 15 ? 3 : 1) * level * level;
 }
 
 /** Total XP from level 1 (0 XP) to reach `level`. */

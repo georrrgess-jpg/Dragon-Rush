@@ -338,6 +338,9 @@ export class ArenaScreen {
           sfx.music('boss');
           this.showHint('The Stormcrown Wyrm arrives!', 3);
           break;
+        case 'hint':
+          this.showHint(e.text, 3);
+          break;
         case 'bossLeft':
           this.showHint('The boss flew away', 2);
           break;
@@ -386,7 +389,7 @@ export class ArenaScreen {
       this.els.dashTxt.textContent = ready ? 'READY' : 'charging';
     }
     const ch = s.abilityCharge;
-    if (this.set('ab', Math.round(ch * 200))) {
+    if (this.set('ab', ch >= 1 ? 1000 + Math.round(ch * 100) : Math.floor(ch * 200))) {
       const over = s.maxCharge > 1;
       this.els.abFill.style.width = `${Math.min(100, (ch / (over ? 2 : 1)) * 100).toFixed(1)}%`;
       this.els.ability.classList.toggle('ready', ch >= 1);

@@ -2,7 +2,7 @@
 import { sfx } from '../audio';
 import type { App } from '../app';
 import { updateSettings } from '../economy';
-import { backupBeforeImport, exportSave, importSave } from '../save';
+import { backupBeforeImport, exportSave, importSave, recoveryCopies } from '../save';
 import { el, esc } from './dom';
 
 export class SettingsPanel {
@@ -69,9 +69,12 @@ export class SettingsPanel {
         download(`emberwild-save-${new Date().toISOString().slice(0, 10)}.json`, exportSave(this.app.save));
         this.app.toast('Save exported. Keep the file somewhere safe.');
         return;
-      case 'recovery':
-        if (this.app.recovery) download('emberwild-recovered-save.txt', this.app.recovery);
+      case 'recovery': {
+        const copies = recoveryCopies(this.app.storeRef as never);
+        const text = this.app.recovery ?? copies[0]?.text;
+        if (text) download('emberwild-recovered-save.txt', text);
         return;
+      }
       case 'import':
         this.el.querySelector<HTMLInputElement>('input[type=file]')?.click();
         return;
@@ -90,9 +93,15 @@ export class SettingsPanel {
     }
     const yes = await this.app.confirm('Replace your current save?', `${esc(r.note)} Your current progress will be replaced. A backup of it is kept in this browser first.`, 'Import and replace');
     if (!yes) return;
-    backupBeforeImport(this.app.storeRef, this.app.save);
+    if (this.app.storeRef && !this.app.readOnly && !backupBeforeImport(this.app.storeRef, this.app.save)) {
+      this.app.toast('Import stopped: a backup of your current save could not be written (storage may be full). Nothing was changed.', 7000);
+      return;
+    }
+    if (!this.app.replaceSave(r.save)) {
+      this.app.toast('Import failed: the save could not be written to this browser (storage may be full or unavailable). Nothing was changed.', 7000);
+      return;
+    }
     this.close();
-    this.app.replaceSave(r.save);
     this.app.toast('Save imported.');
   }
 
@@ -126,7 +135,7 @@ export class SettingsPanel {
           <p class="muted small">Frame time (last ${ft.length} frames): average ${avg.toFixed(1)} ms, worst ${worst.toFixed(1)} ms.</p>
           <h3>Save data</h3>
           <p class="muted small">Progress is saved in this browser automatically. Export a copy to move it or keep it safe. ${this.app.readOnly ? '<b>This save is from a newer version and is not being overwritten.</b>' : ''}</p>
-          <div class="row wrap"><button class="btn small" data-a="export">Export save</button><button class="btn small ghost" data-a="import">Import save…</button>${this.app.recovery ? '<button class="btn small ghost" data-a="recovery">Download unreadable save copy</button>' : ''}</div>
+          <div class="row wrap"><button class="btn small" data-a="export">Export save</button><button class="btn small ghost" data-a="import">Import save…</button>${this.app.recovery || recoveryCopies(this.app.storeRef as never).length ? `<button class="btn small ghost" data-a="recovery">Download unreadable save copy${recoveryCopies(this.app.storeRef as never).length > 1 ? ` (newest of ${recoveryCopies(this.app.storeRef as never).length})` : ''}</button>` : ''}</div>
           <input type="file" accept=".json,application/json,text/plain" hidden>
           <h3>Controls</h3>
           <p class="small">Rush & Trials: mouse height (or W/S) steers · click/Space dash · E ability · Esc pause.<br>Arena: WASD/arrows move · Space/click dash · E ability · 1–3 choose upgrade · Esc pause.</p>

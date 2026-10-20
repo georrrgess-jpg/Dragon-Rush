@@ -268,7 +268,8 @@ export class FlightSim {
   }
   get attractRadius(): number {
     if (this.rushActive) return FLIGHT.rushAttractRadius;
-    let r = FLIGHT.attractRadius * this.stats.attractMult * this.reachBoost;
+    const guard = this.shieldHits > 0 || this.ghostT > 0 ? 1.35 : 1;
+    let r = FLIGHT.attractRadius * this.stats.attractMult * this.reachBoost * guard;
     if (this.magnetT > 0) r = Math.max(r, this.magnetRadius);
     return r;
   }
@@ -300,16 +301,18 @@ export class FlightSim {
 
   setTarget(y: number): void {
     const t = Math.min(FLIGHT.maxY, Math.max(FLIGHT.minY, y));
-    if (Math.abs(t - this.targetY) > 20) this.lastEngage = this.time;
+    if (Math.abs(t - this.targetY) > 6) this.lastEngage = this.time;
     this.targetY = t;
   }
 
   requestDash(): void {
     this.dashRequested = true;
+    this.lastEngage = this.time;
   }
 
   requestAbility(): void {
     this.abilityRequested = true;
+    this.lastEngage = this.time;
   }
 
   drainEvents(): FlightEvent[] {
@@ -462,7 +465,8 @@ export class FlightSim {
       return;
     }
     const scale = this.abilityScale * this.stats.abilityPower;
-    this.abilityCharge = 0;
+    // Saving a legendary meter all the way to 200% pays back 35% of a charge.
+    this.abilityCharge = this.abilityCharge >= 2 - 1e-9 ? 0.35 : 0;
     this.abilityUses += 1;
     this.engage();
     this.fireAbility(this.stats.ability.flight, scale);
@@ -560,6 +564,7 @@ export class FlightSim {
         break;
       case 'freeze': {
         const R = f.radius * power;
+        for (const p of this.pickups) if (Math.hypot(p.x - wx, p.y - y) <= R * 0.7) this.pullPickup(p);
         for (const r of this.rocks) if (Math.hypot(r.x - wx, r.y - y) <= R + r.r) {
           r.frozenUntil = this.time + f.duration;
           targets.push({ x: sx(r.x), y: r.y });
@@ -573,6 +578,14 @@ export class FlightSim {
         break;
     }
     this.events.push({ type: 'ability', effect: f, power, x: sx(wx), y, targets });
+  }
+
+  /** A blocked hit pays a little and refunds part of the ability meter. */
+  private blockReward(x: number, y: number) {
+    this.gold += 2;
+    this.events.push({ type: 'shieldBlock', x, y });
+    this.events.push({ type: 'bonusGold', x, y, gold: 2, reason: 'blocked' });
+    this.addAbilityCharge(this.stats.chargeSeconds * 0.4);
   }
 
   private pullPickup(p: Pickup) {
@@ -643,13 +656,17 @@ export class FlightSim {
 
       if (!this.penalizedRocks.has(rock.id) && this.graceT <= 0) {
         this.penalizedRocks.add(rock.id);
-        if (this.shieldHits > 0) {
+        if (this.collisionsSoft) {
+          // Ghost/soften: the rock bursts harmlessly (+1 gold) instead of blocking.
+          this.shatter(rock);
+          continue;
+        } else if (this.shieldHits > 0) {
           this.shieldHits -= 1;
           if (this.shieldHits <= 0) this.shieldT = 0;
           this.graceT = 0.4;
-          this.events.push({ type: 'shieldBlock', x: rock.x - this.dist, y: rock.y });
-        } else if (this.collisionsSoft) {
-          this.events.push({ type: 'nudge', x: rock.x - this.dist, y: rock.y });
+          this.shatter(rock);
+          this.blockReward(rock.x - this.dist, rock.y);
+          continue;
         } else {
           this.slowT = ROCK.slowSeconds * this.stats.rockSlowMult;
           this.graceT = ROCK.graceSeconds + this.stats.graceBonus;
@@ -717,7 +734,7 @@ export class FlightSim {
     if (p.kind === 'gold') this.gold += 1;
     else this.fruit += 1;
     this.pickupsCollected += 1;
-    this.engage();
+    // (passive events do not count as input)
     if (!this.rushActive && !p.noCharge && this.mode === 'rush') this.addCharge(RUSH.loosePickupCharge);
     if (!p.byAbility) this.addAbilityCharge(this.stats.ability.chargeFrom.pickup ?? 0);
     this.events.push({ type: 'pickup', kind: p.kind, x: p.x - this.dist, y: p.y, rush: this.rushActive });
@@ -783,7 +800,7 @@ export class FlightSim {
     this.containersBroken++;
     if (c.kind === 'chest') this.chests++;
     else this.pods++;
-    this.engage();
+    // (passive events do not count as input)
     if (byDash) {
       this.dashBreaks++;
       // Cinder: chained dash breaks; Bramble/Frostfang: precision gold; Frostfang: cooldown refund.
@@ -822,7 +839,7 @@ export class FlightSim {
         if (Math.abs(y - r.y) <= r.r * radiusMult) {
           r.passed = true;
           this.ringsPassed++;
-          this.engage();
+          // (passive events do not count as input)
           const charge = this.mode === 'rush' && !this.rushActive ? WIND_RING.charge + this.stats.ringCharge : 0;
           this.events.push({ type: 'ring', x: r.x - this.dist, y: r.y, charge });
           if (charge) this.addCharge(charge);
@@ -856,7 +873,7 @@ export class FlightSim {
           b.hit = true;
           if (this.shieldHits > 0) {
             this.shieldHits -= 1;
-            this.events.push({ type: 'shieldBlock', x: b.x - this.dist, y: this.y });
+            this.blockReward(b.x - this.dist, this.y);
           } else if (this.collisionsSoft) {
             this.events.push({ type: 'nudge', x: b.x - this.dist, y: this.y });
           } else if (this.graceT <= 0) {
