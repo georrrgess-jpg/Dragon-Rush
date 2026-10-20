@@ -8,6 +8,7 @@ import type { Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
 import type { Family, Look, Palette, SpeciesId } from '../content/types';
 import type { MarkingId } from '../content/world';
+import { SPECIES_ART, drawAccents, drawMaterial, drawWingPattern, formShading, shade, type Feet, type SpeciesArt, type SurfPt } from './speciesArt';
 
 type Ctx = CanvasRenderingContext2D;
 type Pt = [number, number];
@@ -70,7 +71,26 @@ export const DRAGON_HIT_OFFSET = { x: 18, y: -8 };
 export interface ArtOptions {
   stage?: Stage;
   marking?: MarkingId;
+  /**
+   * Detail tier (art bible): 0 = silhouette, eye and one identifying feature (gameplay at small
+   * scale); 1 = + markings, plates, membrane pattern; 2 = + scale rows, belly plates, claws and
+   * sheen (Observatory, hero, codex). Defaults from the on-screen scale.
+   */
+  detail?: 0 | 1 | 2;
 }
+
+/** Art revision: part of every cached thumbnail key so stale artwork is never shown. */
+export const ART_REV = 4;
+
+/** Detail tier for an on-screen scale (scale × stage scale). */
+export function detailFor(onScreenScale: number): 0 | 1 | 2 {
+  return onScreenScale >= 1.1 ? 2 : onScreenScale >= 0.45 ? 1 : 0;
+}
+
+/** Per-draw state (like RIM below): species art, detail tier and stage. */
+let ART: SpeciesArt = SPECIES_ART.ember;
+let DETAIL: 0 | 1 | 2 = 1;
+let HEAD_K: [number, number] = [1, 1];
 
 // --- colors -----------------------------------------------------------------------------------
 
@@ -156,12 +176,20 @@ const FAMILY: Record<Family, FamilyRig> = {
   crystal: { legs: 'four', shoulders: [[6, -29], [14, -32]], wingScale: 1.04, headPivot: (l, s) => [54 + l.neck * 0.7 + s.neck, -58 - (l.neck + s.neck) * 0.55], chest: [24, -24] },
 };
 
+/** Species head proportions; hatchlings and juveniles have a shorter snout. */
+export function headScale(id: SpeciesId, stage: Stage): [number, number] {
+  const [lx, ly] = SPECIES_ART[id].head;
+  const snout = stage === 'hatchling' ? 0.86 : stage === 'juvenile' ? 0.94 : 1;
+  return [lx * snout, ly];
+}
+
 /** Mouth position relative to the drawing origin at scale 1 (used for feeding effects). */
 export function mouthPoint(id: SpeciesId, stage: Stage = 'adult'): Pt {
   const sp = SPECIES[id];
   const st = STAGE_RIG[stage];
   const [hx, hy] = FAMILY[sp.family].headPivot(sp.look, st);
-  return [(hx + 34 * st.head - DRAGON_HIT_OFFSET.x) * st.scale, (hy + 10 * st.head - DRAGON_HIT_OFFSET.y) * st.scale];
+  const [lx, ly] = headScale(id, stage);
+  return [(hx + 34 * st.head * lx - DRAGON_HIT_OFFSET.x) * st.scale, (hy + 10 * st.head * ly - DRAGON_HIT_OFFSET.y) * st.scale];
 }
 
 // --- body construction ---------------------------------------------------------------------------
@@ -177,32 +205,130 @@ interface Body {
   /** For serpents the tail is part of the body: tip point and angle. */
   tailTip: { x: number; y: number; a: number } | null;
   hips: Pt[];
+  /** Cross-sections from the back (b) to the belly (e), tail end first; the surface lattice follows them. */
+  cols: Col[];
+  lattice: SurfPt[];
+}
+
+/** One cross-section of the torso: back point, belly point, axis angles along the back and belly. */
+interface Col {
+  bx: number;
+  by: number;
+  ex: number;
+  ey: number;
+  topA: number;
+  botA: number;
+}
+
+const LATTICE_ROWS = 6;
+
+/** Surface points between back and belly; odd rows are staggered so scales interlock. */
+function latticeOf(cols: Col[]): SurfPt[] {
+  const out: SurfPt[] = [];
+  cols.forEach((c, u) => {
+    const next = cols[Math.min(cols.length - 1, u + 1)];
+    for (let r = 0; r < LATTICE_ROWS; r++) {
+      const v = 0.08 + (0.84 * r) / (LATTICE_ROWS - 1);
+      const k = r % 2 ? 0.5 : 0;
+      const x0 = c.bx + (c.ex - c.bx) * v;
+      const y0 = c.by + (c.ey - c.by) * v;
+      const x1 = next.bx + (next.ex - next.bx) * v;
+      const y1 = next.by + (next.ey - next.by) * v;
+      out.push({ x: x0 + (x1 - x0) * k, y: y0 + (y1 - y0) * k, a: c.topA * (1 - v) + c.botA * v, v, u });
+    }
+  });
+  return out;
+}
+
+/** Vertical cross-sections of a closed outline polygon (x grows toward the head). */
+function colsFromPoly(poly: Pt[], step: number): Col[] {
+  let xmin = Infinity;
+  let xmax = -Infinity;
+  for (const [x] of poly) {
+    xmin = Math.min(xmin, x);
+    xmax = Math.max(xmax, x);
+  }
+  const cols: Col[] = [];
+  for (let x = xmin + step * 0.9; x <= xmax - step * 0.9; x += step) {
+    let top = Infinity;
+    let bot = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i];
+      const q = poly[(i + 1) % poly.length];
+      if ((p[0] <= x && q[0] > x) || (q[0] <= x && p[0] > x)) {
+        const y = p[1] + ((x - p[0]) / (q[0] - p[0])) * (q[1] - p[1]);
+        top = Math.min(top, y);
+        bot = Math.max(bot, y);
+      }
+    }
+    if (bot - top > 8) cols.push({ bx: x, by: top, ex: x, ey: bot, topA: 0, botA: 0 });
+  }
+  return withAngles(cols);
+}
+
+function withAngles(cols: Col[]): Col[] {
+  cols.forEach((c, i) => {
+    const a = cols[Math.max(0, i - 1)];
+    const b = cols[Math.min(cols.length - 1, i + 1)];
+    c.topA = Math.atan2(b.by - a.by, b.bx - a.bx || 1);
+    c.botA = Math.atan2(b.ey - a.ey, b.ex - a.ex || 1);
+  });
+  return cols;
+}
+
+function bez(p0: Pt, p1: Pt, p2: Pt, p3: Pt, n: number, out: Pt[]) {
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const u = 1 - t;
+    out.push([
+      u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+      u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
+    ]);
+  }
+}
+
+/** Closed cubic outline: builds the path and a sampled polygon from the same control points. */
+function cubicOutline(start: Pt, segs: [Pt, Pt, Pt][]): { path: Path2D; poly: Pt[] } {
+  const path = new Path2D();
+  const poly: Pt[] = [start];
+  path.moveTo(start[0], start[1]);
+  let cur = start;
+  for (const [a, b, e] of segs) {
+    path.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+    bez(cur, a, b, e, 12, poly);
+    cur = e;
+  }
+  path.closePath();
+  return { path, poly };
 }
 
 function classicBody(L: number, T: number, family: Family): Body {
-  const p = new Path2D();
+  const S = (x: number, y: number): Pt => [x * L, y * T];
+  let p: Path2D;
+  let poly: Pt[];
   if (family === 'crystal') {
-    const pts: Pt[] = [[40, -18], [24, -32], [0, -34], [-24, -28], [-46, -10], [-42, 14], [-20, 24], [10, 26], [36, 18], [44, 4]];
-    pts.forEach(([x, y], i) => (i ? p.lineTo(x * L, y * T) : p.moveTo(x * L, y * T)));
+    poly = ([[40, -18], [24, -32], [0, -34], [-24, -28], [-46, -10], [-42, 14], [-20, 24], [10, 26], [36, 18], [44, 4]] as Pt[]).map(([x, y]) => S(x, y));
+    p = new Path2D();
+    poly.forEach(([x, y], i) => (i ? p.lineTo(x, y) : p.moveTo(x, y)));
     p.closePath();
   } else if (family === 'drake') {
-    p.moveTo(40 * L, -14 * T);
-    p.bezierCurveTo(26 * L, -34 * T, -24 * L, -34 * T, -48 * L, -12 * T);
-    p.bezierCurveTo(-58 * L, 4 * T, -46 * L, 28 * T, -22 * L, 28 * T);
-    p.bezierCurveTo(6 * L, 33 * T, 34 * L, 28 * T, 46 * L, 8 * T);
-    p.closePath();
+    ({ path: p, poly } = cubicOutline(S(40, -14), [
+      [S(26, -34), S(-24, -34), S(-48, -12)],
+      [S(-58, 4), S(-46, 28), S(-22, 28)],
+      [S(6, 33), S(34, 28), S(46, 8)],
+    ]));
   } else if (family === 'wyvern') {
-    p.moveTo(38 * L, -16 * T);
-    p.bezierCurveTo(22 * L, -30 * T, -18 * L, -26 * T, -46 * L, -6 * T);
-    p.bezierCurveTo(-54 * L, 2 * T, -44 * L, 16 * T, -24 * L, 18 * T);
-    p.bezierCurveTo(2 * L, 24 * T, 30 * L, 20 * T, 42 * L, 4 * T);
-    p.closePath();
+    ({ path: p, poly } = cubicOutline(S(38, -16), [
+      [S(22, -30), S(-18, -26), S(-46, -6)],
+      [S(-54, 2), S(-44, 16), S(-24, 18)],
+      [S(2, 24), S(30, 20), S(42, 4)],
+    ]));
   } else {
-    p.moveTo(38 * L, -18 * T);
-    p.bezierCurveTo(22 * L, -34 * T, -20 * L, -30 * T, -44 * L, -10 * T);
-    p.bezierCurveTo(-54 * L, 2 * T, -44 * L, 22 * T, -22 * L, 22 * T);
-    p.bezierCurveTo(4 * L, 27 * T, 30 * L, 22 * T, 42 * L, 6 * T);
-    p.closePath();
+    ({ path: p, poly } = cubicOutline(S(38, -18), [
+      [S(22, -34), S(-20, -30), S(-44, -10)],
+      [S(-54, 2), S(-44, 22), S(-22, 22)],
+      [S(4, 27), S(30, 22), S(42, 6)],
+    ]));
   }
   const belly = new Path2D();
   const by = family === 'drake' ? 4 : 0;
@@ -227,7 +353,8 @@ function classicBody(L: number, T: number, family: Family): Body {
     [20 * L, -4 * T, 0.8],
   ];
   const hips: Pt[] = family === 'drake' ? [[-24, 18], [26, 16]] : [[-22, 14], [22, 14]];
-  return { path: p, belly, ridge, marks, tailRoot: [-40 * L, 2], tailTip: null, hips };
+  const cols = colsFromPoly(poly, 7);
+  return { path: p, belly, ridge, marks, tailRoot: [-40 * L, 2], tailTip: null, hips, cols, lattice: latticeOf(cols) };
 }
 
 function cloudBody(L: number, T: number): Body {
@@ -259,7 +386,21 @@ function cloudBody(L: number, T: number): Body {
     [-10 * L, 2 * T, 0.85],
     [20 * L, 2 * T, 0.8],
   ];
-  return { path: p, belly, ridge, marks, tailRoot: [-44 * L, 4], tailTip: null, hips: [[-20, 18], [18, 18]] };
+  const cols: Col[] = [];
+  for (let x = -50 * L; x <= 44 * L; x += 7) {
+    let top = Infinity;
+    let bot = -Infinity;
+    for (const [px, py, rx, ry] of puffs) {
+      const dx = (x - px * L) / (rx * L);
+      if (Math.abs(dx) >= 0.92) continue;
+      const h = ry * T * Math.sqrt(1 - dx * dx);
+      top = Math.min(top, py * T - h);
+      bot = Math.max(bot, py * T + h);
+    }
+    if (bot - top > 8) cols.push({ bx: x, by: top + 2, ex: x, ey: bot - 2, topA: 0, botA: 0 });
+  }
+  withAngles(cols);
+  return { path: p, belly, ridge, marks, tailRoot: [-44 * L, 4], tailTip: null, hips: [[-20, 18], [18, 18]], cols, lattice: latticeOf(cols) };
 }
 
 /** Serpents: one long tube from the chest to the tail tip that ripples with the tail wave. */
@@ -319,6 +460,18 @@ function serpentBody(L: number, T: number, tailLen: number, pose: DragonPose): B
   for (const i of [2, 5, 8, 11, 14, 17, 20]) marks.push([pts[i][0] + normals[i][0] * 4, pts[i][1] + normals[i][1] * 4, 1 - i / N / 1.4]);
   const tb = pts[N - 1];
   const te = pts[N];
+  // cross-sections along the spine, tail end first (stops before the thin tail tip)
+  const cols: Col[] = [];
+  for (let i = N - 6; i >= 1; i--) {
+    const w = width(i / N) * 0.9;
+    cols.push({ bx: pts[i][0] + normals[i][0] * w, by: pts[i][1] + normals[i][1] * w, ex: pts[i][0] - normals[i][0] * w, ey: pts[i][1] - normals[i][1] * w, topA: 0, botA: 0 });
+  }
+  cols.forEach((c, k) => {
+    const i = N - 6 - k;
+    const a = Math.atan2(pts[i - 1][1] - pts[i + 1][1], pts[i - 1][0] - pts[i + 1][0]);
+    c.topA = a;
+    c.botA = a;
+  });
   return {
     path,
     belly,
@@ -327,15 +480,25 @@ function serpentBody(L: number, T: number, tailLen: number, pose: DragonPose): B
     tailRoot: [-40, 2],
     tailTip: { x: te[0], y: te[1], a: Math.atan2(te[1] - tb[1], te[0] - tb[0]) },
     hips: [pts[6], pts[13]],
+    cols,
+    lattice: latticeOf(cols),
   };
 }
+
+const bodyCache = new Map<string, Body>();
 
 function buildBody(family: Family, look: Look, st: StageRig, pose: DragonPose): Body {
   const L = look.bodyLen * st.body;
   const T = look.bodyThick * (st === STAGE_RIG.hatchling ? 1.08 : 1);
   if (family === 'serpent') return serpentBody(L, T, look.tailLen * st.tail, pose);
-  if (family === 'cloud') return cloudBody(L, T);
-  return classicBody(L, T, family);
+  // static bodies depend only on family and proportions: build once (bounded by species × stage)
+  const key = `${family}:${L}:${T}`;
+  let b = bodyCache.get(key);
+  if (!b) {
+    b = family === 'cloud' ? cloudBody(L, T) : classicBody(L, T, family);
+    bodyCache.set(key, b);
+  }
+  return b;
 }
 
 // --- entry point ---------------------------------------------------------------------------------
@@ -347,7 +510,9 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   const c = paletteFor(id, opts.marking ?? 'default');
   const fam = FAMILY[sp.family];
   const look = sp.look;
-  const elder = st === STAGE_RIG.elder;
+  ART = SPECIES_ART[id];
+  HEAD_K = headScale(id, opts.stage ?? 'adult');
+  DETAIL = opts.detail ?? detailFor(scale * st.scale);
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale * st.scale, scale * st.scale);
@@ -358,11 +523,11 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
+  // Rush/ability aura only: elders read through ornament and material, never a constant glow
   const glow = Math.max(pose.rush, pose.ability);
-  if (glow > 0.01 || elder) {
-    const k = elder ? Math.max(0.18, glow) : glow;
+  if (glow > 0.01) {
     const g = ctx.createRadialGradient(10, -18, 10, 10, -18, 150);
-    g.addColorStop(0, `rgba(${c.glow},${0.42 * k})`);
+    g.addColorStop(0, `rgba(${c.glow},${0.42 * glow})`);
     g.addColorStop(1, `rgba(${c.glow},0)`);
     ctx.fillStyle = g;
     ctx.beginPath();
@@ -373,10 +538,10 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   RIM = luminance(c.body) < 0.16 ? 'rgba(205,220,255,0.55)' : null;
   const body = buildBody(sp.family, look, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, true);
-  drawLegs(ctx, fam.legs, c, pose, body, true);
+  drawLegs(ctx, fam.legs, c, pose, body, true, st);
   if (sp.family !== 'serpent') drawTailTube(ctx, look, c, st, pose, body);
   drawTorso(ctx, sp.family, look, c, st, pose, body);
-  drawLegs(ctx, fam.legs, c, pose, body, false);
+  drawLegs(ctx, fam.legs, c, pose, body, false, st);
   drawNeckHead(ctx, sp.family, look, c, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, false);
   RIM = null;
@@ -406,6 +571,11 @@ function outlineFill(ctx: Ctx, path: Path2D, fill: string | CanvasGradient, outl
   ctx.fill(path);
 }
 
+/** Material strength by stage: hatchlings have soft, barely-patterned skin. */
+function materialAlpha(st: StageRig): number {
+  return st === STAGE_RIG.hatchling ? 0.55 : st === STAGE_RIG.juvenile ? 0.8 : 1;
+}
+
 function drawTorso(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig, pose: DragonPose, body: Body) {
   ctx.save();
   ctx.scale(1, 1 + 0.015 * pose.breath * pose.perch);
@@ -413,27 +583,28 @@ function drawTorso(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRi
   g.addColorStop(0, c.body);
   g.addColorStop(1, c.shade);
   outlineFill(ctx, body.path, g, c.outline);
+  const glow = Math.max(pose.rush, pose.ability);
+  // elders show their richer material at any tier that shows material at all
+  const detail = DETAIL > 0 && st === STAGE_RIG.elder ? 2 : DETAIL;
+  ctx.save();
+  ctx.clip(body.path);
+  if (detail > 0) {
+    ctx.globalAlpha = materialAlpha(st);
+    drawMaterial(ctx, ART.material, body.lattice.filter((q) => q.v < 0.8), c, detail, pose.time);
+    ctx.globalAlpha = 1;
+  }
   if (body.belly) {
-    ctx.save();
-    ctx.clip(body.path);
     ctx.fillStyle = c.belly;
     ctx.fill(body.belly);
-    if (family !== 'cloud' && family !== 'serpent') {
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-      ctx.lineWidth = 1.5;
-      for (const bx of [-14, 2, 18, 30]) {
-        ctx.beginPath();
-        ctx.moveTo(bx * look.bodyLen, (family === 'drake' ? 16 : 12) * look.bodyThick);
-        ctx.lineTo(bx * look.bodyLen + 2, (family === 'drake' ? 26 : 20) * look.bodyThick);
-        ctx.stroke();
-      }
+    if (detail > 0) {
+      ctx.save();
+      ctx.clip(body.belly);
+      drawBelly(ctx, ART.belly, body.cols, c, detail);
+      ctx.restore();
     }
-    ctx.restore();
   }
   if (family === 'crystal') {
     // facet highlights
-    ctx.save();
-    ctx.clip(body.path);
     ctx.strokeStyle = 'rgba(255,255,255,0.45)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -450,11 +621,83 @@ function drawTorso(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRi
     ctx.lineTo(40 * look.bodyLen, -18 * look.bodyThick);
     ctx.closePath();
     ctx.fill();
-    ctx.restore();
   }
+  // key light upper left, form shadow lower right (over material and belly alike)
+  formShading(ctx, -40 * look.bodyLen, -36 * look.bodyThick, 30 * look.bodyLen, 30 * look.bodyThick, family === 'serpent' ? 0.7 : 1);
+  // identifying accents show at every tier (tier 0 keeps one feature beyond color)
+  if (ART.accents.length) drawAccents(ctx, detail > 0 ? ART.accents : ART.accents.slice(0, 1), body.lattice, c, detail, pose.time, glow);
+  ctx.restore();
   drawMarkings(ctx, look, c, st, pose, body);
   drawRidge(ctx, look, c, st, body);
   if (body.tailTip) drawTailTip(ctx, look, c, pose, body.tailTip);
+  ctx.restore();
+}
+
+/** Belly treatment across each cross-section (clipped to the belly by the caller). */
+function drawBelly(ctx: Ctx, kind: SpeciesArt['belly'], cols: Col[], c: Palette, detail: number) {
+  const at = (col: Col, v: number): Pt => [col.bx + (col.ex - col.bx) * v, col.by + (col.ey - col.by) * v];
+  ctx.save();
+  ctx.lineCap = 'round';
+  switch (kind) {
+    case 'plates':
+    case 'segments': {
+      const every = kind === 'plates' ? 2 : 1;
+      for (let i = 1; i < cols.length - 1; i += every) {
+        const a = at(cols[i], 0.55);
+        const b = at(cols[i], 1.1);
+        ctx.beginPath();
+        ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(b[0], b[1]);
+        ctx.strokeStyle = shade(c.belly, -0.4, kind === 'plates' ? 0.45 : 0.3);
+        ctx.lineWidth = kind === 'plates' ? 1.5 : 1.1;
+        ctx.stroke();
+        if (detail >= 2 && kind === 'plates') {
+          // lit leading edge of each plate (toward the head and the key light)
+          ctx.beginPath();
+          ctx.moveTo(a[0] + 1.6, a[1]);
+          ctx.lineTo(b[0] + 1.6, b[1]);
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 'scutes':
+      // wide overlapping scutes, each rounded edge facing the tail
+      for (let i = 1; i < cols.length - 1; i += 2) {
+        const a = at(cols[i], 0.6);
+        const b = at(cols[i], 1.1);
+        const m = at(cols[i], 0.85);
+        ctx.beginPath();
+        ctx.moveTo(a[0], a[1]);
+        ctx.quadraticCurveTo(m[0] - 6, m[1], b[0], b[1]);
+        ctx.strokeStyle = shade(c.belly, -0.45, 0.5);
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        if (detail >= 2) {
+          ctx.beginPath();
+          ctx.moveTo(a[0] + 2, a[1]);
+          ctx.quadraticCurveTo(m[0] - 4, m[1], b[0] + 2, b[1]);
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+      break;
+    case 'soft':
+      // downy belly: a soft lit band, fine tufts at the highest tier
+      for (let i = 1; i < cols.length - 1; i++) {
+        if (detail < 2 && i % 2) continue;
+        const p = at(cols[i], 0.82);
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], 2.6, 0.3, Math.PI - 0.3);
+        ctx.strokeStyle = shade(c.belly, 0.45, 0.55);
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      break;
+  }
   ctx.restore();
 }
 
@@ -476,9 +719,9 @@ function drawMarkings(ctx: Ctx, look: Look, c: Palette, st: StageRig, pose: Drag
   ctx.clip(body.path);
   const glow = Math.max(pose.rush, pose.ability);
   ctx.globalAlpha = Math.min(1, st.mark + (1 - st.mark) * glow);
-  if (glow > 0.05 || st === STAGE_RIG.elder) {
+  if (glow > 0.05) {
     ctx.shadowColor = `rgba(${c.glow},0.9)`;
-    ctx.shadowBlur = 8 * Math.max(glow, 0.5);
+    ctx.shadowBlur = 8 * glow;
   }
   ctx.strokeStyle = c.mark;
   ctx.fillStyle = c.mark;
@@ -769,6 +1012,7 @@ function drawTailTube(ctx: Ctx, look: Look, c: Palette, st: StageRig, pose: Drag
   const right: Pt[] = [];
   let tip = { x: p2[0], y: p2[1], a: 0 };
   const base = look.tail === 'ribbon' ? 11 : heavy ? 17 : 14;
+  const surf: SurfPt[] = [];
   for (let i = 0; i <= N; i++) {
     const t = i / N;
     const x = (1 - t) * (1 - t) * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0];
@@ -780,12 +1024,27 @@ function drawTailTube(ctx: Ctx, look: Look, c: Palette, st: StageRig, pose: Drag
     left.push([x + (-dy / l) * w, y + (dx / l) * w]);
     right.push([x - (-dy / l) * w, y - (dx / l) * w]);
     if (i === N) tip = { x, y, a: Math.atan2(dy, dx) };
+    // material continues down the tail (rows 0 = back … 1 = belly), stopping before the thin tip
+    if (DETAIL > 0 && i > 0 && i < N * 0.72)
+      for (const v of [0.2, 0.5, 0.8]) {
+        const off = (1 - 2 * v) * w * 0.8;
+        surf.push({ x: x - (-dy / l) * off, y: y - (dx / l) * off, a: Math.atan2(-dy, -dx), v, u: N - i });
+      }
   }
   const path = new Path2D();
   left.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
   for (let i = right.length - 1; i >= 0; i--) path.lineTo(right[i][0], right[i][1]);
   path.closePath();
   outlineFill(ctx, path, c.body, c.outline);
+  if (surf.length) {
+    ctx.save();
+    ctx.clip(path);
+    ctx.globalAlpha = materialAlpha(st);
+    drawMaterial(ctx, ART.material, surf, c, DETAIL, pose.time);
+    ctx.globalAlpha = 1;
+    formShading(ctx, p0[0], p0[1] - 20, p2[0], p2[1] + 20, 0.6);
+    ctx.restore();
+  }
   drawTailTip(ctx, look, c, pose, tip);
 }
 
@@ -996,11 +1255,169 @@ function mix(a: Pt, b: Pt, t: number): Pt {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
 
-function drawLegs(ctx: Ctx, kind: FamilyRig['legs'], c: Palette, pose: DragonPose, body: Body, far: boolean) {
+const CLAW = '#f4ead8';
+
+/**
+ * Species feet at the end of a leg. `d` is the toe direction (+1 forward when standing, -1 swept
+ * back when tucked), `down` 0 tucked … 1 standing. Hatchlings always get round, soft feet.
+ */
+function drawFoot(ctx: Ctx, kind: Feet, [fx, fy]: Pt, d: number, down: number, c: Palette, fill: string, size: number, hatch: boolean, far: boolean) {
+  const k = size;
+  const fine = DETAIL >= 2 && !far;
+  ctx.save();
+  ctx.translate(fx, fy);
+  ctx.scale(d, 1);
+  // swept back and down when tucked, flat on the ground when standing
+  ctx.rotate((1 - down) * 0.7);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const pad = (rx: number, ry: number, ox = 0) => {
+    ctx.beginPath();
+    ctx.ellipse(ox, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  };
+  const toe = (ang: number, len: number, w: number, color = fill) => {
+    const tx = Math.cos(ang) * len;
+    const ty = Math.sin(ang) * len;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = w + 2.4;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.stroke();
+    return [tx, ty] as Pt;
+  };
+  const claw = ([tx, ty]: Pt, ang: number, len: number, hook: number) => {
+    ctx.beginPath();
+    ctx.moveTo(tx, ty - 1.4);
+    ctx.quadraticCurveTo(tx + Math.cos(ang) * len, ty + Math.sin(ang) * len - hook, tx + Math.cos(ang) * len * 1.1, ty + Math.sin(ang) * len + hook * 0.6);
+    ctx.lineTo(tx, ty + 1.4);
+    ctx.closePath();
+    ctx.fillStyle = CLAW;
+    ctx.fill();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  };
+  if (hatch) {
+    // round baby feet: a soft pad and three toe beans
+    pad(5.5 * k, 4.2 * k, 1.5 * k);
+    if (DETAIL > 0) {
+      ctx.fillStyle = shade(c.belly, 0.1);
+      for (const a of [-0.5, 0, 0.5]) {
+        ctx.beginPath();
+        ctx.arc(1.5 * k + Math.cos(a) * 5 * k, Math.sin(a) * 3.4 * k, 1.5 * k, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+    return;
+  }
+  switch (kind) {
+    case 'claw': {
+      for (const a of [-0.35, 0.05, 0.42]) {
+        const t = toe(a, 6 * k, 3.2 * k);
+        claw(t, a, 3.6 * k, 1.2);
+      }
+      pad(4.2 * k, 3.4 * k);
+      break;
+    }
+    case 'talon': {
+      // long hooked talons forward, a spur behind
+      for (const a of [-0.3, 0.1, 0.48]) {
+        const t = toe(a, 7 * k, 2.6 * k);
+        claw(t, a + 0.5, 5.2 * k, 2.4);
+      }
+      const back = toe(Math.PI - 0.5, 4.5 * k, 2.4 * k);
+      claw(back, Math.PI - 0.1, 3.5 * k, -1.5);
+      pad(3.6 * k, 3 * k);
+      break;
+    }
+    case 'paw':
+      pad(6.2 * k, 4.4 * k, 1.5 * k);
+      ctx.fillStyle = shade(c.belly, 0.05);
+      for (const a of [-0.55, -0.05, 0.45]) {
+        ctx.beginPath();
+        ctx.arc(1.5 * k + Math.cos(a) * 5.4 * k, Math.sin(a) * 3.6 * k, 1.5 * k, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case 'webbed': {
+      // spread toes joined by membrane
+      const tips = [-0.55, 0, 0.55].map((a) => [Math.cos(a) * 8 * k, Math.sin(a) * 8 * k] as Pt);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      tips.forEach(([x, y], i) => (i ? ctx.quadraticCurveTo((x + tips[i - 1][0]) * 0.36, (y + tips[i - 1][1]) * 0.36, x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = shade(c.membrane, 0, 0.85);
+      ctx.fill();
+      ctx.strokeStyle = c.outline;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      for (const a of [-0.55, 0, 0.55]) {
+        const t = toe(a, 8 * k, 2.2 * k);
+        if (fine) claw(t, a, 2.2 * k, 0.6);
+      }
+      pad(3.8 * k, 3.2 * k);
+      break;
+    }
+    case 'root': {
+      // gnarled, root-like toes that taper and curl into the ground
+      const wood = mixHex(c.accent, c.shade, 0.3);
+      for (const [a, len] of [[-0.45, 9], [0.02, 10], [0.5, 8.5], [Math.PI - 0.35, 6]] as const) {
+        const ex = Math.cos(a) * len * k;
+        const ey = Math.sin(a) * len * k;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(ex * 0.55, ey * 0.55 - 2.5 * k, ex, ey + 1.5 * k);
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 4.6 * k;
+        ctx.stroke();
+        ctx.strokeStyle = wood;
+        ctx.lineWidth = 2.4 * k;
+        ctx.stroke();
+      }
+      pad(4.6 * k, 3.8 * k);
+      if (fine) {
+        ctx.strokeStyle = shade(c.shade, -0.4, 0.5);
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(-3 * k, -1 * k);
+        ctx.lineTo(3 * k, -2 * k);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'broad':
+      // heavy padded foot with short blunt nails
+      pad(7.2 * k, 4.6 * k, 1 * k);
+      ctx.fillStyle = CLAW;
+      ctx.strokeStyle = c.outline;
+      ctx.lineWidth = 1;
+      for (const a of [-0.5, 0, 0.5]) {
+        ctx.beginPath();
+        ctx.ellipse(1 * k + Math.cos(a) * 7 * k, Math.sin(a) * 4 * k, 1.8 * k, 1.4 * k, a, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+  }
+  ctx.restore();
+}
+
+function drawLegs(ctx: Ctx, kind: FamilyRig['legs'], c: Palette, pose: DragonPose, body: Body, far: boolean, st: StageRig) {
   ctx.save();
   if (far) ctx.translate(6, -3);
   const fill = far ? c.shade : c.body;
   const down = Math.min(1, pose.perch + 0.35 * pose.recoil);
+  const hatch = st === STAGE_RIG.hatchling;
   if (kind === 'tiny' || kind === 'stubby') {
     const r = kind === 'tiny' ? 5 : 8;
     for (const [hx, hy] of body.hips) {
@@ -1014,6 +1431,8 @@ function drawLegs(ctx: Ctx, kind: FamilyRig['legs'], c: Palette, pose: DragonPos
       ctx.ellipse(fx, fy, r * 1.3 - 2.5, r - 2.5, 0, 0, Math.PI * 2);
       ctx.fillStyle = fill;
       ctx.fill();
+      // small feet at the end of the short legs
+      if (DETAIL > 0) drawFoot(ctx, ART.feet, [fx + r * 0.6, fy + r * 0.55], down > 0.5 ? 1 : -1, down, c, fill, kind === 'tiny' ? 0.6 : 0.8, hatch || ART.feet === 'paw', far);
     }
     ctx.restore();
     return;
@@ -1052,14 +1471,17 @@ function drawLegs(ctx: Ctx, kind: FamilyRig['legs'], c: Palette, pose: DragonPos
     ctx.strokeStyle = c.outline;
     ctx.stroke();
     const d = down > 0.5 ? 1 : -1;
-    ctx.strokeStyle = '#f4ead8';
-    ctx.lineWidth = 2.5;
-    for (const k of [-1, 0, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(foot[0], foot[1]);
-      ctx.lineTo(foot[0] + d * 6 + k * 2, foot[1] + 3 + k * 3 * (1 - down));
-      ctx.stroke();
-    }
+    if (DETAIL === 0) {
+      // tier 0: three claw strokes are enough at gameplay scale
+      ctx.strokeStyle = CLAW;
+      ctx.lineWidth = 2.5;
+      for (const k of [-1, 0, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(foot[0], foot[1]);
+        ctx.lineTo(foot[0] + d * 6 + k * 2, foot[1] + 3 + k * 3 * (1 - down));
+        ctx.stroke();
+      }
+    } else drawFoot(ctx, ART.feet, foot, d, down, c, fill, heavy ? 1.15 : 1, hatch, far);
   }
   ctx.restore();
 }
@@ -1131,11 +1553,16 @@ const HEADS: Record<Look['head'], () => HeadShape> = {
   },
 };
 const headCache = new Map<string, HeadShape>();
-function headShape(kind: Look['head']): HeadShape {
-  let h = headCache.get(kind);
+/** Family head profile stretched to the species proportions (cached; bounded by species × stage). */
+function headShape(kind: Look['head'], [lx, ly]: [number, number]): HeadShape {
+  const key = `${kind}:${lx}:${ly}`;
+  let h = headCache.get(key);
   if (!h) {
-    h = HEADS[kind]();
-    headCache.set(kind, h);
+    const base = HEADS[kind]();
+    const path = new Path2D();
+    path.addPath(base.path, new DOMMatrix([lx, 0, 0, ly, 0, 0]));
+    h = { path, tipX: base.tipX * lx, eye: [base.eye[0] * lx, base.eye[1] * ly] };
+    headCache.set(key, h);
   }
   return h;
 }
@@ -1193,7 +1620,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   ctx.translate(hx, hy);
   ctx.rotate(pose.headTurn);
   ctx.scale(st.head, st.head);
-  const h = headShape(look.head);
+  const h = headShape(look.head, HEAD_K);
   // far-side parts
   if (look.frill === 'sunburst') sunburst(ctx, c, st, pose);
   drawHorns(ctx, look, c, st, true);
@@ -1220,6 +1647,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   if (look.frill === 'whiskers') whiskers(ctx, c, h, st, pose);
   if (look.frill === 'mane' || look.frill === 'aurora') mane(ctx, c, 0, 0, st, false);
   if (look.fangs) fangs(ctx, h);
+  if (DETAIL > 0) drawFace(ctx, family, c, h, st, pose);
   if (st === STAGE_RIG.elder) elderTrait(ctx, family, c, h, pose);
   ctx.restore();
 }
@@ -1252,6 +1680,12 @@ function headBase(ctx: Ctx, c: Palette, pose: DragonPose, h: HeadShape, st: Stag
   hg.addColorStop(0, c.body);
   hg.addColorStop(1, c.shade);
   outlineFill(ctx, h.path, hg, c.outline);
+  if (DETAIL > 0) {
+    ctx.save();
+    ctx.clip(h.path);
+    formShading(ctx, -6, -24, h.tipX, 16, 0.8);
+    ctx.restore();
+  }
   ctx.beginPath();
   ctx.moveTo(6, 13);
   ctx.bezierCurveTo(18, 16, h.tipX - 8, 16, h.tipX - 2, 9);
@@ -1276,6 +1710,32 @@ function headBase(ctx: Ctx, c: Palette, pose: DragonPose, h: HeadShape, st: Stag
   drawEye(ctx, c, pose, h.eye, st.eye / st.head);
 }
 
+/** Sclera outline for each species eye shape, around (0,0); `open` 0 closed … 1 open. */
+function eyePath(shape: SpeciesArt['eye'], s: number, open: number): Path2D {
+  const p = new Path2D();
+  const o = Math.max(0.12, open);
+  switch (shape) {
+    case 'round':
+      p.ellipse(0, 0, 6.4 * s, 6.6 * s * o, 0, 0, Math.PI * 2);
+      break;
+    case 'almond':
+      // pointed corners, upturned toward the snout
+      p.moveTo(-6.8 * s, 1.2 * s);
+      p.quadraticCurveTo(-1 * s, -8.5 * s * o, 7 * s, -1.6 * s);
+      p.quadraticCurveTo(1 * s, 6.4 * s * o, -6.8 * s, 1.2 * s);
+      break;
+    case 'narrow':
+      p.ellipse(0, 0, 6.6 * s, 4.2 * s * o, -0.2, 0, Math.PI * 2);
+      break;
+    case 'bright':
+      p.ellipse(0, 0, 6.2 * s, 7.2 * s * o, 0, 0, Math.PI * 2);
+      break;
+    default:
+      p.ellipse(0, 0, 5.8 * s, 6.8 * s * o, 0, 0, Math.PI * 2);
+  }
+  return p;
+}
+
 function drawEye(ctx: Ctx, c: Palette, pose: DragonPose, [ex, ey]: Pt, size: number) {
   ctx.strokeStyle = c.outline;
   if (pose.happy > 0) {
@@ -1296,28 +1756,237 @@ function drawEye(ctx: Ctx, c: Palette, pose: DragonPose, [ex, ey]: Pt, size: num
     return;
   }
   const open = 1 - pose.blink;
-  ctx.beginPath();
-  ctx.ellipse(ex, ey, 5.8 * size, 6.8 * size * Math.max(0.12, open), 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#fffdf5';
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  if (open > 0.3) {
+  const shape = ART.eye;
+  const sclera = eyePath(shape, size, open);
+  ctx.save();
+  ctx.translate(ex, ey);
+  if (ART.pupil === 'glow' && open > 0.3) {
+    // deep-sea eye: a soft halo instead of a blur filter
+    ctx.fillStyle = `rgba(${c.glow},0.22)`;
     ctx.beginPath();
-    ctx.ellipse(ex + 1.6 * size, ey + 0.4, 3.6 * size, 4.4 * size * open, 0, 0, Math.PI * 2);
-    ctx.fillStyle = c.eye;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(ex + 2.8 * size, ey - 1.8 * size, 1.4 * size, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
+    ctx.arc(1, 0, 10 * size, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.fillStyle = '#fffdf5';
+  ctx.fill(sclera);
+  if (open > 0.3) {
+    ctx.save();
+    ctx.clip(sclera);
+    const ix = 1.6 * size;
+    const iy = 0.4;
+    const ir = (shape === 'narrow' ? 3.4 : 3.8) * size;
+    if (ART.pupil === 'glow') {
+      const g = ctx.createRadialGradient(ix, iy, 0, ix, iy, ir * 1.2);
+      g.addColorStop(0, `rgb(${c.glow})`);
+      g.addColorStop(1, c.eye);
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = c.eye;
+    ctx.beginPath();
+    ctx.ellipse(ix, iy, ir, ir * 1.18 * open, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (DETAIL > 0) {
+      // iris ring and pupil
+      ctx.strokeStyle = shade(c.eye.startsWith('#') ? c.eye : '#444444', -0.45, 0.6);
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+      ctx.fillStyle = '#17121c';
+      ctx.beginPath();
+      switch (ART.pupil) {
+        case 'slit':
+          ctx.ellipse(ix + 0.3, iy, 0.95 * size, ir * 0.95 * open, 0, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        case 'star': {
+          const r = 2.4 * size;
+          ctx.moveTo(ix, iy - r);
+          ctx.quadraticCurveTo(ix, iy, ix + r, iy);
+          ctx.quadraticCurveTo(ix, iy, ix, iy + r);
+          ctx.quadraticCurveTo(ix, iy, ix - r, iy);
+          ctx.quadraticCurveTo(ix, iy, ix, iy - r);
+          ctx.fill();
+          break;
+        }
+        case 'glow':
+          ctx.arc(ix + 0.4, iy, 1.1 * size, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        default:
+          ctx.arc(ix + 0.4, iy, 1.9 * size, 0, Math.PI * 2);
+          ctx.fill();
+      }
+    }
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(ix + 1.2 * size, iy - 2.2 * size, 1.4 * size, 0, Math.PI * 2);
+    ctx.fill();
+    if (shape === 'bright' || shape === 'gentle') {
+      ctx.beginPath();
+      ctx.arc(ix - 1.2 * size, iy + 2 * size, 0.7 * size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (shape === 'hooded') {
+      // heavy upper lid in the head color: calm, watchful
+      ctx.fillStyle = c.body;
+      ctx.fillRect(-8 * size, -9 * size, 16 * size, 6.4 * size * (0.6 + 0.4 * open));
+      ctx.beginPath();
+      ctx.moveTo(-7 * size, -2.6 * size);
+      ctx.lineTo(7 * size, -3.2 * size);
+      ctx.strokeStyle = c.outline;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = 2;
+  ctx.stroke(sclera);
+  if (shape === 'gentle' && DETAIL > 0) {
+    // soft lower lid
+    ctx.beginPath();
+    ctx.arc(0, 1.5 * size, 6.2 * size, 0.55, Math.PI - 0.55);
+    ctx.strokeStyle = shade(c.belly, 0, 0.7);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  ctx.restore();
+  // brow: lowered with focus; heavier for hooded and narrow eyes
   const focus = Math.max(pose.rush, pose.dash, pose.ability);
   ctx.beginPath();
   ctx.moveTo(ex - 6, ey - 8 * size + 2 * focus);
   ctx.quadraticCurveTo(ex + 1, ey - 12 * size + focus, ex + 8, ey - 8 * size + 3 * focus);
-  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = shape === 'hooded' || shape === 'narrow' ? 3 : 2.4;
   ctx.stroke();
+}
+
+/** Species face features (tier 1+): brows, crests, fins, plates, barbels, fluff. */
+function drawFace(ctx: Ctx, family: Family, c: Palette, h: HeadShape, st: StageRig, pose: DragonPose) {
+  const [ex, ey] = h.eye;
+  const t = h.tipX;
+  const young = st === STAGE_RIG.hatchling ? 0.6 : st === STAGE_RIG.juvenile ? 0.85 : 1;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const f of ART.face) {
+    switch (f) {
+      case 'nostrilRidge':
+        ctx.beginPath();
+        ctx.moveTo(t - 3, -2);
+        ctx.quadraticCurveTo(t - 10, -8, t - 18, -9);
+        ctx.strokeStyle = shade(c.shade, -0.3, 0.65);
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(t - 5, -4);
+        ctx.quadraticCurveTo(t - 10, -9, t - 16, -10.5);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        break;
+      case 'browCrest':
+        ctx.beginPath();
+        ctx.moveTo(ex - 9, ey - 8);
+        ctx.quadraticCurveTo(ex, ey - 17 * young, ex + 10, ey - 10);
+        ctx.quadraticCurveTo(ex, ey - 11, ex - 9, ey - 8);
+        ctx.fillStyle = c.bone;
+        ctx.fill();
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        break;
+      case 'brightBrow':
+        // a marking-colored brow streak swept back from the eye
+        ctx.beginPath();
+        ctx.moveTo(ex + 8, ey - 9);
+        ctx.quadraticCurveTo(ex - 2, ey - 13, ex - 15 * young, ey - 15 * young);
+        ctx.strokeStyle = c.mark;
+        ctx.lineWidth = 2.4;
+        ctx.stroke();
+        break;
+      case 'mossBrow':
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.arc(ex - 7 + i * 4.5, ey - 10 - (i % 2) * 1.6, 2.8 * young + 0.6, 0, Math.PI * 2);
+          ctx.fillStyle = i % 2 ? '#8cc265' : '#6aa64a';
+          ctx.fill();
+        }
+        break;
+      case 'cheekFins': {
+        ctx.beginPath();
+        ctx.moveTo(-2, 2);
+        ctx.quadraticCurveTo(-12 * young, -4, -16 * young, 2);
+        ctx.quadraticCurveTo(-10 * young, 6, -14 * young, 12);
+        ctx.quadraticCurveTo(-6, 10, 0, 9);
+        ctx.closePath();
+        ctx.fillStyle = c.membrane;
+        ctx.fill();
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        ctx.strokeStyle = c.bone;
+        ctx.lineWidth = 1;
+        for (const [x, y] of [[-14, 2], [-12, 10]] as Pt[]) {
+          ctx.beginPath();
+          ctx.moveTo(-1, 5);
+          ctx.lineTo(x * young, y);
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'jawPlates':
+        if (st === STAGE_RIG.elder && family === 'drake') break; // the elder trait draws larger ones
+        ctx.fillStyle = mixHex(c.bone, c.shade, 0.15);
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.2;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.ellipse(t - 16 - i * 8, 12.5, 3.8 * young, 2.6 * young, 0.25, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        break;
+      case 'chinBarbel': {
+        // a lure on a barbel, swaying a little
+        const w = Math.sin(pose.time * 1.8) * 2;
+        const bx = t - 20 + w;
+        const by = 26 * young + 4;
+        ctx.beginPath();
+        ctx.moveTo(t - 12, 12);
+        ctx.quadraticCurveTo(t - 10, by - 4, bx, by);
+        ctx.strokeStyle = shade(c.shade, -0.2);
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.fillStyle = `rgba(${c.glow},0.28)`;
+        ctx.beginPath();
+        ctx.arc(bx, by, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = c.mark;
+        ctx.beginPath();
+        ctx.arc(bx, by, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'snoutHorn':
+        horn(ctx, t - 12, -6, t - 6 + 2 * young, -6 - 10 * young, c.accent, c.outline);
+        break;
+      case 'cheekFluff':
+        ctx.fillStyle = c.belly;
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(2, 2);
+        for (let i = 0; i < 3; i++) {
+          const y = 2 + i * 5;
+          ctx.quadraticCurveTo(-8 * young, y + 1, -4, y + 4);
+        }
+        ctx.lineTo(4, 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        break;
+    }
+  }
+  ctx.restore();
 }
 
 function horn(ctx: Ctx, bx: number, by: number, tx: number, ty: number, fill: string, outline: string) {
@@ -1836,7 +2505,14 @@ function drawWing(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig
 
   ctx.save();
   ctx.clip(path);
-  if (look.wings === 'starry' && !far) {
+  // species membrane pattern (near wing; the far wing only at the highest tier, quieter)
+  const patternTier = far ? (DETAIL >= 2 ? 1 : 0) : DETAIL;
+  if (patternTier > 0) {
+    if (far) ctx.globalAlpha = 0.5;
+    drawWingPattern(ctx, ART.wing, W, [F1, F2, F3], R, S, c, patternTier, pose.time, Math.max(pose.rush, pose.ability));
+    ctx.globalAlpha = 1;
+  }
+  if (look.wings === 'starry' && !far && DETAIL === 0) {
     ctx.fillStyle = '#fffbe8';
     for (let i = 0; i < 9; i++) {
       const t = (i * 0.37) % 1;
@@ -1861,7 +2537,7 @@ function drawWing(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig
       ctx.stroke();
     }
   }
-  if (look.wings === 'charged' && !far) {
+  if (look.wings === 'charged' && !far && DETAIL === 0) {
     ctx.strokeStyle = c.mark;
     ctx.lineWidth = 1.8;
     ctx.globalAlpha = 0.6 + 0.4 * Math.max(pose.rush, pose.ability, 0.5 + 0.5 * Math.sin(pose.time * 9));
@@ -1943,7 +2619,7 @@ const portraitCache = new Map<string, HTMLCanvasElement>();
 
 /** Cached still portrait (for cards and lists): perched pose, given stage and marking. */
 export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'default', w = 200, h = 150, silhouette = false): HTMLCanvasElement {
-  const key = `${id}:${stage}:${marking}:${w}x${h}:${silhouette ? 1 : 0}`;
+  const key = `${ART_REV}:${id}:${stage}:${marking}:${w}x${h}:${silhouette ? 1 : 0}`;
   const hit = portraitCache.get(key);
   if (hit) return hit;
   const k = 2;
@@ -1953,7 +2629,8 @@ export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'defa
   const ctx = c.getContext('2d')!;
   ctx.scale(k, k);
   const fit = Math.min(w / 260, h / 190) / STAGE_RIG[stage].scale ** 0.35;
-  drawDragon(ctx, id, w * 0.53, h * 0.56, fit, { wing: 0.5, fold: 0.3, perch: 0.6, tailWaveAmp: 0, breath: 0 }, { stage, marking });
+  // rendered at 2x: cards get tier 1, larger portraits the full tier 2
+  drawDragon(ctx, id, w * 0.53, h * 0.56, fit, { wing: 0.5, fold: 0.3, perch: 0.6, tailWaveAmp: 0, breath: 0 }, { stage, marking, detail: silhouette ? 0 : w >= 160 ? 2 : 1 });
   if (silhouette) {
     ctx.globalCompositeOperation = 'source-in';
     ctx.fillStyle = 'rgba(40,52,70,0.82)';
