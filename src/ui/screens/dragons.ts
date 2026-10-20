@@ -184,7 +184,15 @@ export class DragonsScreen implements Screen {
         const m = v as MarkingId;
         const d = ui.save.dragons[id];
         if (d.ownedMarkings.includes(m)) this.result(eco.setMarking(ui.save, id, m));
-        else this.result(eco.buyMarking(ui.save, id, m), `${MARKINGS[m].name} markings unlocked.`);
+        else {
+          const def = MARKINGS[m];
+          const price = 'price' in def ? def.price.essence : 0;
+          void ui.confirm(`Unlock ${def.name} markings?`, `Spend ${price} Essence to unlock ${def.name} markings for ${esc(eco.dragonName(ui.save, id))}.`, 'Unlock').then((yes) => {
+            if (yes) this.result(eco.buyMarking(ui.save, id, m), `${def.name} markings unlocked.`);
+            this.render();
+          });
+          return;
+        }
         break;
       }
       case 'title':

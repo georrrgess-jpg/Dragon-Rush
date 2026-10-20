@@ -35,11 +35,18 @@ export class JournalScreen implements Screen {
         this.tab = v as JTab;
         break;
       case 'replace': {
-        const r = replaceContract(this.ui.save, v);
-        if (!r.ok) return this.ui.toast(r.reason);
-        this.ui.commit(r.save);
-        this.ui.toast('Contract replaced. Complete any contract to recharge your free replacement.');
-        break;
+        const doIt = () => {
+          const r = replaceContract(this.ui.save, v);
+          if (!r.ok) return this.ui.toast(r.reason);
+          this.ui.commit(r.save);
+          this.ui.toast('Contract replaced. Complete any contract to recharge your free replacement.');
+          this.render();
+        };
+        const c = activeContracts(this.ui.save).find((x) => x.def.id === v);
+        // progress would be lost: ask first
+        if (c && c.progress > 0) void this.ui.confirm('Replace this contract?', `Its progress (${c.progress}/${c.def.target}) will be lost. It may return later, starting from zero.`, 'Replace').then((yes) => yes && doIt());
+        else doIt();
+        return;
       }
       case 'cosmetic': {
         const owned = this.ui.save.cosmetics.owned.includes(v);
