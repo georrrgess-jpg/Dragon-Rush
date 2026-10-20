@@ -13,7 +13,7 @@
 | What you see | What it means |
 | --- | --- |
 | Glowing cracks (chests, pods, frozen rocks) | Breakable: dash through |
-| Solid mossy stone | Fly around it (hitting it slows you briefly; you never lose resources in Rush) |
+| Solid mossy stone | Fly around it (hitting it slows you briefly; you never lose resources in Rush). Pale, hazy stone in the background is scenery |
 | Luminous rings | Good: fly through them |
 | Pulsing amber column / red ground ring or lane | Danger is coming: move to the clear gap or out of the marked area |
 
@@ -48,7 +48,7 @@ A top-down survival session of about four minutes: four waves, an elite in wave 
 ## Growing your dragons
 
 - XP comes from active play (about 200 per minute in any mode) and from feeding **20 Emberfruit = 100 XP**.
-- Levels go from 1 to 30. Dragons evolve at **5** (juvenile), **15** (adult) and **30** (elder). Level 5 strengthens the ability, level 15 makes it charge faster, level 30 grants the species title.
+- Levels go from 1 to 30; levels past 15 take noticeably longer. Dragons evolve at **5** (juvenile), **15** (adult) and **30** (elder). Level 5 strengthens the ability, level 15 makes it charge faster, level 30 grants the species title.
 - **Talents** at levels 10 and 20: pick one of two small utility bonuses; you can change them freely between runs.
 - Level bonuses are small and capped: up to +15% banked gold and fruit in Rush and Arena, and a little Arena damage and health.
 - **Mastery**: three challenges per species (use its ability, a role challenge, then a Trial medal or Arena elite). Rewards are cosmetic: an alternate ability color, Radiant markings and a title — plus 1 Aether Key for all three.
@@ -62,7 +62,7 @@ A top-down survival session of about four minutes: four waves, an elite in wave 
 
 ### The Aether Hatchery
 
-- Keys come only from play: about **one per 3 minutes** of active play in any mode (the meter carries over between runs; paused time and menus don't count), plus one-time rewards from milestones, first medals and full mastery. You also start with one welcome key.
+- Keys come only from play: about **one per 3 minutes** of active play in any mode (the meter carries over between runs; paused time and menus don't count, and time only counts while you're playing: steering, moving, dashing or using abilities — 20 seconds with no input pauses the count), plus one-time rewards from milestones, first medals and full mastery. You also start with one welcome key.
 - **Odds**: Common 55%, Rare 28%, Epic 14%, Legendary 3%, then an equal chance for every species in that tier. The Hatchery shows the exact odds for your next egg and every species' chance.
 - **Bad-luck protection**: the 10th egg in a row without an Epic or better is guaranteed Epic or Legendary (14 : 3); the 40th egg in a row without a Legendary is guaranteed Legendary.
 - A dragon you already own becomes Essence: Common 10, Rare 25, Epic 60, Legendary 150.

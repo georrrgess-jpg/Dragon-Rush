@@ -32,6 +32,12 @@
 ### Saves
 - Save v3 with an idempotent v1/v2 migration (one-time backup), field-by-field defaults, protection for saves from newer versions (never overwritten), recovery of unreadable saves, validated export/import with a backup before replacing, and single-write transactions for settlements, openings and purchases.
 
+### Release pass (critic reviews)
+- Gameplay: ability meter shows READY reliably; the wave-4 elite retreats before the boss; Ember's Arena trail no longer stacks; idle play no longer counts toward XP/keys; adult levels slower; defensive abilities pay on a block and burst rocks; Arena legendary/Zephyr/Rootwarden rebalanced; Trials ignore ring-size passives.
+- Interface: dialogs trap focus, the egg reel locks unrelated controls and hides the wallet change until the reveal, Arena intro has Back, results list rewards and offer Feed, stronger focus ring, larger captions, accessible names.
+- Art: distinct crystal rig and legendary features, Snowcap redesigned as a drake, better wing folds, rim light for dark dragons, family-specific elders, per-species eggs with rarity trim, a proper hatch, backgrounds that never use the hazard look for scenery.
+- Saves: imported data can't inject markup, every unreadable save is kept, a second tab stops saving instead of overwriting, failed imports change nothing.
+
 ### Development
 - Development pages `?gallery` and `?backgrounds`; tests for every system including bot-calibrated Trials medals and Arena difficulty; single-file build now bundles everything into one script.
 
