@@ -1842,3 +1842,17 @@ table.compare thead img {
 .controls-ref td {
   padding: 3px 0;
 }
+.res-tip {
+  margin: 8px 0 4px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--teal-100);
+  font-size: 14px;
+}
+.res-goal {
+  display: grid;
+  grid-template-columns: 1fr 120px auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}

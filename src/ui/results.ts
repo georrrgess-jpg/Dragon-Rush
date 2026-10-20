@@ -5,7 +5,7 @@ import { MILESTONE_LEVELS, STAGES, stageOf, xpToNext, type Stage } from '../cont
 import { SPECIES } from '../content/species';
 import { TRIALS, TRIAL_BY_ID, nextMedalText, trialUnlocked } from '../content/trials';
 import { HATCHERY, REGIONS } from '../content/world';
-import { dragonName, rewardText, type Settlement } from '../economy';
+import { dragonName, nextGoal, rewardText, type Settlement } from '../economy';
 import { HeroView } from '../render/perch';
 import type { SaveData } from '../save';
 import type { RunSummary } from '../sim/flight';
@@ -23,6 +23,29 @@ export interface ResultsData {
   practice?: boolean;
   arena?: ArenaReport;
   reason?: 'defeat' | 'quit' | 'victory' | 'endless' | 'bossLeft';
+  /** One useful improvement tip from the mode (Update 5); a generic one is chosen when absent. */
+  tip?: string;
+}
+
+/** A fallback tip from the run summary (modes can pass a more specific one). */
+function defaultTip(d: ResultsData): string {
+  const sm = d.summary;
+  if (d.kind === 'rush' && sm) {
+    if (sm.rockHits >= 3) return 'Solid stone slows you down: steer around it early, and save the dash for glowing chests and pods.';
+    if (sm.containersBroken < 3) return 'Dash into glowing chests and pods: chests hold gold, pods hold Emberfruit.';
+    if (sm.rushCount === 0) return 'Every pickup charges Dragon Rush; follow the coin and fruit trails to fill it faster.';
+    return 'Trails reward following them to the end; the treasure route near the finish is worth the risk.';
+  }
+  if (d.kind === 'trials' && sm) {
+    if (sm.collisions > 0) return 'Silver and Gold need few or no collisions: slow, steady steering beats sharp corrections.';
+    return 'Collect more rings for a better medal; each course lists its exact numbers.';
+  }
+  if (d.kind === 'arena' && d.arena) {
+    if (!d.arena.victory && d.arena.wave <= 2) return 'Keep moving and dash through danger: you are invulnerable while dashing.';
+    if (!d.arena.victory) return 'Watch for red ground rings and lanes: they show where an attack lands before it does.';
+    return 'Pick upgrades that work together, like wider attacks with faster cooldowns.';
+  }
+  return 'Feed your dragon Emberfruit in Dragons to level it up between runs.';
 }
 
 export interface ResultsActions {
@@ -34,6 +57,12 @@ export interface ResultsActions {
 }
 
 const MEDALS = ['No medal', 'Bronze', 'Silver', 'Gold'];
+
+/** Progress toward the next meaningful goal (the same one the menus suggest). */
+function goalLine(s: SaveData): string {
+  const g = nextGoal(s, 'home');
+  return `<div class="res-goal"><span class="small"><b>Next goal:</b> ${esc(g.text)}</span>${bar(g.progress, g.target, 'teal thin')}<small class="muted">${Math.min(g.progress, g.target)}/${g.target}</small></div>`;
+}
 
 /** Evolution moment length (s): full motion and reduced motion (a plain crossfade). */
 const EVO_FULL = 1.6;
@@ -200,7 +229,7 @@ export class ResultsScreen {
         : '';
     const levelLine =
       lc.to > lc.from
-        ? `<div class="levelup">Level ${lc.from} → <b>${lc.to}</b>${lc.stageTo !== lc.stageFrom ? ` · evolved into its <b>${lc.stageTo}</b> form!` : ''}${lc.milestones.map((l) => `<br><small>Level ${l}: ${MILESTONE_LEVELS[l]}</small>`).join('')}</div>`
+        ? `<div class="levelup">Level ${lc.from} → <b>${lc.to}</b>${lc.milestones.map((l) => `<br><small>Level ${l}: ${MILESTONE_LEVELS[l]}</small>`).join('')}</div>`
         : '';
     const haul =
       d.kind === 'trials'
@@ -208,7 +237,7 @@ export class ResultsScreen {
         : `<table class="haul-table2">
             <tr><th></th><th>${icon('gold', 'icon sm')}</th><th>${icon('fruit', 'icon sm')}</th></tr>
             <tr><td>Collected</td><td>${st.base.gold}</td><td>${st.base.fruit}</td></tr>
-            ${st.bonusPercent ? `<tr><td>Level bonus +${st.bonusPercent}%</td><td>+${st.bonus.gold}</td><td>+${st.bonus.fruit}</td></tr>` : ''}
+            ${st.bonusPercent && st.bonus.gold + st.bonus.fruit > 0 ? `<tr><td>Level bonus +${st.bonusPercent}%</td><td>+${st.bonus.gold}</td><td>+${st.bonus.fruit}</td></tr>` : ''}
             <tr class="total"><td>Banked</td><td>${st.total.gold}</td><td>${st.total.fruit}</td></tr>
           </table>${d.kind === 'arena' && d.arena?.victory ? '<small class="muted">Arena totals include everything banked at the victory checkpoint.</small>' : ''}`;
     this.el = el(`
@@ -225,6 +254,8 @@ export class ResultsScreen {
           <div class="key-block"><span class="row">${icon('key', 'icon sm')} ${st.keysEarned ? `<b>+${st.keysEarned} Aether Key${st.keysEarned > 1 ? 's' : ''} from play!</b>` : 'Key progress'}</span> ${bar(st.keyProgress, HATCHERY.secondsPerKey, 'teal thin')}<small class="muted">${d.practice ? 'Practice runs do not earn XP or key progress.' : `Next key in about ${fmtTime(HATCHERY.secondsPerKey - st.keyProgress)} of active play.`}</small></div>
           ${trial && !d.practice ? `<p class="next-medal">${esc(nextMedalText(trial, s.trials[trial.id]?.bestMedal ?? 0))}</p>` : ''}
           ${lines.length ? `<ul class="news2">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
+          <p class="res-tip"><b>Tip:</b> ${esc(d.tip ?? defaultTip(d))}</p>
+          ${goalLine(s)}
         </div>
         <div class="res-side">
           <div class="evo-wrap" style="position:relative;align-self:center">
@@ -233,10 +264,10 @@ export class ResultsScreen {
           </div>
           ${evoNote}
           <div class="stack">
-            <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Play again'}</button>
+            <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Retry'}</button>
             ${showNext ? `<button class="btn" data-a="next">Next course: ${esc(nextCourse!.name)}</button>` : ''}
             <button class="btn" data-a="dragons">${d.save.wallet.fruit >= 20 && dr.level < 30 ? `Feed ${esc(dragonName(s, st.dragon))}` : 'Dragons'}</button>
-            <button class="btn" data-a="play">${d.kind === 'trials' ? 'Course list' : 'Modes'}</button>
+            <button class="btn" data-a="play">${d.kind === 'trials' ? 'Course list' : 'Change mode'}</button>
             <button class="btn ghost" data-a="home">Home</button>
           </div>
         </div>
