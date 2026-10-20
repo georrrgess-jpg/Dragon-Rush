@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CONTAINERS, DASH, DRAGONS, FLIGHT, ROCK, RUSH } from '../src/config';
-import { PATTERNS, OPENING, FIRST_ROCK_X } from '../src/sim/course';
+import { CONTAINERS, DASH, DRAGONS, FLIGHT, ROCK, RUSH, WIND_RING, type DragonId } from '../src/config';
+import { PATTERNS, OPENING_ISLES, OPENING_CANYON, FIRST_ROCK_X } from '../src/sim/course';
 import { FlightSim, type FlightEvent } from '../src/sim/flight';
 import { createRng } from '../src/sim/rng';
 import { NO_DASH, REASONABLE, playRun } from './bots';
@@ -18,7 +18,7 @@ function run(sim: FlightSim, seconds: number, dt: number, each?: (s: FlightSim) 
 }
 
 /** A sim with no course entities, for isolated mechanics. */
-function emptySim(dragon: 'ember' | 'tide' = 'ember') {
+function emptySim(dragon: DragonId = 'ember') {
   const sim = new FlightSim({ dragon, level: 1, seed: 1 });
   sim.pickups = [];
   sim.containers = [];
@@ -129,7 +129,7 @@ describe('dash', () => {
 });
 
 describe('containers', () => {
-  function withChest(dragon: 'ember' | 'tide', dx: number, dy = 0) {
+  function withChest(dragon: DragonId, dx: number, dy = 0) {
     const sim = emptySim(dragon);
     sim.containers.push({ id: 9999, kind: 'chest', x: sim.dragonWorldX + dx, y: sim.y + dy, r: CONTAINERS.chest.radius, tutorial: false });
     return sim;
@@ -254,7 +254,8 @@ describe('rocks', () => {
   });
 
   it('no rocks during the opening', () => {
-    expect(OPENING.spawns.some((s) => s.kind === 'rock')).toBe(false);
+    expect(OPENING_ISLES.spawns.some((s) => s.kind === 'rock')).toBe(false);
+    expect(OPENING_CANYON.spawns.some((s) => s.kind === 'rock')).toBe(false);
     for (let seed = 0; seed < 30; seed++) {
       const sim = new FlightSim({ dragon: 'ember', level: 1, seed });
       run(sim, 11, 1 / 30);
@@ -262,12 +263,23 @@ describe('rocks', () => {
     }
   });
 
-  it('the course is traversable without ever dashing', () => {
-    for (let seed = 0; seed < 25; seed++) {
-      const sim = new FlightSim({ dragon: 'ember', level: 1, seed: 500 + seed });
-      playRun(sim, { ...NO_DASH, seed });
-      expect(sim.rockHits, `seed ${seed}`).toBe(0);
+  it('both environments are traversable without ever dashing', () => {
+    for (const env of ['isles', 'canyon'] as const) {
+      for (let seed = 0; seed < 25; seed++) {
+        const sim = new FlightSim({ dragon: 'ember', level: 1, seed: 500 + seed, env });
+        playRun(sim, { ...NO_DASH, seed });
+        expect(sim.rockHits, `${env} seed ${seed}`).toBe(0);
+      }
     }
+  });
+
+  it('canyon patterns only appear in the canyon, rings only in the canyon', () => {
+    const isles = new FlightSim({ dragon: 'ember', level: 1, seed: 8, env: 'isles' });
+    run(isles, 61, 1 / 30, (s) => expect(s.rings.length).toBe(0));
+    const canyon = new FlightSim({ dragon: 'ember', level: 1, seed: 8, env: 'canyon' });
+    let seen = 0;
+    run(canyon, 61, 1 / 30, (s) => (seen = Math.max(seen, s.rings.length)));
+    expect(seen).toBeGreaterThan(0);
   });
 });
 
@@ -318,22 +330,104 @@ describe('rush', () => {
   });
 });
 
+describe('dragon traits', () => {
+  it('Gale: dash cooldown is 20% shorter and the sim uses it', () => {
+    const gale = emptySim('gale');
+    expect(gale.dashCooldown).toBeCloseTo(DASH.cooldown * 0.8, 6);
+    gale.requestDash();
+    gale.advance(1 / 60);
+    expect(gale.dashCd).toBeGreaterThan(2.3);
+    expect(gale.dashCd).toBeLessThanOrEqual(2.4);
+    run(gale, 2.45, 1 / 60, (s) => (s.rocks = []));
+    expect(gale.dashReady).toBe(true);
+    const ember = emptySim('ember');
+    ember.requestDash();
+    run(ember, 2.45, 1 / 60, (s) => (s.rocks = []));
+    expect(ember.dashReady).toBe(false);
+  });
+
+  it('Grove: pods give 8 Emberfruit (6 + 2), once', () => {
+    for (const [dragon, fruit] of [
+      ['grove', 8],
+      ['ember', 6],
+    ] as const) {
+      const sim = emptySim(dragon);
+      sim.containers.push({ id: 4242, kind: 'pod', x: sim.dragonWorldX + 200, y: sim.y, r: CONTAINERS.pod.radius, tutorial: false });
+      sim.requestDash();
+      const ev = run(sim, 1.2, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+      expect(sim.fruit, dragon).toBe(fruit);
+      const br = ev.filter((e) => e.type === 'break');
+      expect(br).toHaveLength(1);
+      expect(br[0].type === 'break' && br[0].traitBonus).toBe(dragon === 'grove' ? 2 : 0);
+      expect(sim.pods).toBe(1);
+      expect(sim.dashBreaks).toBe(1);
+    }
+  });
+});
+
+describe('wind rings', () => {
+  function ringSim(dy: number) {
+    const sim = emptySim();
+    sim.rings.push({ id: 31, x: sim.dragonWorldX + 120, y: sim.y + dy, r: WIND_RING.radius, passed: false, fade: 0 });
+    return sim;
+  }
+
+  it('flying through a ring adds Rush charge once and never moves the dragon', () => {
+    const sim = ringSim(0);
+    const ys: number[] = [];
+    const ev = run(sim, 1, 1 / 60, (s) => {
+      s.setTarget(FLIGHT.startY);
+      ys.push(s.y);
+    });
+    expect(ev.filter((e) => e.type === 'ring')).toHaveLength(1);
+    expect(sim.charge).toBe(WIND_RING.charge);
+    expect(sim.ringsPassed).toBe(1);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1e-6);
+  });
+
+  it('missing a ring gives nothing', () => {
+    const sim = ringSim(WIND_RING.radius + 40);
+    run(sim, 1, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(sim.ringsPassed).toBe(0);
+    expect(sim.charge).toBe(0);
+  });
+
+  it('rings do not extend an active Rush or bank charge during it', () => {
+    const sim = ringSim(0);
+    sim.rushT = 2;
+    const before = sim.rushT;
+    run(sim, 0.8, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(sim.ringsPassed).toBe(1);
+    expect(sim.rushT).toBeLessThan(before);
+    expect(sim.charge).toBe(0);
+  });
+
+  it('a very low frame rate cannot skip a ring', () => {
+    const sim = ringSim(0);
+    run(sim, 1, 1 / 10, (s) => s.setTarget(FLIGHT.startY));
+    expect(sim.ringsPassed).toBe(1);
+  });
+});
+
 describe('long play', () => {
   it('entity counts stay bounded through a full run', () => {
     const sim = new FlightSim({ dragon: 'tide', level: 1, seed: 42 });
     let maxEntities = 0;
     run(sim, 61, 1 / 60, (s) => {
-      maxEntities = Math.max(maxEntities, s.pickups.length + s.containers.length + s.rocks.length);
+      maxEntities = Math.max(maxEntities, s.pickups.length + s.containers.length + s.rocks.length + s.rings.length);
     });
     expect(maxEntities).toBeLessThan(80);
   });
 
-  it('both dragons complete full runs with a reasonable pilot', () => {
-    for (const dragon of ['ember', 'tide'] as const) {
-      const sim = new FlightSim({ dragon, level: 2, seed: 9 });
-      playRun(sim, { ...REASONABLE, seed: 4 });
-      expect(sim.finished).toBe(true);
-      expect(sim.gold + sim.fruit).toBeGreaterThan(40);
+  it('every dragon completes full runs in both environments', () => {
+    for (const dragon of ['ember', 'tide', 'grove', 'gale'] as const) {
+      for (const env of ['isles', 'canyon'] as const) {
+        const sim = new FlightSim({ dragon, level: 2, seed: 9, env });
+        playRun(sim, { ...REASONABLE, seed: 4 });
+        expect(sim.finished).toBe(true);
+        expect(sim.summary().completed).toBe(true);
+        expect(sim.gold + sim.fruit).toBeGreaterThan(40);
+      }
     }
   });
 });

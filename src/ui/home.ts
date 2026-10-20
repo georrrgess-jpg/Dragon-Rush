@@ -1,6 +1,6 @@
 // Home screen: perch, wallet, Play, dragon cards, feeding, Tide's egg, goals, settings.
 import { COSTS, DRAGONS, LEVELS, type DragonId } from '../config';
-import { allMaxed, bonusPercentFor, nextFeedCost, tideRemaining } from '../economy';
+import { allMaxed, bonusPercentFor, nextFeedCost, unlockStatus } from '../economy';
 import { drawDragon } from '../render/dragonArt';
 import { drawEgg } from '../render/art';
 import { PERCH_H, PERCH_W, PerchView } from '../render/perch';
@@ -91,7 +91,7 @@ export class HomeScreen {
   update(dt: number): void {
     this.perch.update(dt);
     const s = this.save;
-    const rem = tideRemaining(s);
+    const rem = unlockStatus(s, 'tide').missing;
     this.perch.draw(this.perchCtx, {
       dragon: s.selected,
       showEgg: !s.dragons.tide.owned,
@@ -146,7 +146,7 @@ export class HomeScreen {
           <canvas class="portrait" data-portrait="${id}"></canvas>
           <div><h3>${t.name}</h3><div class="elem">${t.element} dragon · Egg</div><div class="pips"><span>Not hatched</span></div></div>
           <div class="trait">${t.traitText}</div>
-          <div class="card-actions"><span class="muted" style="font-weight:700;font-size:14px">Hatch the egg for ${COSTS.tideEgg.gold} ${icon('gold', 'icon')} + ${COSTS.tideEgg.fruit} ${icon('fruit', 'icon')}</span></div>
+          <div class="card-actions"><span class="muted" style="font-weight:700;font-size:14px">Hatch the egg for ${DRAGONS.tide.unlock!.cost.gold} ${icon('gold', 'icon')} + ${DRAGONS.tide.unlock!.cost.fruit} ${icon('fruit', 'icon')}</span></div>
         </div>`;
     }
     const pips = Array.from({ length: LEVELS.max }, (_, i) => `<i class="${i < d.level ? 'on' : ''}"></i>`).join('');
@@ -173,11 +173,11 @@ export class HomeScreen {
     const can = s.wallet.fruit >= cost;
     let note = '';
     if (!s.dragons.tide.owned) {
-      const left = Math.max(0, COSTS.tideEgg.fruit - (s.wallet.fruit - (can ? cost : 0)));
+      const left = Math.max(0, DRAGONS.tide.unlock!.cost.fruit - (s.wallet.fruit - (can ? cost : 0)));
       note = !can
         ? `<p class="muted">Emberfruit also counts toward Tide's egg — saving it hatches Tide sooner.</p>`
         : left === 0
-          ? `<p class="muted">Emberfruit also counts toward Tide's egg. You'd still have the ${COSTS.tideEgg.fruit} it needs after feeding.</p>`
+          ? `<p class="muted">Emberfruit also counts toward Tide's egg. You'd still have the ${DRAGONS.tide.unlock!.cost.fruit} it needs after feeding.</p>`
           : `<p class="muted">Emberfruit also counts toward Tide's egg. After feeding, Tide would still need <b>${left}</b> Emberfruit.</p>`;
     }
     return `
@@ -192,10 +192,10 @@ export class HomeScreen {
   }
 
   private tideHtml(s: SaveData): string {
-    const rem = tideRemaining(s);
+    const rem = unlockStatus(s, 'tide').missing;
     const ready = rem.gold === 0 && rem.fruit === 0;
-    const g = Math.min(s.wallet.gold, COSTS.tideEgg.gold);
-    const f = Math.min(s.wallet.fruit, COSTS.tideEgg.fruit);
+    const g = Math.min(s.wallet.gold, DRAGONS.tide.unlock!.cost.gold);
+    const f = Math.min(s.wallet.fruit, DRAGONS.tide.unlock!.cost.fruit);
     const row = (kind: 'gold' | 'fruit', have: number, need: number, left: number) => `
       <div class="cost-row">
         ${icon(kind)}
@@ -206,8 +206,8 @@ export class HomeScreen {
       <div class="panel card">
         <h3>${icon('egg')} Tide's Egg</h3>
         <p>Hatch <b>Tide</b>, a water dragon whose wide pull attracts pickups from farther away.</p>
-        ${row('gold', g, COSTS.tideEgg.gold, rem.gold)}
-        ${row('fruit', f, COSTS.tideEgg.fruit, rem.fruit)}
+        ${row('gold', g, DRAGONS.tide.unlock!.cost.gold, rem.gold)}
+        ${row('fruit', f, DRAGONS.tide.unlock!.cost.fruit, rem.fruit)}
         <div class="row spread" style="margin-top:8px">
           <span class="muted" style="font-weight:700">${ready ? 'Ready to hatch!' : `Still needed: ${rem.gold} ${icon('gold')} ${rem.fruit} ${icon('fruit')}`}</span>
           <button class="btn gold" data-a="hatch" ${ready ? '' : 'disabled'}>Hatch Tide</button>

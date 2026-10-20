@@ -1,6 +1,6 @@
 // Results screen: haul, level bonus, banked total, run stats and next-unlock progress.
-import { COSTS, DRAGONS, LEVELS } from '../config';
-import { tideRemaining, type Settlement } from '../economy';
+import { DRAGONS, LEVELS } from '../config';
+import { unlockStatus, type Settlement } from '../economy';
 import { drawDragon } from '../render/dragonArt';
 import type { RunSummary } from '../sim/flight';
 import type { SaveData } from '../save';
@@ -62,15 +62,15 @@ export class ResultsScreen {
 
   private progressHtml(s: SaveData): string {
     if (!s.dragons.tide.owned) {
-      const rem = tideRemaining(s);
-      const g = Math.min(s.wallet.gold, COSTS.tideEgg.gold);
-      const f = Math.min(s.wallet.fruit, COSTS.tideEgg.fruit);
+      const rem = unlockStatus(s, 'tide').missing;
+      const g = Math.min(s.wallet.gold, DRAGONS.tide.unlock!.cost.gold);
+      const f = Math.min(s.wallet.fruit, DRAGONS.tide.unlock!.cost.fruit);
       const ready = rem.gold === 0 && rem.fruit === 0;
       return `
         <div>
           <div style="font-weight:800;font-size:18px">${icon('egg')} Tide's egg ${ready ? '— ready to hatch at Home!' : ''}</div>
-          <div class="cost-row">${icon('gold')}<div class="progress ${rem.gold ? '' : 'done'}"><i style="width:${(100 * g) / COSTS.tideEgg.gold}%"></i></div><span>${g}/${COSTS.tideEgg.gold}</span></div>
-          <div class="cost-row">${icon('fruit')}<div class="progress fruit ${rem.fruit ? '' : 'done'}"><i style="width:${(100 * f) / COSTS.tideEgg.fruit}%"></i></div><span>${f}/${COSTS.tideEgg.fruit}</span></div>
+          <div class="cost-row">${icon('gold')}<div class="progress ${rem.gold ? '' : 'done'}"><i style="width:${(100 * g) / DRAGONS.tide.unlock!.cost.gold}%"></i></div><span>${g}/${DRAGONS.tide.unlock!.cost.gold}</span></div>
+          <div class="cost-row">${icon('fruit')}<div class="progress fruit ${rem.fruit ? '' : 'done'}"><i style="width:${(100 * f) / DRAGONS.tide.unlock!.cost.fruit}%"></i></div><span>${f}/${DRAGONS.tide.unlock!.cost.fruit}</span></div>
         </div>`;
     }
     return `

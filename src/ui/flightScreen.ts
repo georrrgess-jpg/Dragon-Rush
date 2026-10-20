@@ -1,6 +1,6 @@
 // Flight screen: owns the simulation, renderer, HUD and pause overlay for one run.
 import { sfx } from '../audio';
-import { DASH, DRAGONS, FLIGHT, RUSH, VIEW, type DragonId } from '../config';
+import { DRAGONS, DASH, FLIGHT, RUSH, VIEW, type DragonId, type EnvId } from '../config';
 import { FlightRenderer } from '../render/flightRenderer';
 import { FlightSim, type FlightEvent, type RunSummary } from '../sim/flight';
 import { $, el, icon } from './dom';
@@ -32,8 +32,8 @@ export class FlightScreen {
   private shown = { gold: -1, fruit: -1, time: -1, charge: -1, dashP: -1, dashReady: false, rush: false };
   private els: Record<string, HTMLElement>;
 
-  constructor(private host: FlightHost, dragon: DragonId, level: number, seed: number) {
-    this.sim = new FlightSim({ dragon, level, seed });
+  constructor(private host: FlightHost, dragon: DragonId, level: number, seed: number, env: EnvId = 'isles') {
+    this.sim = new FlightSim({ dragon, level, seed, env });
     // Reuse one renderer (and its pre-rendered backdrop) across runs.
     sharedRenderer ??= new FlightRenderer();
     this.renderer = sharedRenderer;
@@ -256,7 +256,7 @@ export class FlightScreen {
     if (s.fruit !== sh.fruit) this.els.fruit.textContent = String((sh.fruit = s.fruit));
 
     const ready = s.dashReady;
-    const p = ready ? 1 : 1 - s.dashCd / DASH.cooldown;
+    const p = ready ? 1 : 1 - s.dashCd / s.dashCooldown;
     if (Math.abs(p - sh.dashP) > 0.004 || ready !== sh.dashReady) {
       sh.dashP = p;
       sh.dashReady = ready;
@@ -298,7 +298,7 @@ export class FlightScreen {
       time: this.sim.time,
       paused: this.paused,
       dragon: DRAGONS[this.sim.dragonId].name,
-      entities: this.sim.pickups.length + this.sim.containers.length + this.sim.rocks.length,
+      entities: this.sim.pickups.length + this.sim.containers.length + this.sim.rocks.length + this.sim.rings.length,
       particles: this.renderer.particleCount,
       view: VIEW,
     };

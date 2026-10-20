@@ -1,10 +1,10 @@
 // Course data: a fixed teaching opening followed by reusable patterns.
 // x is relative to the start of the pattern; y is the logical playfield height (0-720).
 
-import { CONTAINERS, FLIGHT } from '../config';
+import { CONTAINERS, FLIGHT, type EnvId } from '../config';
 import type { Rng } from './rng';
 
-export type SpawnKind = 'gold' | 'fruit' | 'chest' | 'pod' | 'rock';
+export type SpawnKind = 'gold' | 'fruit' | 'chest' | 'pod' | 'rock' | 'ring';
 
 export interface Spawn {
   kind: SpawnKind;
@@ -21,6 +21,8 @@ export interface Pattern {
   length: number;
   weight: number;
   hasRocks: boolean;
+  /** Environments this pattern appears in. */
+  envs: readonly EnvId[];
   build(rng: Rng): Spawn[];
 }
 
@@ -72,6 +74,9 @@ function rockColumn(x: number, side: 'top' | 'bottom', edge: number, rng: Rng): 
   return out;
 }
 
+const BOTH: readonly EnvId[] = ['isles', 'canyon'];
+const CANYON: readonly EnvId[] = ['canyon'];
+
 const fl = FLIGHT;
 /** Lowest/highest y the dragon can center on, kept slightly inside bounds for pickups. */
 const LANE_MIN = fl.minY + 70;
@@ -83,7 +88,7 @@ const LANE_MAX = fl.maxY - 70;
  * Easy teaching opening. The dragon starts at mid height and meets coins within
  * about a second, a clearly marked chest after ~5.5 s, then a fruit pod. No rocks.
  */
-export const OPENING: { length: number; spawns: Spawn[] } = {
+export const OPENING_ISLES: { length: number; spawns: Spawn[] } = {
   length: 3700,
   spawns: [
     ...line('gold', 640, 360, 5, 95),
@@ -96,6 +101,26 @@ export const OPENING: { length: number; spawns: Spawn[] } = {
   ],
 };
 
+/** Canyon opening: same teaching beats, plus a wind ring placed right on the dragon's line. */
+export const OPENING_CANYON: { length: number; spawns: Spawn[] } = {
+  length: 3700,
+  spawns: [
+    ...line('gold', 640, 360, 4, 95),
+    { kind: 'ring', x: 1180, y: 360 },
+    ...ease('gold', 1380, 1640, 360, 300, 2),
+    { kind: 'fruit', x: 1760, y: 300 },
+    ...line('gold', 1960, 320, 2, 100),
+    { kind: 'chest', x: 2290, y: 320, tutorial: true },
+    { kind: 'ring', x: 2680, y: 390 },
+    ...ease('fruit', 2860, 3060, 410, 450, 2),
+    { kind: 'pod', x: 3330, y: 450 },
+  ],
+};
+
+export function openingFor(env: EnvId) {
+  return env === 'canyon' ? OPENING_CANYON : OPENING_ISLES;
+}
+
 // --- reusable patterns -----------------------------------------------------------
 
 export const PATTERNS: Pattern[] = [
@@ -104,6 +129,7 @@ export const PATTERNS: Pattern[] = [
     length: 520,
     weight: 3,
     hasRocks: false,
+    envs: BOTH,
     build: (rng) => {
       const y = rng.range(LANE_MIN, LANE_MAX);
       return [...line('gold', 0, y, 4, 110), { kind: 'fruit', x: 480, y }];
@@ -114,6 +140,7 @@ export const PATTERNS: Pattern[] = [
     length: 480,
     weight: 3,
     hasRocks: false,
+    envs: BOTH,
     build: (rng) => {
       const y = rng.range(LANE_MIN + 140, LANE_MAX);
       return arc(['gold', 'gold', 'fruit', 'gold', 'gold'], 0, y, 120, 130);
@@ -125,6 +152,7 @@ export const PATTERNS: Pattern[] = [
     length: 640,
     weight: 2,
     hasRocks: false,
+    envs: BOTH,
     build: (rng) => {
       const y = rng.range(300, 430);
       return [
@@ -139,6 +167,7 @@ export const PATTERNS: Pattern[] = [
     length: 560,
     weight: 1.5,
     hasRocks: false,
+    envs: BOTH,
     build: (rng) => {
       const y = rng.range(LANE_MIN + 20, LANE_MAX - 20);
       return [...line('gold', 0, y, 2, 110), { kind: 'chest', x: 400, y }];
@@ -150,6 +179,7 @@ export const PATTERNS: Pattern[] = [
     length: 700,
     weight: 2,
     hasRocks: true,
+    envs: BOTH,
     build: (rng) => {
       const fromTop = rng.chance(0.5);
       const rocks = fromTop ? rockColumn(380, 'top', 300, rng) : rockColumn(380, 'bottom', 420, rng);
@@ -162,6 +192,7 @@ export const PATTERNS: Pattern[] = [
     length: 640,
     weight: 1.5,
     hasRocks: false,
+    envs: BOTH,
     build: (rng) => {
       const y = rng.range(LANE_MIN + 70, LANE_MAX - 10);
       return [...arc(['fruit', 'fruit'], 0, y, 160, 0), { kind: 'pod', x: 470, y }, { kind: 'gold', x: 640, y }];
@@ -173,6 +204,7 @@ export const PATTERNS: Pattern[] = [
     length: 1050,
     weight: 1.5,
     hasRocks: true,
+    envs: BOTH,
     build: (rng) => [
       ...rockColumn(180, 'bottom', 450, rng),
       ...rockColumn(860, 'top', 270, rng),
@@ -187,6 +219,7 @@ export const PATTERNS: Pattern[] = [
     length: 560,
     weight: 1,
     hasRocks: false,
+    envs: BOTH,
     build: () => [
       { kind: 'gold', x: 200, y: 220 },
       { kind: 'chest', x: 420, y: 220 },
@@ -194,15 +227,69 @@ export const PATTERNS: Pattern[] = [
       { kind: 'pod', x: 420, y: 510 },
     ],
   },
+  // --- Sunset Canyon: wind-ring patterns ---
+  {
+    // Three rings along a gentle arc, coins between them.
+    id: 'ring-arc',
+    length: 640,
+    weight: 2.5,
+    hasRocks: false,
+    envs: CANYON,
+    build: (rng) => {
+      const y = rng.range(LANE_MIN + 120, LANE_MAX - 10);
+      return [
+        { kind: 'ring', x: 0, y },
+        { kind: 'gold', x: 150, y: y - 80 },
+        { kind: 'ring', x: 320, y: y - 110 },
+        { kind: 'fruit', x: 410, y: y - 100 },
+        { kind: 'gold', x: 490, y: y - 80 },
+        { kind: 'ring', x: 640, y },
+      ];
+    },
+  },
+  {
+    // A rock column with a ring marking the safe opening.
+    id: 'ring-gate',
+    length: 700,
+    weight: 2,
+    hasRocks: true,
+    envs: CANYON,
+    build: (rng) => {
+      const fromTop = rng.chance(0.5);
+      const rocks = fromTop ? rockColumn(400, 'top', 300, rng) : rockColumn(400, 'bottom', 420, rng);
+      const gapY = fromTop ? 490 : 240;
+      return [...rocks, ...line('gold', 80, gapY, 2, 120), { kind: 'ring', x: 400, y: gapY }, { kind: 'fruit', x: 640, y: gapY }];
+    },
+  },
+  {
+    // A smooth climb or descent with two rings on the line.
+    id: 'ring-climb',
+    length: 760,
+    weight: 2,
+    hasRocks: false,
+    envs: CANYON,
+    build: (rng) => {
+      const up = rng.chance(0.5);
+      const y0 = up ? LANE_MAX - 20 : LANE_MIN + 20;
+      const y1 = up ? LANE_MIN + 60 : LANE_MAX - 60;
+      const at = (t: number) => y0 + (y1 - y0) * ((1 - Math.cos(Math.PI * t)) / 2);
+      return [
+        ...ease('gold', 0, 760, y0, y1, 5).filter((_, i) => i !== 1),
+        { kind: 'ring', x: 190, y: at(0.25) },
+        { kind: 'ring', x: 570, y: at(0.75) },
+      ];
+    },
+  },
 ];
 
 /**
- * Picks the next pattern: weighted, never the same pattern twice in a row,
+ * Picks the next pattern for an environment: weighted, never the same pattern twice in a row,
  * never two rock patterns back to back, and no rocks during the opening.
  */
-export function pickPattern(rng: Rng, previous: Pattern | null, startX: number): Pattern {
+export function pickPattern(rng: Rng, previous: Pattern | null, startX: number, env: EnvId = 'isles'): Pattern {
   const options = PATTERNS.filter(
     (p) =>
+      p.envs.includes(env) &&
       p !== previous &&
       !(p.hasRocks && previous?.hasRocks) &&
       !(p.hasRocks && startX < FIRST_ROCK_X),

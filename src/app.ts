@@ -2,7 +2,8 @@
 import { sfx } from './audio';
 import { DRAGONS, VIEW, type DragonId } from './config';
 import * as eco from './economy';
-import { browserStore, loadSave, writeSave, type KeyValueStore, type SaveData } from './save';
+import { ensureObjectives } from './objectives';
+import { browserStore, loadSaveDetailed, writeSave, type KeyValueStore, type SaveData } from './save';
 import type { RunSummary } from './sim/flight';
 import { $, sizeCanvas } from './ui/dom';
 import { FlightScreen } from './ui/flightScreen';
@@ -28,16 +29,18 @@ export class App {
 
   constructor() {
     this.store = browserStore();
-    const fresh = !this.store?.getItem('emberwild.dragonRush.save');
-    let save = loadSave(this.store);
-    if (fresh) {
+    const loaded = loadSaveDetailed(this.store);
+    let save = loaded.save;
+    if (loaded.fresh) {
       save.settings.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     }
     const stale = eco.abandonStaleRun(save);
-    save = stale.save;
+    save = ensureObjectives(stale.save);
     this.save = save;
     writeSave(this.store, save);
     sfx.muted = save.settings.muted;
+    this.applyMotionClass();
+    if (loaded.notice) this.toast(loaded.notice, 6000);
     if (!this.store) this.toast('Saving is unavailable in this browser window; progress will reset on reload.');
 
     this.ctx = sizeCanvas(this.canvas, VIEW.width, VIEW.height, 1);
@@ -53,6 +56,20 @@ export class App {
   private persist(next: SaveData): void {
     this.save = next;
     writeSave(this.store, next);
+  }
+
+  /** Reduced motion also stills interface animation (pulses, bumps, slide-ins). */
+  private applyMotionClass() {
+    document.body.classList.toggle('reduced-motion', this.save.settings.reducedMotion);
+  }
+
+  toggleFullscreen(): void {
+    try {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      else void document.documentElement.requestFullscreen?.();
+    } catch {
+      this.toast('Fullscreen is not available in this browser window.');
+    }
   }
 
   // --- layout ----------------------------------------------------------------
@@ -78,9 +95,15 @@ export class App {
 
   private bindInput() {
     window.addEventListener('resize', this.resize);
+    document.addEventListener('fullscreenchange', () => {
+      this.resize();
+      this.home?.render(this.save);
+    });
     window.addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
     window.addEventListener('pointermove', (e) => {
       if (!this.flight) return;
+      // Reaching for a HUD button or a menu must not steer the dragon.
+      if ((e.target as Element | null)?.closest?.('button, .overlay')) return;
       const p = this.toLogical(e.clientX, e.clientY);
       // Only movement inside the playfield steers; leaving keeps the last target.
       if (p.inside && (e.movementX !== 0 || e.movementY !== 0 || e.pointerType !== 'mouse')) this.flight.pointerMove(p.y);
@@ -95,6 +118,10 @@ export class App {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('keydown', (e) => {
       sfx.unlock();
+      if (e.code === 'KeyF' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        this.toggleFullscreen();
+        return;
+      }
       if (this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
       else if (this.hatch && (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space')) {
         e.preventDefault();
@@ -161,6 +188,7 @@ export class App {
       run.dragon,
       run.level,
       (Math.random() * 2 ** 31) >>> 0,
+      run.env,
     );
   }
 
@@ -168,7 +196,7 @@ export class App {
     const runId = this.runId;
     this.runId = null;
     if (!runId) return;
-    const { save, settlement } = eco.settleRun(this.save, runId, { gold: summary.gold, fruit: summary.fruit });
+    const { save, settlement } = eco.settleRun(this.save, runId, summary);
     if (settlement) this.persist(save);
     if (early || !settlement) {
       this.goHome();
@@ -222,7 +250,7 @@ export class App {
     },
     hatch: () => {
       if (this.hatch) return;
-      const r = eco.hatchTide(this.save);
+      const r = eco.unlockDragon(this.save, 'tide');
       if (!r.ok) return this.toast(r.reason);
       this.persist(r.save); // paid and unlocked before the reveal plays
       this.refreshHome();
@@ -258,6 +286,7 @@ export class App {
       const s = structuredClone(this.save);
       s.settings.reducedMotion = !s.settings.reducedMotion;
       this.persist(s);
+      this.applyMotionClass();
       this.refreshHome();
     },
   };

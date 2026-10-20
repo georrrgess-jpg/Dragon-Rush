@@ -1,8 +1,8 @@
 // Pure flight simulation: no DOM, no rendering, no audio. The game loop feeds it
 // input and real time; it advances in bounded substeps and reports events.
 
-import { CONTAINERS, DASH, DRAGONS, FLIGHT, ROCK, RUSH, VIEW, type DragonId } from '../config';
-import { OPENING, PATTERN_GAP, pickPattern, type Pattern, type Spawn } from './course';
+import { CONTAINERS, DASH, DRAGONS, FLIGHT, ROCK, RUSH, VIEW, WIND_RING, type DragonId, type EnvId } from '../config';
+import { PATTERN_GAP, openingFor, pickPattern, type Pattern, type Spawn } from './course';
 import { createRng, type Rng } from './rng';
 
 export interface Pickup {
@@ -35,9 +35,21 @@ export interface Rock {
   seed: number;
 }
 
+/** Sunset Canyon wind ring. Pure bonus: it never pushes the dragon or changes controls. */
+export interface Ring {
+  id: number;
+  x: number;
+  y: number;
+  r: number;
+  passed: boolean;
+  /** Seconds since passed (visual). */
+  fade: number;
+}
+
 export type FlightEvent =
   | { type: 'pickup'; kind: 'gold' | 'fruit'; x: number; y: number; rush: boolean }
-  | { type: 'break'; kind: 'chest' | 'pod'; x: number; y: number; gold: number; fruit: number }
+  | { type: 'break'; kind: 'chest' | 'pod'; x: number; y: number; gold: number; fruit: number; traitBonus: number; byDash: boolean }
+  | { type: 'ring'; x: number; y: number; charge: number }
   | { type: 'dash' }
   | { type: 'dashDenied' }
   | { type: 'rushStart' }
@@ -50,18 +62,27 @@ export type FlightEvent =
 export interface RunSummary {
   dragon: DragonId;
   level: number;
+  env: EnvId;
   gold: number;
   fruit: number;
   containersBroken: number;
+  chests: number;
+  pods: number;
+  /** Containers broken while dashing. */
+  dashBreaks: number;
+  rings: number;
   rushCount: number;
   rockHits: number;
   seconds: number;
+  /** True when the full timer ran out (not an early return). */
+  completed: boolean;
 }
 
 export interface FlightOptions {
   dragon: DragonId;
   level: number;
   seed: number;
+  env?: EnvId;
   /** Override run length (tests). */
   runSeconds?: number;
 }
@@ -70,6 +91,7 @@ export class FlightSim {
   readonly dragonId: DragonId;
   readonly level: number;
   readonly runSeconds: number;
+  readonly env: EnvId;
 
   /** Active-play seconds elapsed. */
   time = 0;
@@ -104,11 +126,16 @@ export class FlightSim {
   gold = 0;
   fruit = 0;
   containersBroken = 0;
+  chests = 0;
+  pods = 0;
+  dashBreaks = 0;
+  ringsPassed = 0;
   rockHits = 0;
 
   pickups: Pickup[] = [];
   containers: Container[] = [];
   rocks: Rock[] = [];
+  rings: Ring[] = [];
 
   private events: FlightEvent[] = [];
   private nextId = 1;
@@ -117,6 +144,7 @@ export class FlightSim {
   private lastPattern: Pattern | null = null;
   private tutorialShown = false;
   private rockHintShown = false;
+  private ringHintShown = false;
   /** Ids of everything that has paid out (pickups and containers). Guards double awards. */
   private paid = new Set<number>();
 
@@ -124,9 +152,11 @@ export class FlightSim {
     this.dragonId = opts.dragon;
     this.level = opts.level;
     this.runSeconds = opts.runSeconds ?? FLIGHT.runSeconds;
+    this.env = opts.env ?? 'isles';
     this.rng = createRng(opts.seed);
-    this.spawnSegment(OPENING.spawns, 0);
-    this.courseX = OPENING.length;
+    const opening = openingFor(this.env);
+    this.spawnSegment(opening.spawns, 0);
+    this.courseX = opening.length;
     this.prevWX = this.dragonWorldX;
     this.ensureCourse();
   }
@@ -155,6 +185,14 @@ export class FlightSim {
   get dashReady(): boolean {
     return this.dashCd <= 0;
   }
+  /** This dragon's full dash cooldown in seconds (the HUD reads this too). */
+  get dashCooldown(): number {
+    return DASH.cooldown * DRAGONS[this.dragonId].dashCooldownMult;
+  }
+  /** Emberfruit from one pod for this dragon. */
+  get podFruit(): number {
+    return CONTAINERS.pod.fruit + DRAGONS[this.dragonId].podFruitBonus;
+  }
 
   setTarget(y: number): void {
     this.targetY = clamp(y, FLIGHT.minY, FLIGHT.maxY);
@@ -175,12 +213,18 @@ export class FlightSim {
     return {
       dragon: this.dragonId,
       level: this.level,
+      env: this.env,
       gold: this.gold,
       fruit: this.fruit,
       containersBroken: this.containersBroken,
+      chests: this.chests,
+      pods: this.pods,
+      dashBreaks: this.dashBreaks,
+      rings: this.ringsPassed,
       rushCount: this.rushCount,
       rockHits: this.rockHits,
       seconds: Math.min(this.time, this.runSeconds),
+      completed: this.finished,
     };
   }
 
@@ -210,6 +254,7 @@ export class FlightSim {
     const wx2 = this.dragonWorldX; // rock push-back can change lunge
     this.updatePickups(dt, wx2);
     this.updateContainers(wx2);
+    this.updateRings(dt, wx2);
     this.updateRush(dt);
     this.cleanup();
 
@@ -243,7 +288,7 @@ export class FlightSim {
       return;
     }
     this.dashT = DASH.duration;
-    this.dashCd = DASH.cooldown;
+    this.dashCd = this.dashCooldown;
     this.events.push({ type: 'dash' });
   }
 
@@ -396,12 +441,43 @@ export class FlightSim {
   private breakContainer(c: Container) {
     if (this.paid.has(c.id)) return;
     this.paid.add(c.id);
-    const def = CONTAINERS[c.kind];
-    this.gold += def.gold;
-    this.fruit += def.fruit;
+    const gold = CONTAINERS[c.kind].gold;
+    const fruit = c.kind === 'pod' ? this.podFruit : CONTAINERS[c.kind].fruit;
+    const traitBonus = c.kind === 'pod' ? DRAGONS[this.dragonId].podFruitBonus : 0;
+    const byDash = this.dashActive;
+    this.gold += gold;
+    this.fruit += fruit;
     this.containersBroken++;
+    if (c.kind === 'chest') this.chests++;
+    else this.pods++;
+    if (byDash) this.dashBreaks++;
     if (!this.rushActive) this.addCharge(RUSH.containerCharge);
-    this.events.push({ type: 'break', kind: c.kind, x: c.x - this.dist, y: c.y, gold: def.gold, fruit: def.fruit });
+    this.events.push({ type: 'break', kind: c.kind, x: c.x - this.dist, y: c.y, gold, fruit, traitBonus, byDash });
+  }
+
+  /** A ring counts when the dragon's center crosses its plane inside the opening. */
+  private updateRings(dt: number, wx: number) {
+    for (const r of this.rings) {
+      if (r.passed) {
+        r.fade += dt;
+        continue;
+      }
+      if (this.prevWX < r.x && wx >= r.x) {
+        const t = (r.x - this.prevWX) / Math.max(1e-6, wx - this.prevWX);
+        const y = this.prevY + (this.y - this.prevY) * t;
+        if (Math.abs(y - r.y) <= r.r) {
+          r.passed = true;
+          this.ringsPassed++;
+          const charge = this.rushActive ? 0 : WIND_RING.charge;
+          this.events.push({ type: 'ring', x: r.x - this.dist, y: r.y, charge });
+          if (charge) this.addCharge(charge);
+        }
+      }
+    }
+    if (!this.ringHintShown && this.rings.some((r) => r.x - this.dist < VIEW.width - 120)) {
+      this.ringHintShown = true;
+      this.events.push({ type: 'hint', text: 'Fly through wind rings to charge Dragon Rush' });
+    }
   }
 
   private addCharge(n: number) {
@@ -454,12 +530,13 @@ export class FlightSim {
     if (this.rocks.some((r) => r.x < left)) {
       this.rocks = this.rocks.filter((r) => r.x >= left);
     }
+    if (this.rings.some((r) => r.x < left)) this.rings = this.rings.filter((r) => r.x >= left);
   }
 
   private ensureCourse() {
     const horizon = this.dist + VIEW.width + FLIGHT.spawnAhead;
     while (this.courseX < horizon) {
-      const p = pickPattern(this.rng, this.lastPattern, this.courseX);
+      const p = pickPattern(this.rng, this.lastPattern, this.courseX, this.env);
       this.spawnSegment(p.build(this.rng), this.courseX);
       this.lastPattern = p;
       this.courseX += p.length + PATTERN_GAP;
@@ -487,6 +564,9 @@ export class FlightSim {
           break;
         case 'rock':
           this.rocks.push({ id: this.nextId++, x, y: s.y, r: s.r ?? 58, seed: this.rng.int(1, 1e9) });
+          break;
+        case 'ring':
+          this.rings.push({ id: this.nextId++, x, y: s.y, r: WIND_RING.radius, passed: false, fade: 0 });
           break;
       }
     }

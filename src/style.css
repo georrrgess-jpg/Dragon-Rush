@@ -992,3 +992,11 @@ button:focus-visible {
   font-size: 18px;
   margin: 4px 0 0;
 }
+
+/* Reduced motion: still the interface; essential state changes remain visible. */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation: none !important;
+  transition: none !important;
+}

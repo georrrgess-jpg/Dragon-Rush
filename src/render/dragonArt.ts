@@ -17,6 +17,26 @@ interface Colors {
 }
 
 const COLORS: Record<DragonId, Colors> = {
+  grove: {
+    body: '#5fae4a',
+    shade: '#3f8a35',
+    belly: '#e3f1b0',
+    outline: '#1f4a1c',
+    membrane: '#8fd06a',
+    membraneLight: '#d4f5a8',
+    bone: '#4e7d33',
+    accent: '#7a5434',
+  },
+  gale: {
+    body: '#bfe0f5',
+    shade: '#93c3e6',
+    belly: '#fff4dc',
+    outline: '#2f5878',
+    membrane: '#e8f5ff',
+    membraneLight: '#ffffff',
+    bone: '#7fb6e0',
+    accent: '#f3e1b5',
+  },
   ember: {
     body: '#f28a2b',
     shade: '#d4661b',
