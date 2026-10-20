@@ -586,7 +586,7 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
     ctx.fill();
   }
 
-  RIM = luminance(c.body) < 0.16 ? 'rgba(205,220,255,0.78)' : null;
+  RIM = luminance(c.body) < 0.24 ? 'rgba(205,220,255,0.78)' : null;
   const body = buildBody(sp.family, look, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, true);
   drawLegs(ctx, fam.legs, c, pose, body, true, st);

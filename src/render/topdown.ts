@@ -577,7 +577,7 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   const art = SPECIES_ART[id];
   const detail = opts.detail ?? detailFor(scale * st.scale);
   const n = parseInt(c.body.slice(1), 16);
-  TOP_RIM = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.16 ? 'rgba(205,220,255,0.7)' : null;
+  TOP_RIM = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.24 ? 'rgba(205,220,255,0.7)' : null;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale * st.scale, scale * st.scale);
