@@ -6,11 +6,11 @@
 // `reduced-motion` and `low-effects` body classes.
 //
 // Usage (collection cards and tags):
-//   `<button class="dcard2 ${rarityCardClass(sp.rarity)}">…</button>`
+//   `<button class="dcard2 ${rarityCardClass(sp.rarity, id)}">…</button>`
 //   `${rarityBadge(sp.rarity)}`                 → symbol + word
 //   `${rarityBadge(sp.rarity, { compact: true })}` → symbol only (the word stays for screen readers)
-import { RARITIES } from '../content/species';
-import type { Rarity } from '../content/types';
+import { RARITIES, SPECIES } from '../content/species';
+import type { Rarity, SpeciesId } from '../content/types';
 
 export const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary'];
 
@@ -60,8 +60,14 @@ export function rarityBadge(rarity: Rarity, opts: { compact?: boolean; size?: nu
  * Card frame classes for a rarity: `rframe rframe-<rarity>`. Common understated, Rare ornamental
  * corner studs, Epic layered double line with filigree, Legendary a premium gold band with star
  * corners and a slow shimmer (none under Reduced motion or Low effects). Frames never cover the
- * portrait and leave the element's border to selection/focus styles.
+ * portrait and leave the element's border to selection/focus styles; the top-left ornament steps
+ * aside when the card shows its "Flying" pill (`.dc-sel`).
+ *
+ * Pass the species to give a Legendary card its own crest (`rframe-m-<species>`: Solpyre's sun,
+ * Leviara's pearl and fins, Glacielle's crystal crown, Astralux's constellation — the same motifs
+ * as the canvas frames); without it the generic crowned-star crest is used.
  */
-export function rarityCardClass(rarity: Rarity): string {
-  return `rframe rframe-${rarity}`;
+export function rarityCardClass(rarity: Rarity, species?: SpeciesId): string {
+  const motif = rarity === 'legendary' && species && SPECIES[species]?.rarity === 'legendary' ? ` rframe-m-${species}` : '';
+  return `rframe rframe-${rarity}${motif}`;
 }

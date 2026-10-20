@@ -733,3 +733,10 @@ img.nt-icon {
 .np-row + .np-tags + .np-row {
   margin-top: 6px;
 }
+
+/* One tooltip at a time: while the pointer hovers something with a tooltip, a keyboard-focus
+   tooltip elsewhere (top bar, mode chips, Hatchery reasons) steps back instead of overlapping. */
+body:has([data-tip]:hover) [data-tip]:focus-visible:not(:hover)::after {
+  opacity: 0;
+  transition-delay: 0s;
+}

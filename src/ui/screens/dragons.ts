@@ -322,7 +322,7 @@ export class DragonsScreen implements Screen {
       .map((id) => {
         const d = s.dragons[id];
         const sp = SPECIES[id];
-        return `<button class="dcard2 ${rarityCardClass(sp.rarity)} r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}${eco.dragonName(s, id) !== sp.name ? `, ${sp.name}` : ''}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
+        return `<button class="dcard2 ${rarityCardClass(sp.rarity, id)} r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}${eco.dragonName(s, id) !== sp.name ? `, ${sp.name}` : ''}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
           <img src="${portraitUrl(id, d.owned ? stageOf(d.level) : 'adult', d.owned ? d.marking : 'default', 120, 90)}" alt="" draggable="false">
           <span class="dc-name">${d.favorite ? '<i class="fav">★</i>' : ''}${esc(eco.dragonName(s, id))}</span>
           <span class="dc-meta">${rarityBadge(sp.rarity, { compact: true })} ${ELEMENTS[sp.element].symbol} ${d.owned ? `Lv ${d.level}` : '🔒'}</span>

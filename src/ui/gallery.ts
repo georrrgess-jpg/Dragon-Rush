@@ -152,14 +152,21 @@ function drawRow(ctx: CanvasRenderingContext2D, id: SpeciesId, t: number, o: Opt
   ctx.setTransform(2, 0, 0, 2, 0, 0);
   ctx.clearRect(0, 0, CELL_W * COLS, CELL_H * 2);
   const detail = o.detail === 'auto' ? undefined : (Number(o.detail) as 0 | 1 | 2);
-  const scale = 0.62;
+  // long serpents are framed smaller and a little right so their tails stay in the cell
+  const serpent = SPECIES[id].family === 'serpent';
+  const scale = serpent ? 0.5 : 0.62;
   const p = sidePose(o.pose, t, o.reduced);
   if (o.low) p.rush = 0;
   STAGES.forEach((stage, i) => {
     // side view
     cellBg(ctx, i, 0, o);
-    const cx = CELL_W * i + CELL_W / 2;
+    const cx = CELL_W * i + CELL_W / 2 + (serpent ? 24 : 0);
     const cy = CELL_H / 2 + 10;
+    // each cell is clipped, so nothing spills into its neighbours
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(CELL_W * i, 0, CELL_W, CELL_H);
+    ctx.clip();
     drawDragon(ctx, id, cx, cy, scale, p, { stage: stage.id, marking: o.marking, detail });
     if (o.hitbox) circleMark(ctx, cx, cy, FLIGHT.bodyRadius * scale, 'rgba(220,0,80,0.9)');
     if (o.anchors) {
@@ -169,9 +176,14 @@ function drawRow(ctx: CanvasRenderingContext2D, id: SpeciesId, t: number, o: Opt
       dot(ctx, cx, cy, '#2a7fff', 'center');
       dot(ctx, cx - DRAGON_HIT_OFFSET.x * k * stageScale(stage.id), cy - DRAGON_HIT_OFFSET.y * k * stageScale(stage.id), '#12a150', 'origin');
     }
+    ctx.restore();
     label(ctx, `${stage.name} · side`, CELL_W * i + 8, 14, o);
     // top-down (Arena) view of the same stage
     cellBg(ctx, i, 1, o);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(CELL_W * i, CELL_H, CELL_W, CELL_H);
+    ctx.clip();
     const turn = o.reduced ? 0 : Math.sin(t * 0.8) * 0.4;
     drawDragonTop(
       ctx,
@@ -184,6 +196,7 @@ function drawRow(ctx: CanvasRenderingContext2D, id: SpeciesId, t: number, o: Opt
       { stage: stage.id, marking: o.marking },
     );
     if (o.hitbox) circleMark(ctx, cx, CELL_H * 1.5, 22 * 0.9, 'rgba(220,0,80,0.9)');
+    ctx.restore();
     label(ctx, `${stage.name} · Arena`, CELL_W * i + 8, CELL_H + 14, o);
   });
   // eggs: detail tier (codex/hero), reel tier and icon tier
@@ -272,8 +285,8 @@ function runRarityGallery(params: URLSearchParams): void {
     </header>
     <section class="g-dom" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:8px 0 14px">
       ${RARITY_ORDER.map((r) => rarityBadge(r)).join(' ')} ${RARITY_ORDER.map((r) => rarityBadge(r, { compact: true })).join(' ')}
-      <span style="display:flex;gap:10px">${(['ember', 'cinder', 'pyrelisk', 'solpyre'] as SpeciesId[])
-        .map((id) => `<button class="dcard2 ${rarityCardClass(SPECIES[id].rarity)}" style="width:118px"><img src="${portrait(id, o.stage, 'default', 120, 90).toDataURL()}" alt="" width="104" height="78"><span class="dc-name">${SPECIES[id].name}</span><span class="dc-meta">${rarityBadge(SPECIES[id].rarity, { compact: true })}</span></button>`)
+      <span style="display:flex;gap:10px">${(['ember', 'cinder', 'pyrelisk', 'solpyre', 'leviara', 'glacielle', 'astralux'] as SpeciesId[])
+        .map((id) => `<button class="dcard2 ${rarityCardClass(SPECIES[id].rarity, id)}" style="width:118px"><img src="${portrait(id, o.stage, 'default', 120, 90).toDataURL()}" alt="" width="104" height="78"><span class="dc-name">${SPECIES[id].name}</span><span class="dc-meta">${rarityBadge(SPECIES[id].rarity, { compact: true })}</span></button>`)
         .join('')}</span>
     </section>`;
   root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-r]').forEach((el) => {
@@ -360,8 +373,13 @@ function runRarityGallery(params: URLSearchParams): void {
         ctx.beginPath();
         ctx.roundRect(cl.x + 8, cl.y + 10, RC_W - 16, RC_H - 18, 12);
         ctx.fill();
-        const scale = 0.66;
-        const cx = cl.x + RC_W * 0.54;
+        // clipped to the card (auras and serpent tails never spill into the neighbours);
+        // serpents are framed smaller and further right so the whole tail shows
+        ctx.save();
+        ctx.clip();
+        const serpent = SPECIES[cl.id].family === 'serpent';
+        const scale = serpent ? 0.46 : 0.66;
+        const cx = cl.x + RC_W * (serpent ? 0.63 : 0.54);
         const cy = cl.y + RC_H * 0.55;
         if (!o.low) drawRarityAura(ctx, cl.id, cx, cy, scale * stageScale(o.stage), clock, o.reduced);
         else drawRarityAura(ctx, cl.id, cx, cy, scale * stageScale(o.stage), 0, true);
@@ -369,6 +387,7 @@ function runRarityGallery(params: URLSearchParams): void {
         pose.bob *= 1 - pose.perch;
         if (o.freeze) pose.time = clock;
         drawDragon(ctx, cl.id, cx, cy, scale, pose, { stage: o.stage, detail: o.low ? 1 : 2 });
+        ctx.restore();
         drawRarityFrame(ctx, rar, cl.x + 8, cl.y + 10, RC_W - 16, RC_H - 18, { reduced: o.reduced, low: o.low, time: clock, species: cl.id });
         ctx.fillStyle = o.dark ? '#dbe7ef' : '#2b3a48';
         ctx.font = '700 12px system-ui';

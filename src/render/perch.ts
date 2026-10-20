@@ -181,8 +181,12 @@ export class HeroView {
   private weatherRegion: RegionId | null = null;
   /** drawLayered(): what the back / front canvases currently show, and when the back was drawn. */
   private backSig = '';
-  private frontSig = '';
+  private frontSig = '\0';
   private backT = -1;
+  /** Seconds left of a reaction, cheer or feeding (the dragon then animates at the full rate). */
+  private lively = 0;
+  /** The front layer kept last frame's picture (see drawLayered). */
+  private frontHeld = false;
 
   constructor(
     readonly w: number,
@@ -191,6 +195,7 @@ export class HeroView {
 
   feed(): void {
     this.feedT = 0;
+    this.lively = 2.4;
     // the jaw starts opening early so the bite lands as the fruit reaches the mouth (0.55 s)
     this.anim.feed(0.55);
   }
@@ -208,6 +213,7 @@ export class HeroView {
     // the species' own reaction (playful hop, stoic snort, curious head tilt…); under reduced
     // motion the animator changes only the expression, and no particles are added here
     this.anim.react();
+    this.lively = 1.8;
     if (this.rm) return;
     const m = this.mouth ?? [this.w * 0.5, this.h * 0.45];
     for (let i = 0; i < 5; i++) this.floats.push({ x: m[0] + (Math.random() - 0.3) * 50, y: m[1] - 20, vy: -36 - Math.random() * 40, life: 1, kind: 'spark' });
@@ -232,6 +238,7 @@ export class HeroView {
   }
 
   private cheerNow(): void {
+    this.lively = 1.8;
     if (this.rm) {
       this.glowT = 1.2;
       return;
@@ -290,6 +297,7 @@ export class HeroView {
       if (this.fadeT >= REGION_FADE || s.reducedMotion) this.endFade();
     }
     this.glowT = Math.max(0, this.glowT - dt);
+    this.lively = Math.max(0, this.lively - dt);
     this.heartT = Math.max(0, this.heartT - dt);
     if (s.reducedMotion) {
       if (this.floats.length) this.floats.length = 0;
@@ -342,13 +350,23 @@ export class HeroView {
   drawLayered(back: Ctx, front: Ctx, s: HeroState): void {
     const F = this.frame(back, s);
     const sig = this.backSignature(s, F);
-    const due = !F.still && (F.k <= LIVE_FULL_RATE_MAX_SCALE || this.t - this.backT >= 1 / 30 - 0.002);
-    if (due || sig !== this.backSig) {
+    const half = !F.still && F.k > LIVE_FULL_RATE_MAX_SCALE;
+    const due = !F.still && (!half || this.t - this.backT >= 1 / 30 - 0.002);
+    const backNow = due || sig !== this.backSig;
+    if (backNow) {
       if (!s.backdrop) back.clearRect(0, 0, this.w, this.h);
       this.drawBack(back, s, F);
       this.backSig = sig;
       this.backT = this.t;
     }
+    // Large stages: the idle dragon is redrawn on the frames between backdrop updates, so no
+    // frame pays for both (each layer at 30 Hz); a reaction, cheer or evolution stays at 60 Hz.
+    // (never twice in a row, so a slow device still sees the dragon move every other frame)
+    if (half && backNow && due && this.lively <= 0 && !this.evo && this.frontSig === '' && !this.frontHeld) {
+      this.frontHeld = true;
+      return;
+    }
+    this.frontHeld = false;
     const pose = this.pose(s);
     const fsig = s.reducedMotion ? this.frontSignature(s, F, pose) : '';
     if (!s.reducedMotion || fsig !== this.frontSig) {

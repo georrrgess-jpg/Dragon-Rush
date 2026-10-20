@@ -109,7 +109,7 @@ export interface ArtOptions {
 }
 
 /** Art revision: part of every cached thumbnail key so stale artwork is never shown. */
-export const ART_REV = 5;
+export const ART_REV = 6;
 
 /** Detail tier for an on-screen scale (scale × stage scale). */
 export function detailFor(onScreenScale: number): 0 | 1 | 2 {
@@ -478,8 +478,16 @@ function cloudBody(L: number, T: number): Body {
 }
 
 /** Serpents: one long tube from the chest to the tail tip that ripples with the tail wave. */
+/**
+ * Perched serpents: body-space y the tail's underside rests on. The coil's contact line is
+ * PERCH_FOOT_Y − 26 = 34 from drawDragon's origin, i.e. 26 in body space (DRAGON_HIT_OFFSET.y = −8);
+ * the tail lies a few units lower, along the ledge top.
+ */
+const SERPENT_REST_Y = 31;
+
 function serpentBody(L: number, T: number, tailLen: number, pose: DragonPose): Body {
   const N = 30;
+  const width = (t: number) => (t < 0.2 ? 16 + t * 15 : 19 * (1 - (t - 0.2) / 0.8) + 2.5) * T;
   const p0: Pt = [36, -22];
   const p1: Pt = [-18, 34];
   const p2: Pt = [-58 * L, -34 + pose.tailBend1 * 0.6];
@@ -491,9 +499,18 @@ function serpentBody(L: number, T: number, tailLen: number, pose: DragonPose): B
     const x = u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0];
     let y = u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1];
     y += Math.sin(pose.tailWave * 1.1 - t * 5) * pose.tailWaveAmp * 1.2 * t;
+    if (pose.perch > 0) {
+      // perched: the tail rests along the ledge instead of hanging below the feet — its
+      // underside is eased onto the foot line (a smooth soft minimum, so the curve has no kink).
+      // Flight poses (perch 0) and hitboxes are unchanged.
+      const lim = SERPENT_REST_Y - width(t);
+      const soft = 5;
+      const z = (lim - y) / soft;
+      const rest = lim - soft * (z > 30 ? z : Math.log1p(Math.exp(z)));
+      y += (rest - y) * pose.perch;
+    }
     pts.push([x, y]);
   }
-  const width = (t: number) => (t < 0.2 ? 16 + t * 15 : 19 * (1 - (t - 0.2) / 0.8) + 2.5) * T;
   const left: Pt[] = [];
   const right: Pt[] = [];
   const normals: Pt[] = [];
@@ -4127,6 +4144,44 @@ function solarFan(ctx: Ctx, c: Palette, W: Pt, tips: Pt[], far: boolean, st: Sta
 // --- portraits -----------------------------------------------------------------------------------
 
 const portraitCache = new Map<string, HTMLCanvasElement>();
+const PORTRAIT_POSE: Partial<DragonPose> = { wing: 0.5, fold: 0.3, perch: 0.6, tailWaveAmp: 0, breath: 0 };
+
+/** Measured extents (drawDragon units, from its origin) of a species' portrait pose; cached. */
+const boundsCache = new Map<string, { x0: number; x1: number; y0: number; y1: number }>();
+
+function portraitBounds(id: SpeciesId, stage: Stage): { x0: number; x1: number; y0: number; y1: number } {
+  const key = `${ART_REV}:${id}:${stage}`;
+  const hit = boundsCache.get(key);
+  if (hit) return hit;
+  // a low-resolution silhouette is enough (2.5 units per pixel)
+  const q = 0.4;
+  const W = 340;
+  const H = 260;
+  const cx = 200;
+  const cy = 140;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  drawDragon(g, id, cx, cy, q, PORTRAIT_POSE, { stage, detail: 1 });
+  const d = g.getImageData(0, 0, W, H).data;
+  let x0 = W;
+  let x1 = -1;
+  let y0 = H;
+  let y1 = -1;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (d[(y * W + x) * 4 + 3] > 24) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+  c.width = c.height = 1;
+  const b = x1 < 0 ? { x0: -130, x1: 130, y0: -100, y1: 90 } : { x0: (x0 - cx) / q, x1: (x1 + 1 - cx) / q, y0: (y0 - cy) / q, y1: (y1 + 1 - cy) / q };
+  boundsCache.set(key, b);
+  return b;
+}
 
 /** Cached still portrait (for cards and lists): perched pose, given stage and marking. */
 export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'default', w = 200, h = 150, silhouette = false, cache = true): HTMLCanvasElement {
@@ -4139,9 +4194,21 @@ export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'defa
   c.height = h * k;
   const ctx = c.getContext('2d')!;
   ctx.scale(k, k);
-  const fit = Math.min(w / 260, h / 190) / STAGE_RIG[stage].scale ** 0.35;
+  let fit = Math.min(w / 260, h / 190) / STAGE_RIG[stage].scale ** 0.35;
+  let ox = w * 0.53;
+  let oy = h * 0.56;
+  // long dragons (serpents' tails, wide wings) would be cut at the card edge: when the measured
+  // silhouette overflows the box, scale it down and centre it so the whole body fits
+  const b = portraitBounds(id, stage);
+  const pad = Math.max(2, w * 0.03);
+  const over = ox + b.x0 * fit < pad || ox + b.x1 * fit > w - pad || oy + b.y0 * fit < pad || oy + b.y1 * fit > h - pad;
+  if (over) {
+    fit = Math.min(fit, (w - pad * 2) / (b.x1 - b.x0), (h - pad * 2) / (b.y1 - b.y0));
+    ox = w / 2 - ((b.x0 + b.x1) / 2) * fit;
+    oy = h / 2 - ((b.y0 + b.y1) / 2) * fit;
+  }
   // rendered at 2x: cards get tier 1, larger portraits the full tier 2
-  drawDragon(ctx, id, w * 0.53, h * 0.56, fit, { wing: 0.5, fold: 0.3, perch: 0.6, tailWaveAmp: 0, breath: 0 }, { stage, marking, detail: silhouette ? 0 : w >= 160 ? 2 : 1 });
+  drawDragon(ctx, id, ox, oy, fit, PORTRAIT_POSE, { stage, marking, detail: silhouette ? 0 : w >= 160 ? 2 : 1 });
   if (silhouette) {
     ctx.globalCompositeOperation = 'source-in';
     ctx.fillStyle = 'rgba(40,52,70,0.82)';
