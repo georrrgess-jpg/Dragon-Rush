@@ -18,7 +18,7 @@ import { ResultsScreen, type ResultsData } from './ui/results';
 import { createScreen } from './ui/screens';
 import { SettingsPanel } from './ui/settings';
 import { Shell } from './ui/shell';
-import type { Screen, Tab, UI } from './ui/types';
+import type { Overlay, Screen, Tab, UI } from './ui/types';
 
 export class App implements UI {
   save: SaveData;
@@ -40,6 +40,8 @@ export class App implements UI {
   private settings: SettingsPanel | null = null;
   private modal: HTMLElement | null = null;
   private lastFocus: HTMLElement | null = null;
+  private overlay: Overlay | null = null;
+  private overlayFocus: HTMLElement | null = null;
   private runId: string | null = null;
   private lastTrial: { id: string; practice: boolean } | null = null;
   /** Most recent settlement (read by automated checks; not used by gameplay). */
@@ -205,6 +207,7 @@ export class App implements UI {
       else if (this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
       else if (e.code === 'Escape') {
         if (this.modal) this.closeModal(false);
+        else if (this.overlay) this.closeOverlay();
         else if (this.settings) this.closeSettings();
       }
     });
@@ -234,6 +237,7 @@ export class App implements UI {
     if (this.frameTimes.length > 240) this.frameTimes.shift();
     if (this.flight) this.flight.update(dt);
     else if (this.arena) this.arena.update(dt);
+    else if (this.overlay) this.overlay.update?.(dt);
     else this.screen?.update?.(dt);
     this.results?.update(dt);
     requestAnimationFrame(this.frame);
@@ -260,6 +264,7 @@ export class App implements UI {
   }
 
   go(tab: Tab, arg?: string): void {
+    this.closeOverlay(false);
     const sameShell = !!this.shell && !this.flight && !this.arena && !this.results;
     if (!sameShell) {
       this.clearAll();
@@ -304,12 +309,37 @@ export class App implements UI {
 
   /** While a dialog is open, everything behind it is inert (no Tab, no clicks, no key actions). */
   private updateInert() {
-    this.root.inert = !!(this.settings || this.modal);
-    if (this.settings) this.settings.el.inert = !!this.modal;
+    this.root.inert = !!(this.settings || this.modal || this.overlay);
+    if (this.settings) this.settings.el.inert = !!(this.modal || this.overlay);
+    if (this.overlay) this.overlay.el.inert = !!this.modal;
   }
 
   get dialogOpen(): boolean {
-    return !!(this.settings || this.modal);
+    return !!(this.settings || this.modal || this.overlay);
+  }
+
+  openOverlay(o: Overlay): void {
+    this.closeOverlay(false);
+    this.overlayFocus = document.activeElement as HTMLElement | null;
+    this.overlay = o;
+    this.stage.appendChild(o.el);
+    this.updateInert();
+    o.focus();
+  }
+
+  closeOverlay(restore = true): void {
+    const o = this.overlay;
+    if (!o) return;
+    this.overlay = null;
+    o.destroy?.();
+    o.el.remove();
+    this.updateInert();
+    if (!restore) return;
+    this.screen?.render();
+    // the opener was re-rendered: find it again by its focus key
+    const fk = this.overlayFocus?.dataset.fk;
+    const back = (fk && this.root.querySelector<HTMLElement>(`[data-fk="${CSS.escape(fk)}"]`)) || this.overlayFocus;
+    back?.focus({ preventScroll: true });
   }
 
   /** Freezes the wallet display (e.g. while the egg reel plays) so it can't spoil the result. */
@@ -374,6 +404,7 @@ export class App implements UI {
   // --- modes -----------------------------------------------------------------------------------
 
   private beginRun(opts: eco.StartOptions): string {
+    this.closeOverlay(false);
     sfx.unlock();
     this.clearToasts();
     const runId = eco.newRunId();

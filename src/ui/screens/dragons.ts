@@ -1,19 +1,21 @@
 // Dragons: the 24-species collection and the inspector (overview, growth, mastery, style,
 // records). Feeding, talents, names, favorites, markings and titles live here.
 import { sfx } from '../../audio';
+import { DEFAULT_QUERY, SORT_LABELS, compareRows, eggDiscovery, feedPlan, filtersActive, nextEvolution, queryCollection, xpUntil, type CollectionQuery, type CollectionSort, type CompareMode } from '../../collection';
 import { MASTERY_BY_SPECIES } from '../../content/mastery';
 import { MAX_LEVEL, MILESTONE_LEVELS, STAGES, TALENTS, TALENT_SLOTS, XP, haulBonusPercent, stageOf, xpToNext, type TalentId, type TalentSlot } from '../../content/progression';
 import { ELEMENTS, FAMILIES, RARITIES, SPECIES, SPECIES_IDS } from '../../content/species';
-import type { Element as ElementId, SpeciesId } from '../../content/types';
+import type { Element as ElementId, Rarity, SpeciesId } from '../../content/types';
 import { HATCHERY, MARKINGS, type MarkingId } from '../../content/world';
 import * as eco from '../../economy';
 import { HeroView } from '../../render/perch';
 import { arenaStats, flightStats } from '../../stats';
 import { bar, el, esc, icon, rerender, sizeCanvas, svg } from '../dom';
+import { Observatory, eggCodexHtml } from '../observatory';
 import type { Screen, UI } from '../types';
-import { bindGoal, elementTag, goalStrip, portraitUrl, rarityTag } from './common';
+import { bindGoal, eggUrl, elementTag, goalStrip, portraitUrl, rarityTag } from './common';
 
-type InspectTab = 'overview' | 'growth' | 'mastery' | 'style' | 'records';
+type InspectTab = 'overview' | 'growth' | 'compare' | 'mastery' | 'style' | 'records';
 const VIEW_W = 420;
 const VIEW_H = 230;
 
@@ -21,8 +23,11 @@ export class DragonsScreen implements Screen {
   el: HTMLElement;
   private focus: SpeciesId;
   private tab: InspectTab = 'overview';
-  private filter: 'all' | 'owned' | 'locked' = 'all';
-  private element: ElementId | 'any' = 'any';
+  private q: CollectionQuery;
+  private view: 'dragons' | 'eggs' = 'dragons';
+  private feedQty = 1;
+  private compareWith: SpeciesId | null = null;
+  private compareMode: CompareMode = 'rush';
   private hero = new HeroView(VIEW_W, VIEW_H);
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -33,13 +38,40 @@ export class DragonsScreen implements Screen {
     arg?: string,
   ) {
     this.focus = arg && arg in SPECIES ? (arg as SpeciesId) : ui.save.selected;
+    this.q = { ...DEFAULT_QUERY, sort: ui.save.prefs.collectionSort };
     this.el = el(`<section class="screen dragons"></section>`);
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.el.addEventListener('submit', (e) => this.onSubmit(e));
+    this.el.addEventListener('input', (e) => this.onInput(e));
+    this.el.addEventListener('change', (e) => this.onChange(e));
     bindGoal(this.el, ui);
   }
 
+  private onInput(e: Event) {
+    const t = e.target as HTMLInputElement;
+    if (t.dataset.fk !== 'search') return;
+    this.q.text = t.value.slice(0, 24);
+    // update the list only, so the caret and focus stay in the search field
+    this.renderGrid();
+  }
+
+  private onChange(e: Event) {
+    const t = e.target as HTMLSelectElement;
+    if (t.dataset.fk === 'sort') {
+      this.q.sort = t.value as CollectionSort;
+      if (this.ui.save.prefs.collectionSort !== this.q.sort) this.ui.commit({ ...this.ui.save, prefs: { ...this.ui.save.prefs, collectionSort: this.q.sort } });
+      this.render();
+    } else if (t.dataset.fk === 'cmp-with') {
+      this.compareWith = t.value as SpeciesId;
+      this.render();
+    }
+  }
+
   private onSubmit(e: Event) {
+    if ((e.target as HTMLElement).classList.contains('search-form')) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     const f = e.target as HTMLFormElement;
     const name = (f.elements.namedItem('name') as HTMLInputElement | null)?.value ?? '';
@@ -78,10 +110,35 @@ export class DragonsScreen implements Screen {
         this.tab = v as InspectTab;
         break;
       case 'filter':
-        this.filter = v as typeof this.filter;
+        this.q.own = v as CollectionQuery['own'];
         break;
       case 'element':
-        this.element = v as ElementId | 'any';
+        this.q.element = v as ElementId | 'any';
+        break;
+      case 'rarity':
+        this.q.rarity = v as Rarity | 'any';
+        break;
+      case 'clear-filters':
+        this.q = { ...DEFAULT_QUERY, sort: this.q.sort };
+        this.render();
+        this.el.querySelector<HTMLElement>('[data-fk=search]')?.focus({ preventScroll: true });
+        return;
+      case 'view':
+        this.view = v as typeof this.view;
+        break;
+      case 'observatory':
+        ui.openOverlay(new Observatory(ui, id, v === 'egg' ? 'egg' : 'dragon'));
+        return;
+      case 'codex-egg':
+      case 'codex-dragon':
+        this.focus = v as SpeciesId;
+        if (a === 'codex-dragon') this.view = 'dragons';
+        break;
+      case 'qty':
+        this.feedQty = Math.max(1, Math.min(feedPlan(ui.save, id, 1).maxPortions || 1, v === 'max' ? Infinity : this.feedQty + Number(v)));
+        break;
+      case 'cmp-mode':
+        this.compareMode = v as CompareMode;
         break;
       case 'select':
         ui.commit(eco.selectDragon(ui.save, id));
@@ -96,8 +153,13 @@ export class DragonsScreen implements Screen {
           ui.toast(r.reason);
           return;
         }
+        // brief lock and a reset to one portion so a double click never repeats a large spend
         this.feedBusy = true;
-        setTimeout(() => (this.feedBusy = false), 120);
+        setTimeout(() => {
+          this.feedBusy = false;
+          this.render();
+        }, 450);
+        this.feedQty = 1;
         ui.commit(r.save);
         sfx.feed();
         this.hero.feed();
@@ -155,8 +217,10 @@ export class DragonsScreen implements Screen {
   }
 
   render(): void {
-    rerender(this.el, `<div class="dragons-layout">${this.gridHtml()}${this.inspectHtml()}</div><div class="goal-wrap">${goalStrip(this.ui, 'dragons')}</div>`);
+    const right = this.view === 'eggs' ? this.eggPanelHtml() : this.inspectHtml();
+    rerender(this.el, `<div class="dragons-layout">${this.collectionHtml()}${right}</div><div class="goal-wrap">${goalStrip(this.ui, 'dragons')}</div>`);
     this.canvas = this.el.querySelector('.inspect-canvas');
+    this.ctx = null;
     if (this.canvas) {
       this.canvas.style.width = `${VIEW_W}px`;
       this.canvas.style.height = `${VIEW_H}px`;
@@ -164,24 +228,82 @@ export class DragonsScreen implements Screen {
     }
   }
 
-  private gridHtml(): string {
+  /** Re-renders the card list and filter state only (used while typing a search). */
+  private renderGrid(): void {
+    const grid = this.el.querySelector<HTMLElement>('.card-grid');
+    const state = this.el.querySelector<HTMLElement>('.coll-state');
+    if (!grid || !state) return this.render();
+    const top = grid.scrollTop;
+    grid.innerHTML = this.cardsHtml();
+    grid.scrollTop = top;
+    state.innerHTML = this.stateHtml();
+  }
+
+  private list(): SpeciesId[] {
+    return queryCollection(this.ui.save, this.q);
+  }
+
+  private stateHtml(): string {
+    const n = this.list().length;
+    return `<span class="small muted" aria-live="polite">${n === 24 ? 'All 24 species' : `${n} of 24 shown`}</span>${filtersActive(this.q) ? '<button class="chip-btn" data-a="clear-filters" data-fk="clear-filters">Clear all filters</button>' : ''}`;
+  }
+
+  private collectionHtml(): string {
     const s = this.ui.save;
     const owned = SPECIES_IDS.filter((id) => s.dragons[id].owned).length;
-    const list = SPECIES_IDS.filter((id) => {
-      const o = s.dragons[id].owned;
-      if (this.filter === 'owned' && !o) return false;
-      if (this.filter === 'locked' && o) return false;
-      if (this.element !== 'any' && SPECIES[id].element !== this.element) return false;
-      return true;
-    }).sort((a, b) => Number(s.dragons[b].favorite) - Number(s.dragons[a].favorite));
+    const q = this.q;
     const els = (['any', 'fire', 'water', 'nature', 'air', 'frost', 'storm'] as const)
-      .map((e) => `<button class="chip-btn ${this.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${this.element === e}" title="${e === 'any' ? 'All elements' : ELEMENTS[e].name}" aria-label="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
+      .map((e) => `<button class="chip-btn ${q.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${q.element === e}" title="${e === 'any' ? 'All elements' : ELEMENTS[e].name}" aria-label="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
       .join('');
-    const cards = list
+    const rars = (['any', 'common', 'rare', 'epic', 'legendary'] as const)
+      .map((r) => `<button class="chip-btn ${q.rarity === r ? 'on' : ''}" data-a="rarity" data-v="${r}" data-fk="r-${r}" aria-pressed="${q.rarity === r}" title="${r === 'any' ? 'All rarities' : RARITIES[r].name}" aria-label="${r === 'any' ? 'All rarities' : RARITIES[r].name}">${r === 'any' ? 'All' : RARITIES[r].symbol}</button>`)
+      .join('');
+    return `
+      <div class="collection">
+        <div class="coll-head">
+          <h2>Collection <small>${owned}/24</small></h2>
+          <div class="seg-tabs" role="tablist" aria-label="Collection view">
+            <button role="tab" aria-selected="${this.view === 'dragons'}" class="${this.view === 'dragons' ? 'on' : ''}" data-a="view" data-v="dragons" data-fk="view-dragons">Dragons</button>
+            <button role="tab" aria-selected="${this.view === 'eggs'}" class="${this.view === 'eggs' ? 'on' : ''}" data-a="view" data-v="eggs" data-fk="view-eggs">Eggs</button>
+          </div>
+          <form class="search-form" role="search"><input type="search" class="search" placeholder="Search names" aria-label="Search dragons by name or nickname" value="${esc(q.text)}" data-fk="search" maxlength="24" autocomplete="off"></form>
+          <label class="sort-label small">Sort <select data-fk="sort" aria-label="Sort dragons">${(Object.keys(SORT_LABELS) as CollectionSort[]).map((k) => `<option value="${k}" ${q.sort === k ? 'selected' : ''}>${SORT_LABELS[k]}</option>`).join('')}</select></label>
+        </div>
+        <div class="coll-head filters">
+          <div class="seg" role="group" aria-label="Show">
+            ${(['all', 'owned', 'locked'] as const).map((f) => `<button class="chip-btn ${q.own === f ? 'on' : ''}" data-a="filter" data-v="${f}" data-fk="f-${f}" aria-pressed="${q.own === f}">${f === 'all' ? 'All' : f === 'owned' ? 'Owned' : 'Not hatched'}</button>`).join('')}
+          </div>
+          <div class="seg" role="group" aria-label="Rarity">${rars}</div>
+          <div class="seg" role="group" aria-label="Element">${els}</div>
+          <div class="coll-state">${this.stateHtml()}</div>
+        </div>
+        ${q.sort === 'recent' ? '<p class="small muted sort-note">Dragons that joined before dates were recorded are listed after dated ones, by name.</p>' : ''}
+        <div class="card-grid ${this.view}" data-scroll="grid">${this.cardsHtml()}</div>
+      </div>`;
+  }
+
+  private cardsHtml(): string {
+    const s = this.ui.save;
+    const list = this.list();
+    if (!list.length)
+      return `<div class="empty-state"><p><b>No dragons match these filters.</b></p><p class="small muted">Try another name, or show every species again.</p><button class="btn small" data-a="clear-filters" data-fk="empty-reset">Clear all filters</button></div>`;
+    if (this.view === 'eggs')
+      return list
+        .map((id) => {
+          const sp = SPECIES[id];
+          const disc = eggDiscovery(s, id).discovered;
+          return `<button class="dcard2 egg-card r-${sp.rarity} ${disc ? '' : 'locked'} ${id === this.focus ? 'on' : ''}" data-a="focus" data-v="${id}" data-fk="egg-${id}" aria-pressed="${id === this.focus}" aria-label="${sp.name} egg, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}, ${disc ? 'discovered' : 'not discovered'}">
+            <img src="${eggUrl(id, 64, 80)}" alt="" draggable="false">
+            <span class="dc-name">${esc(sp.name)}</span>
+            <span class="dc-meta"><span class="rs">${RARITIES[sp.rarity].symbol}</span> ${ELEMENTS[sp.element].symbol} ${disc ? '✓' : '?'}</span>
+          </button>`;
+        })
+        .join('');
+    return list
       .map((id) => {
         const d = s.dragons[id];
         const sp = SPECIES[id];
-        return `<button class="dcard2 r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${sp.name}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
+        return `<button class="dcard2 r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}, ${sp.name}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
           <img src="${portraitUrl(id, d.owned ? stageOf(d.level) : 'adult', d.owned ? d.marking : 'default', 120, 90)}" alt="" draggable="false">
           <span class="dc-name">${d.favorite ? '<i class="fav">★</i>' : ''}${esc(eco.dragonName(s, id))}</span>
           <span class="dc-meta"><span class="rs">${RARITIES[sp.rarity].symbol}</span> ${ELEMENTS[sp.element].symbol} ${d.owned ? `Lv ${d.level}` : '🔒'}</span>
@@ -189,17 +311,17 @@ export class DragonsScreen implements Screen {
         </button>`;
       })
       .join('');
+  }
+
+  private eggPanelHtml(): string {
+    const id = this.focus;
     return `
-      <div class="collection">
-        <div class="coll-head">
-          <h2>Dragons <small>${owned}/24</small></h2>
-          <div class="seg" role="group" aria-label="Show">
-            ${(['all', 'owned', 'locked'] as const).map((f) => `<button class="chip-btn ${this.filter === f ? 'on' : ''}" data-a="filter" data-v="${f}" data-fk="f-${f}" aria-pressed="${this.filter === f}">${f === 'all' ? 'All' : f === 'owned' ? 'Owned' : 'Not hatched'}</button>`).join('')}
-          </div>
-          <div class="seg" role="group" aria-label="Element">${els}</div>
+      <aside class="panel inspector egg-panel" aria-label="${SPECIES[id].name} egg">
+        <div class="insp-body" data-scroll="egg">
+          ${eggCodexHtml(this.ui, id, { canvas: false, dragonLink: 'codex-dragon' })}
+          <button class="btn small ghost" data-a="observatory" data-v="egg" data-fk="obs-egg">Open in the Observatory</button>
         </div>
-        <div class="card-grid" data-scroll="grid">${cards || '<p class="muted">No dragons match these filters.</p>'}</div>
-      </div>`;
+      </aside>`;
   }
 
   private inspectHtml(): string {
@@ -210,6 +332,7 @@ export class DragonsScreen implements Screen {
     const tabs: [InspectTab, string][] = [
       ['overview', 'Overview'],
       ['growth', 'Growth'],
+      ['compare', 'Compare'],
       ['mastery', 'Mastery'],
       ['style', 'Style'],
       ['records', 'Records'],
@@ -223,6 +346,7 @@ export class DragonsScreen implements Screen {
             <div>${rarityTag(id)} ${elementTag(id)} <span class="muted small">${FAMILIES[sp.family]}</span></div>
             ${d.title ? `<div class="title-tag">${esc(d.title)}</div>` : ''}
           </div>
+          <button class="btn small ghost obs-open" data-a="observatory" data-fk="obs-open" title="Large view, poses, stages and egg">Observatory</button>
           ${d.owned ? (s.selected === id ? '<span class="badge sel">Flying now</span>' : `<button class="btn gold small" data-a="select" data-fk="select">Fly with ${esc(eco.dragonName(s, id))}</button>`) : ''}
         </div>
         <div class="insp-tabs" role="tablist">${tabs.map(([t, l]) => `<button role="tab" aria-selected="${this.tab === t}" class="${this.tab === t ? 'on' : ''}" data-a="tab" data-v="${t}" data-fk="tab-${t}">${l}</button>`).join('')}</div>
@@ -236,6 +360,8 @@ export class DragonsScreen implements Screen {
         return this.overview();
       case 'growth':
         return this.growth();
+      case 'compare':
+        return this.compare();
       case 'mastery':
         return this.mastery();
       case 'style':
@@ -319,20 +445,76 @@ export class DragonsScreen implements Screen {
           </div>`;
       })
       .join('');
-    const portions = Math.min(5, Math.floor(s.wallet.fruit / XP.feedFruit));
     return `
       <div class="lvl-row"><b>Level ${d.level}</b>${d.level < MAX_LEVEL ? `<span class="grow">${bar(d.xp, need, 'teal')}</span><small>${d.xp}/${need} XP</small>` : '<span class="muted">Maximum level</span>'}</div>
-      <div class="row feed-row2">
-        <button class="btn gold" data-a="feed" data-v="1" data-fk="feed1" ${d.level < MAX_LEVEL && s.wallet.fruit >= XP.feedFruit ? '' : 'disabled'}>Feed ${XP.feedFruit} ${icon('fruit', 'icon sm')} → ${XP.feedXp} XP</button>
-        <button class="btn" data-a="feed" data-v="${Math.max(2, portions)}" data-fk="feed5" ${d.level < MAX_LEVEL && portions >= 2 ? '' : 'disabled'}>Feed ×${Math.max(2, portions)}</button>
-        <small class="muted">You have ${s.wallet.fruit}. Playing earns ~200 XP per active minute.</small>
-      </div>
+      ${this.feedPanel()}
       <p class="small"><b>Level bonuses now:</b> +${haulBonusPercent(d.level)}% banked gold & fruit in Rush and Arena · ${esc(as.levelBonusText)} · Sky Trials always use level-1 stats.</p>
       ${this.stages(d.level)}
       <h4>Milestones</h4>
       <ul class="milestones">${Object.entries(MILESTONE_LEVELS).map(([l, t]) => `<li class="${d.level >= Number(l) ? 'done' : ''}"><b>Level ${l}</b> ${esc(t)}${Number(l) === 30 ? ` (“${esc(SPECIES[id].elderTitle)}”)` : ''}</li>`).join('')}</ul>
       <h4>Talents <span class="muted small">(free to change between runs)</span></h4>
       ${talents}`;
+  }
+
+  /** Feeding with an explicit quantity, its exact cost and a preview of the result. */
+  private feedPanel(): string {
+    const s = this.ui.save;
+    const id = this.focus;
+    const d = s.dragons[id];
+    const evo = nextEvolution(d.level);
+    const evoText = evo
+      ? `Next evolution: <b>${STAGES.find((x) => x.id === evo.stage)!.name}</b> at level ${evo.level} — ${xpUntil(s, id, evo.level).toLocaleString()} XP to go (${Math.ceil(xpUntil(s, id, evo.level) / XP.feedXp)} portions).`
+      : 'Fully evolved (Elder).';
+    if (d.level >= MAX_LEVEL) return `<p class="small">${evoText}</p>`;
+    const max = feedPlan(s, id, 1).maxPortions;
+    this.feedQty = Math.max(1, Math.min(this.feedQty, Math.max(1, max)));
+    const plan = feedPlan(s, id, this.feedQty);
+    const stageUp = plan.to.stage !== plan.from.stage;
+    const preview = plan.reason
+      ? `<span class="feed-why">${esc(plan.reason)}</span>`
+      : `Level ${plan.from.level} → <b>${plan.to.level}</b>${plan.levelsGained ? ` (+${plan.levelsGained} level${plan.levelsGained === 1 ? '' : 's'})` : ` (${plan.to.xp}/${xpToNext(plan.to.level)} XP)`}${stageUp ? ` · evolves into its <b>${plan.to.stage}</b> form` : ''}`;
+    return `
+      <div class="feed-panel">
+        <div class="row feed-qty" role="group" aria-label="Portions to feed">
+          <span class="small">Portions</span>
+          <button class="chip-btn" data-a="qty" data-v="-1" data-fk="qty-dec" aria-label="One portion fewer" ${this.feedQty <= 1 ? 'disabled' : ''}>−</button>
+          <b class="qty" aria-live="polite">${this.feedQty}</b>
+          <button class="chip-btn" data-a="qty" data-v="1" data-fk="qty-inc" aria-label="One portion more" ${this.feedQty >= max ? 'disabled' : ''}>+</button>
+          <button class="chip-btn" data-a="qty" data-v="max" data-fk="qty-max" ${max > 1 && this.feedQty < max ? '' : 'disabled'}>Max (${Math.max(1, max)})</button>
+        </div>
+        <p class="small feed-preview">${preview}</p>
+        <div class="row feed-row2">
+          <button class="btn gold" data-a="feed" data-v="${this.feedQty}" data-fk="feed" ${plan.reason || this.feedBusy ? 'disabled' : ''}>Feed ${plan.fruit} ${icon('fruit', 'icon sm')} → ${plan.xp} XP</button>
+          <small class="muted">You have ${s.wallet.fruit} Emberfruit. ${XP.feedFruit} per portion; playing earns ~200 XP per active minute.</small>
+        </div>
+        <p class="small">${evoText}</p>
+      </div>`;
+  }
+
+  private compare(): string {
+    const s = this.ui.save;
+    const id = this.focus;
+    const owned = SPECIES_IDS.filter((x) => s.dragons[x].owned && x !== id);
+    if (!s.dragons[id].owned) return '<p class="muted">Hatch this dragon to compare it with your others.</p>';
+    if (!owned.length) return '<p class="muted">Hatch a second dragon to compare.</p>';
+    if (!this.compareWith || !owned.includes(this.compareWith)) this.compareWith = owned.includes(s.selected) ? s.selected : owned[0];
+    const other = this.compareWith;
+    const rows = compareRows(s, id, other, this.compareMode);
+    const modes: [CompareMode, string][] = [
+      ['rush', 'Rush'],
+      ['trials', 'Sky Trials'],
+      ['arena', 'Arena'],
+    ];
+    return `
+      <div class="row cmp-controls">
+        <label class="small">Compare with <select data-fk="cmp-with" aria-label="Second dragon">${owned.map((x) => `<option value="${x}" ${x === other ? 'selected' : ''}>${esc(eco.dragonName(s, x))}</option>`).join('')}</select></label>
+        <div class="seg" role="group" aria-label="Mode">${modes.map(([m, l]) => `<button class="chip-btn ${this.compareMode === m ? 'on' : ''}" data-a="cmp-mode" data-v="${m}" data-fk="cm-${m}" aria-pressed="${this.compareMode === m}">${l}</button>`).join('')}</div>
+      </div>
+      <table class="compare">
+        <thead><tr><th></th>${[id, other].map((x) => `<th><img src="${portraitUrl(x, stageOf(s.dragons[x].level), s.dragons[x].marking, 96, 72)}" alt=""><span>${esc(eco.dragonName(s, x))}</span></th>`).join('')}</tr></thead>
+        <tbody>${rows.map((r) => `<tr><th scope="row">${r.label}</th><td>${esc(r.a)}</td><td>${esc(r.b)}</td></tr>`).join('')}</tbody>
+      </table>
+      <p class="small muted">Values come straight from each dragon's data at its current level${this.compareMode === 'trials' ? ' (Sky Trials always use level-1 stats)' : ''}.</p>`;
   }
 
   private stages(level: number): string {

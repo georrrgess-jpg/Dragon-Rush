@@ -48,6 +48,8 @@ export function esc(s: string): string {
 export function rerender(container: HTMLElement, html: string): void {
   const active = document.activeElement as HTMLElement | null;
   const fk = active && container.contains(active) ? active.dataset.fk : undefined;
+  // keep the caret in text fields (search) across a re-render
+  const sel = active instanceof HTMLInputElement && ['text', 'search'].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
   const scrolls = new Map<string, number>();
   container.querySelectorAll<HTMLElement>('[data-scroll]').forEach((n) => scrolls.set(n.dataset.scroll!, n.scrollTop));
   container.innerHTML = html;
@@ -55,7 +57,11 @@ export function rerender(container: HTMLElement, html: string): void {
     const v = scrolls.get(n.dataset.scroll!);
     if (v !== undefined) n.scrollTop = v;
   });
-  if (fk) container.querySelector<HTMLElement>(`[data-fk="${CSS.escape(fk)}"]`)?.focus({ preventScroll: true });
+  if (fk) {
+    const n = container.querySelector<HTMLElement>(`[data-fk="${CSS.escape(fk)}"]`);
+    n?.focus({ preventScroll: true });
+    if (sel && n instanceof HTMLInputElement) n.setSelectionRange(sel[0], sel[1]);
+  }
 }
 
 /** A canvas with a crisp backing store for its CSS size within the scaled stage. */

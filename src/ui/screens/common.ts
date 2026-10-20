@@ -5,7 +5,8 @@ import { ELEMENTS, RARITIES, SPECIES } from '../../content/species';
 import type { SpeciesId } from '../../content/types';
 import type { MarkingId } from '../../content/world';
 import { nextGoal, type NextGoal } from '../../economy';
-import { portrait } from '../../render/dragonArt';
+import { ART_REV, portrait } from '../../render/dragonArt';
+import { drawEgg } from '../../render/eggs';
 import { bar, esc } from '../dom';
 import type { Tab, UI } from '../types';
 
@@ -13,11 +14,31 @@ const urlCache = new Map<string, string>();
 
 /** Data URL of a cached portrait (cards and lists). */
 export function portraitUrl(id: SpeciesId, stage: Stage, marking: MarkingId = 'default', w = 150, h = 112, silhouette = false): string {
-  const key = `${id}:${stage}:${marking}:${w}:${h}:${silhouette}`;
+  const key = `${ART_REV}:${id}:${stage}:${marking}:${w}:${h}:${silhouette}`;
   let u = urlCache.get(key);
   if (!u) {
     u = portrait(id, stage, marking, w, h, silhouette).toDataURL();
     urlCache.set(key, u);
+  }
+  return u;
+}
+
+const eggUrls = new Map<string, string>();
+
+/** Data URL of a still egg (bounded cache: 24 species × the few sizes the UI uses). */
+export function eggUrl(id: SpeciesId, w = 64, h = 80): string {
+  const key = `${ART_REV}:${id}:${w}x${h}`;
+  let u = eggUrls.get(key);
+  if (!u) {
+    const k = 2;
+    const c = document.createElement('canvas');
+    c.width = w * k;
+    c.height = h * k;
+    const ctx = c.getContext('2d')!;
+    ctx.scale(k, k);
+    drawEgg(ctx, id, w / 2, h * 0.52, h * 0.82);
+    u = c.toDataURL();
+    eggUrls.set(key, u);
   }
   return u;
 }

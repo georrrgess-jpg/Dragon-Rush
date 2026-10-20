@@ -19,6 +19,17 @@ export interface UI {
   /** Toasts for contracts, milestones, mastery and new species from a transaction. */
   announce(ev: ProgressEvents): void;
   confirm(title: string, body: string, ok: string, cancel?: string): Promise<boolean>;
+  /** Opens a full-stage dialog (Observatory): background inert, Escape closes, focus restored. */
+  openOverlay(o: Overlay): void;
+  closeOverlay(): void;
+}
+
+/** A full-stage dialog. While open it receives update() and the screen behind does not. */
+export interface Overlay {
+  el: HTMLElement;
+  focus(): void;
+  update?(dt: number): void;
+  destroy?(): void;
 }
 
 export interface Screen {

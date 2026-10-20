@@ -161,6 +161,19 @@ export interface SaveData {
   /** Recently settled run/transaction ids (double-settlement guard across reloads). */
   settled: string[];
   migratedFrom: number | null;
+  /** View preferences (Update 4, optional in older saves; defaults when absent). */
+  prefs: Prefs;
+}
+
+export type CollectionSortPref = 'favorites' | 'name' | 'level' | 'rarity' | 'recent';
+export type ObservatoryPose = 'idle' | 'fly' | 'dash' | 'ability';
+export interface Prefs {
+  collectionSort: CollectionSortPref;
+  observatoryPose: ObservatoryPose;
+}
+
+export function defaultPrefs(): Prefs {
+  return { collectionSort: 'favorites', observatoryPose: 'idle' };
 }
 
 // --- defaults -------------------------------------------------------------------------------------
@@ -263,6 +276,7 @@ export function defaultSave(): SaveData {
     activeRun: null,
     settled: [],
     migratedFrom: null,
+    prefs: defaultPrefs(),
   };
 }
 
@@ -453,6 +467,13 @@ export function sanitize(raw: unknown): SaveData {
   }
   d.settled = strList(r.settled, 60);
   d.migratedFrom = typeof r.migratedFrom === 'number' ? r.migratedFrom : null;
+  const pf = r.prefs ?? {};
+  const sorts: CollectionSortPref[] = ['favorites', 'name', 'level', 'rarity', 'recent'];
+  const poses: ObservatoryPose[] = ['idle', 'fly', 'dash', 'ability'];
+  d.prefs = {
+    collectionSort: sorts.includes(pf.collectionSort) ? pf.collectionSort : 'favorites',
+    observatoryPose: poses.includes(pf.observatoryPose) ? pf.observatoryPose : 'idle',
+  };
   return d;
 }
 
