@@ -114,13 +114,13 @@ export class TopDragonMotion {
     if (!this.ready || Math.hypot(x - this.x, y - this.y) > 300) this.snap(x, y);
     this.x = x;
     this.y = y;
-    const maxRate = dashing ? 16 : 9; // rad/s
+    const maxRate = dashing ? 22 : 14; // rad/s: a full reversal takes about a quarter second
     const speed = Math.hypot(vx, vy);
     let want = 0;
     if (speed > 20) want = Math.max(-maxRate, Math.min(maxRate, wrapAngle(Math.atan2(vy, vx) - this.heading) * 11));
     this.omega += (want - this.omega) * (1 - Math.exp(-18 * dt));
     this.heading = wrapAngle(this.heading + this.omega * dt);
-    const tt = Math.max(-1, Math.min(1, this.omega / 6));
+    const tt = Math.max(-1, Math.min(1, this.omega / 8));
     this.turn += (tt - this.turn) * (1 - Math.exp(-8 * dt));
     this.phase += dt * this.freq * (dashing ? 0.45 : 1);
 
@@ -150,7 +150,7 @@ export class TopDragonMotion {
         rx /= rl;
         ry /= rl;
       }
-      const stiff = 1 - Math.exp(-(i === 1 ? 14 : 5 - (3 * i) / this.n) * dt);
+      const stiff = 1 - Math.exp(-(i === 1 ? 24 : 13 - (6 * i) / this.n) * dt);
       dx += (rx - dx) * stiff;
       dy += (ry - dy) * stiff;
       const dl = Math.hypot(dx, dy) || 1;
@@ -584,7 +584,8 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
-  const glow = Math.max(p.ability, st === STAGE_RIG.elder ? 0.25 : 0);
+  // ability flash only: elders read through ornament and material, never a constant glow
+  const glow = p.ability;
   if (glow > 0.01) {
     const g = ctx.createRadialGradient(0, 0, 8, 0, 0, 90);
     g.addColorStop(0, `rgba(${c.glow},${0.5 * glow})`);

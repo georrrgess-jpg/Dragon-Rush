@@ -1,1 +1,199 @@
 /* Hatchery reel, pedestal and reveal styles (Update 4). */
+
+.hatchery .reel-ui {
+  min-height: 64px;
+}
+
+/* single result / batch detail */
+.hc-detail {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  max-width: 1120px;
+  padding: 6px 16px;
+}
+.hc-egg {
+  width: 64px;
+  height: 64px;
+  display: block;
+}
+.hc-text h3 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hc-line {
+  font-size: 16px;
+}
+.hc-rarity {
+  font-weight: 700;
+}
+.hc-badge {
+  display: inline-block;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+.hc-badge.new {
+  background: var(--gold-500);
+  color: #3a2a05;
+}
+.hc-badge.dup {
+  background: var(--teal-100);
+  color: var(--teal-800);
+  border: 1px solid var(--teal-400);
+}
+.hc-tag {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: #eef2f6;
+  color: #4a5a6a;
+  border: 1px dashed #9aaab8;
+}
+.hc-owned {
+  margin: 2px 0 0;
+  font-weight: 700;
+  color: var(--teal-800);
+}
+.hc-quote {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+.hc-detail .row {
+  flex-wrap: nowrap;
+}
+
+/* quick reveal toggle */
+.hc-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.hc-quick input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--teal-600);
+}
+
+/* Open 5 overview: one card per awarded egg (buttons, keyboard reachable) */
+.hc-batch {
+  display: grid;
+  grid-template-columns: 190px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  max-width: 1220px;
+  padding: 6px 12px;
+}
+.hc-batch-head h3 {
+  margin: 0;
+  font-size: 22px;
+}
+.hc-batch-head p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.hc-cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.hc-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: #fff;
+  border: 2px solid #c8d2dc;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.hc-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(15, 79, 88, 0.18);
+}
+.hc-card.r-rare {
+  border: 2px dashed #3a8fd8;
+}
+.hc-card.r-epic {
+  border: 3px dotted #9a5ad8;
+}
+.hc-card.r-legendary {
+  border: 3px solid #e0a020;
+  background: #fffaf0;
+}
+.hc-card img {
+  flex: none;
+}
+.hc-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+.hc-card-text b {
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hc-card-text small {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.hc-card em {
+  font-style: normal;
+  font-weight: 800;
+  font-size: 13px;
+}
+.hc-card em.new {
+  color: var(--gold-700);
+}
+.hc-card em.dup {
+  color: var(--teal-700);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-card {
+    transition: none;
+  }
+  .hc-card:hover {
+    transform: none;
+  }
+}
+
+/* catalog items carry a small egg icon */
+.cat-item:has(.cat-egg) {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  column-gap: 6px;
+  align-items: center;
+  text-align: left;
+}
+.cat-egg {
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+}

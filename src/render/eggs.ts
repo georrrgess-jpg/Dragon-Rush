@@ -38,6 +38,11 @@ export interface EggOptions {
   shadow?: boolean;
   /** Rarity collar accent (default true). */
   rarity?: boolean;
+  /**
+   * Device-pixel height to pick the cached shell by (default: the on-screen size). Pass a fixed
+   * value while the egg's size animates so one cached picture is reused instead of several.
+   */
+  cachePx?: number;
 }
 
 type Material = 'stone' | 'pearl' | 'leaf' | 'bark' | 'ice' | 'storm' | 'star' | 'smooth' | 'cloud' | 'metal';
@@ -2115,7 +2120,7 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
   const tier = o.tier ?? 1;
   const m = ctx.getTransform();
   const k = Math.hypot(m.a, m.b) || 1;
-  const e = eggShellImage(id, tier, h * k);
+  const e = eggShellImage(id, tier, o.cachePx ?? h * k);
   const L = LOOK[id];
   const sp = eggShapeSpec(id);
   const time = o.time ?? 0;

@@ -335,3 +335,72 @@ describe('animator state machine', () => {
     expect(moved[1]).toBeLessThan(rest[1]); // nose up toward the fruit
   });
 });
+
+import { TopDragonMotion } from '../src/render/topdown';
+
+describe('arena top-down motion', () => {
+  const run = (m: TopDragonMotion, seconds: number, vx: number, vy: number, state: { x: number; y: number }, each?: () => void) => {
+    for (let t = 0; t < seconds; t += 1 / 120) {
+      state.x += vx / 120;
+      state.y += vy / 120;
+      m.update(1 / 120, state.x, state.y, vx, vy, false);
+      each?.();
+    }
+  };
+
+  it('heading turns smoothly with a capped turn rate, and the rope tail never flips instantly', () => {
+    for (const id of ['ember', 'abyssfin', 'ripple'] as const) {
+      const m = new TopDragonMotion(id, 'adult', 0.82);
+      const s = { x: 0, y: 0 };
+      m.snap(0, 0, 0);
+      run(m, 1, 260, 0, s);
+      expect(Math.abs(m.heading)).toBeLessThan(0.01);
+      let prevH = m.heading;
+      let maxStep = 0;
+      let prevTip: [number, number] | null = null;
+      let maxTipJump = 0;
+      run(m, 1, -260, 0, s, () => {
+        let d = m.heading - prevH;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        maxStep = Math.max(maxStep, Math.abs(d));
+        prevH = m.heading;
+        // tip position in world space (local tail → world) must move continuously
+        const tl = m.tail();
+        const n = tl.length / 2 - 1;
+        const k = 0.82;
+        const c = Math.cos(m.heading);
+        const sn = Math.sin(m.heading);
+        const tip: [number, number] = [s.x + (tl[n * 2] * c - tl[n * 2 + 1] * sn) * k, s.y + (tl[n * 2] * sn + tl[n * 2 + 1] * c) * k];
+        if (prevTip) maxTipJump = Math.max(maxTipJump, Math.hypot(tip[0] - prevTip[0], tip[1] - prevTip[1]));
+        prevTip = tip;
+      });
+      expect(maxStep, id).toBeLessThan((14 / 120) * 1.01); // max turn rate 14 rad/s
+      expect(Math.abs(Math.abs(m.heading) - Math.PI), id).toBeLessThan(0.05); // finished the reversal
+      expect(maxTipJump, id).toBeLessThan(12); // px per 1/120 s frame: no instant reversal
+      // after the turn the tail trails behind (local x of the tip is well behind the root)
+      const tl = m.tail();
+      expect(tl[tl.length - 2], id).toBeLessThan(tl[0] - 40);
+    }
+  });
+
+  it('is pause-safe and keeps collision-independent state', () => {
+    const m = new TopDragonMotion('cinder', 'hatchling', 0.82);
+    m.snap(10, 10, 1);
+    const before = Array.from(m.tail());
+    m.update(0, 500, 500, 300, 0, false);
+    m.update(Number.NaN, 500, 500, 300, 0, false);
+    expect(Array.from(m.tail())).toEqual(before);
+    expect(m.heading).toBe(1);
+  });
+
+  it('wingbeat speed follows the family (wyvern slower than cloud)', () => {
+    const a = new TopDragonMotion('cinder', 'adult', 0.82);
+    const b = new TopDragonMotion('ripple', 'adult', 0.82);
+    for (let i = 0; i < 120; i++) {
+      a.update(1 / 120, 0, 0, 0, 0, false);
+      b.update(1 / 120, 0, 0, 0, 0, false);
+    }
+    expect(a.phase).toBeLessThan(b.phase * 0.6);
+  });
+});

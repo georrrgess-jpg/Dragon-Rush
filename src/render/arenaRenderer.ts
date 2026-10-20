@@ -10,9 +10,12 @@ import { ARENA, ENEMIES, type ArenaEvent, type ArenaSim, type Enemy } from '../s
 import { drawCoin, drawFruit, makeSprite } from './art';
 import { ArenaFloor } from './arenaFloor';
 import { abilityColor, FONT } from './flightRenderer';
-import { drawDragonTop } from './topdown';
+import { TopDragonMotion, drawDragonTop } from './topdown';
 
 type Ctx = CanvasRenderingContext2D;
+
+/** Draw scale of the player dragon (art only; the collision body is unchanged). */
+const PLAYER_SCALE = 0.82;
 
 interface Particle {
   kind: 'spark' | 'ring' | 'text' | 'chain' | 'arc' | 'band' | 'puff';
@@ -46,14 +49,14 @@ export class ArenaRenderer {
   private particles: Particle[] = [];
   private time = 0;
   private shake = 0;
-  private phase = 0;
   private abilityGlow = 0;
   private hurt = 0;
-  private turn = 0;
-  private heading = 0;
+  /** Player dragon motion: smoothed heading, family wingbeat and rope tail (visual only). */
+  private motion: TopDragonMotion;
   private coin: HTMLCanvasElement;
   private fruit: HTMLCanvasElement;
   constructor(private look: ArenaLook) {
+    this.motion = new TopDragonMotion(look.species, look.stage, PLAYER_SCALE);
     this.coin = makeSprite(28, 28, 2, (c) => drawCoin(c, 14, 14, 11));
     this.fruit = makeSprite(30, 30, 2, (c) => drawFruit(c, 15, 15, 24));
   }
@@ -161,19 +164,10 @@ export class ArenaRenderer {
   update(dt: number, sim: ArenaSim): void {
     if (dt <= 0) return;
     this.time += dt;
-    this.phase += dt * (sim.dashT > 0 ? 1 : 2.4);
     this.shake = Math.max(0, this.shake - dt * 30);
     this.abilityGlow = Math.max(0, this.abilityGlow - dt * 2);
     this.hurt = Math.max(0, this.hurt - dt * 3);
-    const sp = Math.hypot(sim.vx, sim.vy);
-    if (sp > 20) {
-      const h = Math.atan2(sim.vy, sim.vx);
-      let d = h - this.heading;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      this.heading += d * Math.min(1, dt * 12);
-      this.turn += (Math.max(-1, Math.min(1, d * 2)) - this.turn) * Math.min(1, dt * 6);
-    } else this.turn *= 1 - Math.min(1, dt * 4);
+    this.motion.update(dt, sim.x, sim.y, sim.vx, sim.vy, sim.dashT > 0);
     for (const p of this.particles) {
       p.life -= dt;
       p.x += p.vx * dt;
@@ -193,6 +187,7 @@ export class ArenaRenderer {
   }
 
   snapCamera(sim: ArenaSim): void {
+    this.motion.snap(sim.x, sim.y);
     this.camX = Math.max(-200, Math.min(ARENA.w - VIEW.width + 200, sim.x - VIEW.width / 2));
     this.camY = Math.max(-160, Math.min(ARENA.h - VIEW.height + 160, sim.y - VIEW.height / 2));
   }
@@ -342,7 +337,8 @@ export class ArenaRenderer {
     // player
     const blink = sim.iT > 0 && sim.dashT <= 0 ? 0.55 + 0.45 * Math.cos(t * 22) : 1;
     ctx.globalAlpha = blink;
-    drawDragonTop(ctx, this.look.species, sim.x, sim.y, this.heading, 0.82, { phase: this.phase, dash: sim.dashT > 0 ? 1 : 0, hurt: this.hurt, ability: this.abilityGlow, turn: this.turn, time: t }, { stage: this.look.stage, marking: this.look.marking });
+    const mp = this.motion.pose({ dash: sim.dashT > 0 ? 1 : 0, hurt: this.hurt, ability: this.abilityGlow, time: t });
+    drawDragonTop(ctx, this.look.species, sim.x, sim.y, this.motion.heading, PLAYER_SCALE, mp, { stage: this.look.stage, marking: this.look.marking });
     ctx.globalAlpha = 1;
     if (sim.shieldHits > 0 || sim.barrierReady) {
       ctx.save();

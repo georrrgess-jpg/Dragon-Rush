@@ -1,7 +1,7 @@
 // Results for every mode: what was banked, XP and level changes, key progress, mode rewards,
 // completed goals, and a quick Play Again.
 import { sfx } from '../audio';
-import { MILESTONE_LEVELS, stageOf, xpToNext } from '../content/progression';
+import { MILESTONE_LEVELS, STAGES, stageOf, xpToNext, type Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
 import { TRIALS, TRIAL_BY_ID, nextMedalText, trialUnlocked } from '../content/trials';
 import { HATCHERY, REGIONS } from '../content/world';
@@ -35,10 +35,123 @@ export interface ResultsActions {
 
 const MEDALS = ['No medal', 'Bronze', 'Silver', 'Gold'];
 
+/** Evolution moment length (s): full motion and reduced motion (a plain crossfade). */
+const EVO_FULL = 1.6;
+const EVO_CALM = 0.9;
+const W = 300;
+const H = 220;
+
+function stageName(s: Stage): string {
+  return STAGES.find((x) => x.id === s)?.name ?? s;
+}
+
+function smooth(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * One combined evolution moment for the results screen: the old form, gathering light, a
+ * crossfade into the new form, then the new form celebrates. Crossing several stages in one run
+ * shows only the final form with a note (never one moment per stage). Presentation only: the
+ * level and stage were already settled before the results screen exists.
+ */
+class EvolutionMoment {
+  t = 0;
+  done = false;
+  private oldHero = new HeroView(W, H);
+  private bufOld: HTMLCanvasElement;
+  private bufNew: HTMLCanvasElement;
+  private cheered = false;
+
+  constructor(
+    readonly from: Stage,
+    readonly to: Stage,
+    private hero: HeroView,
+    k: number,
+    private calm: boolean,
+  ) {
+    // two offscreen layers for the crossfade, allocated once
+    const layer = () => {
+      const c = document.createElement('canvas');
+      c.width = Math.round(W * k);
+      c.height = Math.round(H * k);
+      c.getContext('2d')!.setTransform(k, 0, 0, k, 0, 0);
+      return c;
+    };
+    this.bufOld = layer();
+    this.bufNew = layer();
+  }
+
+  get duration(): number {
+    return this.calm ? EVO_CALM : EVO_FULL;
+  }
+
+  skip(): void {
+    this.t = this.duration;
+  }
+
+  /** Advances and draws; returns false once finished (the caller then draws the hero alone). */
+  frame(ctx: CanvasRenderingContext2D, dt: number, st: Parameters<HeroView['draw']>[1]): boolean {
+    this.t = Math.min(this.duration, this.t + Math.max(0, Math.min(dt, 0.1)));
+    const oldSt = { ...st, stage: this.from };
+    // the cross point: the new form takes over here
+    const mid = this.calm ? 0.5 : 0.75 / EVO_FULL;
+    const u = this.t / this.duration;
+    const k = this.calm ? smooth(u) : smooth((u - (mid - 0.14)) / 0.28);
+    if (k >= 0.5 && !this.cheered) {
+      this.cheered = true;
+      this.hero.cheer();
+    }
+    this.oldHero.update(dt, oldSt);
+    this.hero.update(dt, st);
+    if (k <= 0) this.oldHero.draw(ctx, oldSt);
+    else if (k >= 1) this.hero.draw(ctx, st);
+    else {
+      // crossfade: old form fading out, new form fading in
+      this.oldHero.draw(this.bufOld.getContext('2d')!, oldSt);
+      this.hero.draw(this.bufNew.getContext('2d')!, st);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, this.bufOld.width, this.bufOld.height);
+      ctx.globalAlpha = 1 - k;
+      ctx.drawImage(this.bufOld, 0, 0);
+      ctx.globalAlpha = k;
+      ctx.drawImage(this.bufNew, 0, 0);
+      ctx.restore();
+    }
+    if (!this.calm) {
+      // light gathers around the old form, peaks over the crossfade, then fades from the new one
+      const light = u < mid ? smooth(u / mid) : 1 - smooth((u - mid) / (1 - mid));
+      const cx = W * 0.47;
+      const cy = H * 0.5;
+      const r = 70 + 70 * light;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, `rgba(255,250,225,${0.92 * light * light})`);
+      g.addColorStop(0.55, `rgba(255,236,170,${0.5 * light})`);
+      g.addColorStop(1, 'rgba(255,236,170,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      // an expanding ring after the change
+      if (u > mid) {
+        const q = (u - mid) / (1 - mid);
+        ctx.strokeStyle = `rgba(255,240,180,${0.8 * (1 - q)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 30 + 110 * smooth(q), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    if (this.t >= this.duration) this.done = true;
+    return !this.done;
+  }
+}
+
 export class ResultsScreen {
   el: HTMLElement;
-  private hero = new HeroView(300, 220);
+  private hero = new HeroView(W, H);
   private ctx: CanvasRenderingContext2D;
+  private evo: EvolutionMoment | null = null;
 
   constructor(
     private d: ResultsData,
@@ -77,6 +190,14 @@ export class ResultsScreen {
     for (const m of ev.mastery) lines.push(`Mastery: ${esc(m.title)} → ${esc(m.rewardText)}`);
     for (const id of ev.newSpecies) lines.push(`<b>${SPECIES[id].name} joined your roster!</b>`);
     for (const r of ev.regions) lines.push(`New region unlocked: <b>${REGIONS[r].name}</b>`);
+    // Evolution: one combined moment, even when a run crosses several stage milestones.
+    const stageIdx = (x: Stage) => STAGES.findIndex((q) => q.id === x);
+    const crossed = lc.to > lc.from ? stageIdx(lc.stageTo) - stageIdx(lc.stageFrom) : 0;
+    const passed = crossed > 1 ? STAGES.slice(stageIdx(lc.stageFrom) + 1, stageIdx(lc.stageTo)).map((q) => q.name) : [];
+    const evoNote =
+      crossed > 0
+        ? `<div class="evo-note" role="status" style="text-align:center;font-weight:700;color:var(--teal-700)">${crossed > 1 ? `Evolved ${crossed === 2 ? 'twice' : `${crossed} times`}: ` : 'Evolved: '}${stageName(lc.stageFrom)} → <b>${stageName(lc.stageTo)}</b>${passed.length ? `<br><small class="muted">(grew through the ${passed.join(' and ')} form${passed.length > 1 ? 's' : ''} on the way)</small>` : ''}</div>`
+        : '';
     const levelLine =
       lc.to > lc.from
         ? `<div class="levelup">Level ${lc.from} → <b>${lc.to}</b>${lc.stageTo !== lc.stageFrom ? ` · evolved into its <b>${lc.stageTo}</b> form!` : ''}${lc.milestones.map((l) => `<br><small>Level ${l}: ${MILESTONE_LEVELS[l]}</small>`).join('')}</div>`
@@ -106,7 +227,11 @@ export class ResultsScreen {
           ${lines.length ? `<ul class="news2">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
         </div>
         <div class="res-side">
-          <canvas aria-hidden="true"></canvas>
+          <div class="evo-wrap" style="position:relative;align-self:center">
+            <canvas aria-hidden="true"></canvas>
+            ${crossed > 0 ? '<button class="btn ghost small" data-evo-skip style="position:absolute;right:6px;bottom:6px;padding:2px 10px;font-size:14px" aria-label="Skip the evolution animation">Skip</button>' : ''}
+          </div>
+          ${evoNote}
           <div class="stack">
             <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Play again'}</button>
             ${showNext ? `<button class="btn" data-a="next">Next course: ${esc(nextCourse!.name)}</button>` : ''}
@@ -119,8 +244,17 @@ export class ResultsScreen {
     const c = this.el.querySelector('canvas')!;
     c.style.width = '300px';
     c.style.height = '220px';
-    this.ctx = sizeCanvas(c, 300, 220, ui.scale);
+    this.ctx = sizeCanvas(c, W, H, ui.scale);
+    if (crossed > 0) {
+      const k = c.width / W;
+      this.evo = new EvolutionMoment(lc.stageFrom, lc.stageTo, this.hero, k, s.settings.reducedMotion);
+      c.addEventListener('click', () => this.skipEvolution());
+    }
     this.el.addEventListener('click', (e) => {
+      if ((e.target as Element).closest('[data-evo-skip]')) {
+        this.skipEvolution();
+        return;
+      }
       const b = (e.target as Element).closest<HTMLElement>('[data-a]');
       if (!b) return;
       sfx.click();
@@ -128,7 +262,8 @@ export class ResultsScreen {
       if (a === 'next' && nextCourse) actions.next(nextCourse.id);
       else if (a !== 'next') actions[a]();
     });
-    if (lc.to > lc.from || (st.trial?.medal ?? 0) >= 2 || d.arena?.victory) this.hero.cheer();
+    // an evolution cheers at its change point instead of right away
+    if (!this.evo && (lc.to > lc.from || (st.trial?.medal ?? 0) >= 2 || d.arena?.victory)) this.hero.cheer();
   }
 
   focus(): void {
@@ -140,8 +275,25 @@ export class ResultsScreen {
     const id = this.d.settlement.dragon;
     const dr = s.dragons[id];
     const st = { species: id, stage: stageOf(dr.level), marking: dr.marking, region: this.d.settlement.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false };
+    if (this.evo) {
+      if (this.evo.frame(this.ctx, dt, st)) return;
+      this.endEvolution();
+      return;
+    }
     this.hero.update(dt, st);
     this.hero.draw(this.ctx, st);
+  }
+
+  private skipEvolution(): void {
+    this.evo?.skip();
+  }
+
+  private endEvolution(): void {
+    this.evo = null;
+    const b = this.el.querySelector<HTMLElement>('[data-evo-skip]');
+    const hadFocus = !!b && document.activeElement === b;
+    b?.remove();
+    if (hadFocus) this.focus();
   }
 
   destroy(): void {
