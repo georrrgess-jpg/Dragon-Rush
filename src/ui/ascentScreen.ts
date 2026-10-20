@@ -113,7 +113,7 @@ const CSS = `
 .asc-tags{display:flex;flex-direction:column;gap:4px;align-self:flex-end;margin-bottom:6px}
 .asc-tags span{font-size:12px;font-weight:800;padding:2px 8px;border-radius:8px;background:rgba(246,196,69,.92);color:#3a2a00}
 .asc-hud .upgrades-mini{margin-left:auto;justify-content:flex-end;align-self:flex-end;margin-bottom:6px}
-.asc-end .panel{width:960px;max-width:96%;text-align:left;display:grid;grid-template-columns:1fr 260px;gap:18px;padding:20px 26px}
+.asc-end .panel{width:960px;max-width:96%;max-height:calc(100% - 24px);overflow-y:auto;text-align:left;display:grid;grid-template-columns:1fr 260px;gap:18px;padding:20px 26px}
 .asc-end h2{font-size:34px}
 .asc-big{font-size:54px;font-weight:800;color:var(--teal-800);line-height:1}
 .asc-big small{font-size:22px}
@@ -579,7 +579,7 @@ export class AscentScreen {
         <div class="panel">
           <div>
             <div class="asc-who"><img src="${portraitUrl(look.species, look.stage, look.marking, 240, 180)}" alt="" width="120" height="90"/><span><b>${esc(s.dragonName)}</b>${rarityBadge(sp.rarity)}</span></div>
-            <h2>${reason === 'defeat' ? 'Out of wards' : 'Run ended'}</h2>
+            <h2 tabindex="-1" data-end-title>${reason === 'defeat' ? 'Out of wards' : 'Run ended'}</h2>
             <div class="asc-big">${r.distance.toLocaleString()}<small> m</small>${pb}</div>
             <dl class="asc-facts">
               <dt>${reason === 'defeat' ? 'Last hit' : 'Ended'}</dt><dd>${cause ? `Hit: ${esc(cause)}` : 'You ended the run'}</dd>
@@ -615,7 +615,8 @@ export class AscentScreen {
       this.host.onHome();
     });
     if (info.newBest) ascentSfx.newBest();
-    ($(o, '[data-a=retry]') as HTMLButtonElement).focus({ preventScroll: true });
+    // focus the heading, not Retry: a dash (Space) held as the run ends must not restart at once
+    o.querySelector<HTMLElement>('[data-end-title]')?.focus({ preventScroll: true });
     // start at the top: the dragon and the distance heading are what the player looks for first
     const panel = o.querySelector<HTMLElement>('.panel');
     if (panel) {
@@ -645,9 +646,10 @@ export class AscentScreen {
       if (this.dyingT <= 0) this.finish('defeat');
     }
     this.hintT = Math.max(0, this.hintT - (this.mode === 'play' ? dt : 0));
-    if (this.hintT <= 0) this.els.hint.classList.remove('show');
+    this.els.hint.classList.toggle('show', this.hintT > 0 && this.mode === 'play');
     this.bannerT = Math.max(0, this.bannerT - (this.mode === 'play' ? dt : 0));
-    if (this.bannerT <= 0) this.els.banner.classList.remove('show');
+    // the banner waits (hidden) behind the pause and shrine panels instead of showing through them
+    this.els.banner.classList.toggle('show', this.bannerT > 0 && this.mode === 'play');
     // the end screen shows a still frame: draw it once instead of every frame
     if (this.mode === 'ended') {
       if (this.drawnEnded) return;

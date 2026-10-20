@@ -555,6 +555,10 @@ export class ArenaScreen {
       else if (this.sim.state === 'victory') this.showVictory();
       else if (this.sim.state === 'over') this.finish(this.sim.hp <= 0 ? 'defeat' : this.sim.endless ? 'endless' : 'bossLeft');
     }
+    // hints wait (hidden) behind pause, upgrade and victory panels instead of showing through them
+    const live = this.mode === 'play' && (this.sim.state === 'play' || this.sim.state === 'endless');
+    this.els.hint.classList.toggle('show', live && this.hintT > 0);
+    this.els.coach.style.visibility = live ? '' : 'hidden';
     this.renderer.draw(this.host.ctx, this.sim, this.setup.region);
     this.updateHud();
   }

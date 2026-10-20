@@ -252,7 +252,7 @@ export class ResultsScreen {
     this.el = el(`
       <div class="results2 screen-enter" role="dialog" aria-label="Results">
         <div class="panel res-main">
-          <h1>${title}</h1>
+          <h1 tabindex="-1" data-res-title>${title}</h1>
           <p class="muted">${sub}</p>
           ${haul}
           <div class="xp-block">
@@ -306,8 +306,10 @@ export class ResultsScreen {
     if (!this.evo && (lc.to > lc.from || (st.trial?.medal ?? 0) >= 2 || d.arena?.victory)) this.hero.cheer();
   }
 
+  /** Focus starts on the heading, not Retry: a dash (Space) held as the run ends must not start
+   *  a new run before the results are read. Tab reaches the buttons; R still retries. */
   focus(): void {
-    this.el.querySelector<HTMLButtonElement>('[data-a=again]')?.focus({ preventScroll: true });
+    this.el.querySelector<HTMLElement>('[data-res-title]')?.focus({ preventScroll: true });
   }
 
   /** R retries, Escape changes mode (the same keys as the Ascent end screen). */

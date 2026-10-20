@@ -1899,3 +1899,14 @@ table.compare thead img {
 #toast-root .toast:nth-last-child(n + 3) {
   display: none;
 }
+[data-res-title]:focus,[data-end-title]:focus{outline:none}
+/* while a hatch result card fills the bottom of the Hatchery, toasts use the empty top-right of the stage */
+body:has(.screen.hatchery .result-card) #toast-root {
+  left: auto;
+  right: 46px;
+  top: 84px;
+  bottom: auto;
+  width: 400px;
+  transform: none;
+  flex-direction: column;
+}
