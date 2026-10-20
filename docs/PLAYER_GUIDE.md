@@ -58,8 +58,9 @@ An endless flight that opens after 2 full Rush flights. Same controls as Rush.
 - Every route can be flown without dashing; dashing is always optional.
 - At **shrines** the flight pauses for a choice of three upgrades (keys 1–3) and banks what you have earned so far.
 - Score comes from distance plus small bonuses for optional challenge routes and caches; it never changes gold or Emberfruit.
-- **Assist** (Play → Aether Ascent) adds a ward and a gentler speed-up; assisted runs keep their own record.
-- Ending from the pause menu banks everything; if the page reloads mid-run, only what shrines already banked is kept.
+- Every dash gives a brief moment of protection. Your dragon's ability also helps here: shield abilities give a short ward, clearing abilities break cracked rubble nearby (or protect you for a moment if nothing is in reach), and slowing abilities slow the sky.
+- **Assist** (on the first-run intro or Play → Aether Ascent) adds a ward, a gentler speed-up, hazards that move 15% slower with earlier warnings, and one ward restored at each shrine; assisted runs keep their own record.
+- Ending from the pause menu banks everything; if the page reloads mid-run, only what shrines already banked is kept. Runs shorter than 100 m don't count toward records or milestones.
 
 ## Growing your dragons
 
