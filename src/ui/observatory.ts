@@ -430,7 +430,9 @@ export class Observatory implements Overlay {
       drawDragon(ctx, this.id, 40, dy, sc, pose, opts);
     } else {
       const tp = this.t;
-      drawDragonTop(ctx, this.id, 0, 30, -Math.PI / 2, 2, {
+      // serpents are long from above: smaller and higher so the tail stays in view
+      const serp = SPECIES[this.id].family === 'serpent';
+      drawDragonTop(ctx, this.id, 0, serp ? -70 : 30, -Math.PI / 2, serp ? 1.35 : 2, {
         phase: still ? 0.3 : this.topPhase,
         time: tp,
         dash: !still && this.pose === 'dash' && this.dashClock % 1.8 < 0.45 ? 1 : 0,
