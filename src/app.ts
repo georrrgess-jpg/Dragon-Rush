@@ -25,6 +25,8 @@ export class App {
   flight: FlightScreen | null = null;
   private hatch: HatchReveal | null = null;
   private runId: string | null = null;
+  /** Most recent settlement (read by automated checks; not used by gameplay). */
+  lastSettlement: eco.Settlement | null = null;
   private last = performance.now();
 
   constructor() {
@@ -85,6 +87,16 @@ export class App {
     this.home?.resize(this.scale);
   };
 
+  /** True within a padded zone around in-flight HUD buttons (e.g. Pause). */
+  private nearHudButton(x: number, y: number): boolean {
+    const pad = 44 * this.scale;
+    for (const b of this.root.querySelectorAll('.hud button')) {
+      const r = b.getBoundingClientRect();
+      if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return true;
+    }
+    return false;
+  }
+
   /** Maps a client-space pointer to logical playfield coordinates (accounts for scaling/letterboxing). */
   toLogical(clientX: number, clientY: number): { x: number; y: number; inside: boolean } {
     const r = this.canvas.getBoundingClientRect();
@@ -104,6 +116,7 @@ export class App {
       if (!this.flight) return;
       // Reaching for a HUD button or a menu must not steer the dragon.
       if ((e.target as Element | null)?.closest?.('button, .overlay')) return;
+      if (this.nearHudButton(e.clientX, e.clientY)) return;
       const p = this.toLogical(e.clientX, e.clientY);
       // Only movement inside the playfield steers; leaving keeps the last target.
       if (p.inside && (e.movementX !== 0 || e.movementY !== 0 || e.pointerType !== 'mouse')) this.flight.pointerMove(p.y);
@@ -199,7 +212,10 @@ export class App {
     this.runId = null;
     if (!runId) return;
     const { save, settlement } = eco.settleRun(this.save, runId, summary);
-    if (settlement) this.persist(save);
+    if (settlement) {
+      this.persist(save);
+      this.lastSettlement = settlement;
+    }
     if (early || !settlement) {
       this.goHome();
       if (settlement) {
