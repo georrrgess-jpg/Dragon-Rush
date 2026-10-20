@@ -83,6 +83,14 @@ export class HeroView {
   private floats: Float[] = [];
   private anim = new DragonAnimator(true);
   private key = '';
+  private species = '';
+  private stage: HeroState['stage'] | null = null;
+  /** Evolution crossfade when the stage changes in place (e.g. by feeding). */
+  private evo: { from: HeroState['stage']; t: number } | null = null;
+  /** Eased view zoom, so an evolution doesn't jump the framing. */
+  private zoomNow: number | null = null;
+  /** A level-up cheer waits for the feeding swallow to finish (two separate beats). */
+  private cheerIn = -1;
   /** Mouth position on screen from the last draw (feeding feedback starts there). */
   private mouth: [number, number] | null = null;
   /** Reduced motion as of the last update (cheer() has no state argument). */
@@ -109,6 +117,14 @@ export class HeroView {
   }
 
   cheer(): void {
+    if (this.feedT >= 0 && this.feedT < 1.6) {
+      this.cheerIn = 1.6 - this.feedT;
+      return;
+    }
+    this.cheerNow();
+  }
+
+  private cheerNow(): void {
     if (this.rm) {
       this.glowT = 1.2;
       return;
@@ -121,7 +137,27 @@ export class HeroView {
     const key = `${s.species}:${s.stage}`;
     if (key !== this.key) {
       this.key = key;
-      this.anim = new DragonAnimator(true, 0.2, { species: s.species, stage: s.stage, reducedMotion: s.reducedMotion });
+      if (s.species === this.species && this.stage) {
+        // same dragon evolving in place: keep the animator (feeding and cheer carry on)
+        this.anim.setStage(s.stage);
+        this.evo = { from: this.stage, t: 0 };
+      } else {
+        this.anim = new DragonAnimator(true, 0.2, { species: s.species, stage: s.stage, reducedMotion: s.reducedMotion });
+        this.evo = null;
+        this.zoomNow = null;
+      }
+      this.species = s.species;
+      this.stage = s.stage;
+    }
+    const z = s.zoom ?? 1;
+    this.zoomNow = this.zoomNow === null || s.reducedMotion ? z : this.zoomNow + (z - this.zoomNow) * (1 - Math.exp(-3 * dt));
+    if (this.evo) {
+      this.evo.t += dt;
+      if (this.evo.t >= (s.reducedMotion ? 0.6 : 1.1)) this.evo = null;
+    }
+    if (this.cheerIn >= 0) {
+      this.cheerIn -= dt;
+      if (this.cheerIn < 0) this.cheerNow();
     }
     this.anim.setReducedMotion(s.reducedMotion);
     this.rm = s.reducedMotion;
@@ -183,7 +219,7 @@ export class HeroView {
     const cx = w * (s.focusX ?? 0.5);
     const baseY = h * 0.8;
     const base = Math.min(w / 520, h / 360) * 1.25;
-    const scale = base * (s.zoom ?? 1);
+    const scale = base * (this.zoomNow ?? s.zoom ?? 1);
     const pu = scale / REF_SCALE;
     if (s.backdrop) {
       // backing resolution follows the destination's device scale, so the per-frame blit is
@@ -237,7 +273,28 @@ export class HeroView {
     }
 
     const pose = this.pose(s);
-    drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
+    if (this.evo) {
+      // evolution in place: the old form fades out as the new one gathers in, with a soft light
+      const k = Math.min(1, this.evo.t / (s.reducedMotion ? 0.6 : 1.1));
+      const e = k * k * (3 - 2 * k);
+      if (!s.reducedMotion) {
+        const gx = ox + 10 * scale * st;
+        const gy = oy - 20 * scale * st;
+        const r = 160 * scale * st;
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+        g.addColorStop(0, `rgba(255,244,190,${0.6 * Math.sin(Math.PI * e)})`);
+        g.addColorStop(1, 'rgba(255,244,190,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+      }
+      ctx.save();
+      ctx.globalAlpha = 1 - e;
+      const oldOy = baseY - foot * scale * stageScale(this.evo.from) - hopK * 18 * pu;
+      drawDragon(ctx, s.species, ox, oldOy, scale, pose, { stage: this.evo.from, marking: s.marking });
+      ctx.globalAlpha = e;
+      drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
+      ctx.restore();
+    } else drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
     drawPerch(ctx, s.perch, cx, baseY, pu, true, s.reducedMotion ? -1 : this.t);
 
     // aim the fruit at where the jaw actually is in this pose

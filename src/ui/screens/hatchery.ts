@@ -258,11 +258,7 @@ export class HatcheryScreen implements Screen {
     this.soundPlayed = false;
     this.timing = this.quick ? TIMING.quick : TIMING.normal;
     for (const p of this.particles) p.on = false;
-    this.anims = openings.map(() => {
-      const a = new DragonAnimator(true, 0.3);
-      a.setStage('hatchling');
-      return a;
-    });
+    this.anims = openings.map((o) => new DragonAnimator(true, 0.3, { species: o.species, stage: 'hatchling', reducedMotion: this.ui.save.settings.reducedMotion }));
     // warm the caches the reveal uses (shell art, pedestal) before the first frame
     for (const o of openings) {
       eggShellImage(o.species, openings.length > 1 ? 1 : 2, (openings.length > 1 ? 104 : EGG_H) * this.k);
@@ -720,10 +716,10 @@ export class HatcheryScreen implements Screen {
     const end = WIN_INDEX * SLOT;
     if (this.phase === 'reel') return start + (end - start) * reelEase(this.t / T.reel);
     if (this.phase === 'hatch') return end;
-    return (WIN_INDEX - 3) * SLOT + Math.sin(this.t * 0.6) * 6;
+    return (WIN_INDEX - 3) * SLOT + (this.ui.save.settings.reducedMotion ? 0 : Math.sin(this.t * 0.6) * 6);
   }
 
-  private drawReel(ctx: Ctx, dt: number, alpha: number, hideWinner = false) {
+  private drawReel(ctx: Ctx, dt: number, alpha: number, winnerAlpha = alpha) {
     const offset = this.reelOffset();
     if (this.phase === 'reel') {
       // ticks follow real card crossings under the marker, rate-limited (≤ 25/s) and thinned when fast
@@ -755,8 +751,7 @@ export class HatcheryScreen implements Screen {
     for (let i = 0; i < this.reel.length; i++) {
       const x = CX + i * SLOT - offset;
       if (x < -CARD_W || x > REEL_W + CARD_W) continue;
-      if (hideWinner && i === WIN_INDEX) continue;
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = i === WIN_INDEX ? winnerAlpha : alpha;
       ctx.drawImage(this.card(this.reel[i]), x - CARD_W / 2, top, CARD_W, CARD_H);
     }
     ctx.globalAlpha = 1;
@@ -844,7 +839,8 @@ export class HatcheryScreen implements Screen {
 
     // A) the winning egg leaves the reel and settles on a small elemental pedestal
     const kA = clamp01(ht / Math.max(0.01, S.b));
-    if (kA < 1) this.drawReel(ctx, dt, 1 - smooth(0, 1, kA), true);
+    // the winning card fades out under the travelling egg (same size and place at the start: no pop)
+    if (kA < 1) this.drawReel(ctx, dt, 1 - smooth(0, 1, kA), 1 - smooth(0, 0.5, kA));
     const pedIn = smooth(0, 1, kA);
     const glowBehind = smooth(S.c, S.d, ht) * (1 - smooth(S.d + 0.2, S.f + 0.6, ht));
     if (glowBehind > 0) {
@@ -885,7 +881,8 @@ export class HatcheryScreen implements Screen {
       const shakeK = clamp01((ke - 0.8) / 0.45);
       const shake = shakeK > 0 && shakeK < 1 ? Math.sin(shakeK * Math.PI * 6) * 0.07 * (1 - shakeK) : 0;
       if (ke >= 0.8 && this.once('shake')) this.shakeOff(o, CX, PED_Y - 50, 1);
-      const blink = ke > 1.1 && ke < 1.24 ? 1 : 0;
+      // scripted blink with a smooth lid envelope
+      const blink = ke > 1.1 && ke < 1.32 ? Math.sin(((ke - 1.1) / 0.22) * Math.PI) : 0;
       ctx.globalAlpha = alpha;
       this.drawHatchling(ctx, o, CX, PED_Y + 2, grow, anim ?? null, shake, 1 - stretch * 0.04, 1 + stretch * 0.07, blink);
       ctx.globalAlpha = 1;

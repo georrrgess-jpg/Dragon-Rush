@@ -39,8 +39,15 @@ export interface ArenaLook {
   abilityVariant: boolean;
 }
 
+/** Deterministic jitter in [-0.5, 0.5) from renderer time (time only advances in update, so pause freezes it). */
+function jitter(time: number, k: number): number {
+  const v = Math.sin(Math.floor(time * 60) * 12.9898 + k * 78.233) * 43758.5453;
+  return v - Math.floor(v) - 0.5;
+}
+
 export class ArenaRenderer {
   reducedMotion = false;
+  private dashW = 0;
   lowEffects = false;
   showHitboxes = false;
   camX = 0;
@@ -167,6 +174,10 @@ export class ArenaRenderer {
     this.shake = Math.max(0, this.shake - dt * 30);
     this.abilityGlow = Math.max(0, this.abilityGlow - dt * 2);
     this.hurt = Math.max(0, this.hurt - dt * 3);
+    // eased dash weight: quick into the streamline, softer back to flapping
+    const dashOn = sim.dashT > 0 ? 1 : 0;
+    this.dashW += (dashOn - this.dashW) * (1 - Math.exp(-(dashOn ? 30 : 7) * dt));
+    if (Math.abs(dashOn - this.dashW) < 0.002) this.dashW = dashOn;
     this.motion.update(dt, sim.x, sim.y, sim.vx, sim.vy, sim.dashT > 0);
     for (const p of this.particles) {
       p.life -= dt;
@@ -193,8 +204,8 @@ export class ArenaRenderer {
   }
 
   draw(ctx: Ctx, sim: ArenaSim, region: RegionId): void {
-    const shx = this.shake && !this.reducedMotion && !this.lowEffects ? (Math.random() - 0.5) * this.shake : 0;
-    const shy = this.shake && !this.reducedMotion && !this.lowEffects ? (Math.random() - 0.5) * this.shake : 0;
+    const shx = this.shake && !this.reducedMotion && !this.lowEffects ? jitter(this.time, 1) * this.shake : 0;
+    const shy = this.shake && !this.reducedMotion && !this.lowEffects ? jitter(this.time, 2) * this.shake : 0;
     const cx = Math.round(this.camX + shx);
     const cy = Math.round(this.camY + shy);
     this.floor(region).draw(ctx, cx, cy, this.time);
@@ -335,9 +346,10 @@ export class ArenaRenderer {
     ctx.stroke();
     ctx.restore();
     // player
-    const blink = sim.iT > 0 && sim.dashT <= 0 ? 0.55 + 0.45 * Math.cos(t * 22) : 1;
+    // invulnerability: a steady dim under reduced motion instead of a flicker
+    const blink = sim.iT > 0 && sim.dashT <= 0 ? (this.reducedMotion ? 0.6 : 0.55 + 0.45 * Math.cos(t * 22)) : 1;
     ctx.globalAlpha = blink;
-    const mp = this.motion.pose({ dash: sim.dashT > 0 ? 1 : 0, hurt: this.hurt, ability: this.abilityGlow, time: t });
+    const mp = this.motion.pose({ dash: this.dashW, hurt: this.hurt, ability: this.abilityGlow, time: t });
     drawDragonTop(ctx, this.look.species, sim.x, sim.y, this.motion.heading, PLAYER_SCALE, mp, { stage: this.look.stage, marking: this.look.marking, detail: this.lowEffects ? 0 : 1 });
     ctx.globalAlpha = 1;
     if (sim.shieldHits > 0 || sim.barrierReady) {
@@ -632,7 +644,7 @@ export class ArenaRenderer {
                 if (!i) ctx.moveTo(q.x, q.y);
                 else {
                   const pr = p.pts![i - 1];
-                  ctx.lineTo((pr.x + q.x) / 2 + (Math.random() - 0.5) * 20, (pr.y + q.y) / 2 + (Math.random() - 0.5) * 20);
+                  ctx.lineTo((pr.x + q.x) / 2 + jitter(this.time, i * 2) * 20, (pr.y + q.y) / 2 + jitter(this.time, i * 2 + 1) * 20);
                   ctx.lineTo(q.x, q.y);
                 }
               });

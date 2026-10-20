@@ -52,6 +52,12 @@ export interface FlightLook {
   abilityVariant: boolean;
 }
 
+/** Deterministic jitter in [-0.5, 0.5) from renderer time (time only advances in update, so pause freezes it). */
+function jitter(time: number, k: number): number {
+  const v = Math.sin(Math.floor(time * 60) * 12.9898 + k * 78.233) * 43758.5453;
+  return v - Math.floor(v) - 0.5;
+}
+
 export class FlightRenderer {
   reducedMotion = false;
   lowEffects = false;
@@ -336,8 +342,8 @@ export class FlightRenderer {
 
   draw(ctx: Ctx, sim: FlightSim): void {
     this.background(sim.env).draw(ctx, sim.dist, this.time);
-    const sx = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
-    const sy = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
+    const sx = this.shake > 0 ? jitter(this.time, 1) * this.shake : 0;
+    const sy = this.shake > 0 ? jitter(this.time, 2) * this.shake : 0;
     ctx.save();
     ctx.translate(sx, sy);
     const t = this.time;
@@ -599,7 +605,7 @@ export class FlightRenderer {
         ctx.beginPath();
         ctx.moveTo(x, y0);
         const steps = 8;
-        for (let i = 1; i <= steps; i++) ctx.lineTo(x + (i === steps ? 0 : (Math.random() - 0.5) * (this.reducedMotion ? 4 : 18)), y0 + ((y1 - y0) * i) / steps);
+        for (let i = 1; i <= steps; i++) ctx.lineTo(x + (i === steps ? 0 : (this.reducedMotion ? 0 : jitter(this.time, i + 3) * 18)), y0 + ((y1 - y0) * i) / steps);
         ctx.stroke();
       }
     }
@@ -753,7 +759,7 @@ export class FlightRenderer {
                 if (!i) ctx.moveTo(q.x, q.y);
                 else {
                   const pr = p.pts![i - 1];
-                  ctx.lineTo((pr.x + q.x) / 2 + (Math.random() - 0.5) * 18, (pr.y + q.y) / 2 + (Math.random() - 0.5) * 18);
+                  ctx.lineTo((pr.x + q.x) / 2 + jitter(this.time, i * 2) * 18, (pr.y + q.y) / 2 + jitter(this.time, i * 2 + 1) * 18);
                   ctx.lineTo(q.x, q.y);
                 }
               });

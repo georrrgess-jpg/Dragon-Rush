@@ -11,7 +11,7 @@ import { MARKINGS, type MarkingId } from '../content/world';
 import * as eco from '../economy';
 import { nextOdds, percent } from '../hatchery';
 import { drawDragon } from '../render/dragonArt';
-import { DragonAnimator } from '../render/dragonAnim';
+import { DragonAnimator, FAMILY_MOTION } from '../render/dragonAnim';
 import { drawEgg } from '../render/eggs';
 import { SPECIES_ART } from '../render/speciesArt';
 import { drawDragonTop } from '../render/topdown';
@@ -88,7 +88,8 @@ export class Observatory implements Overlay {
   private zoom = 1;
   private pan = { x: 0, y: 0 };
   private t = 0;
-  private anim = new DragonAnimator(true, 0.2);
+  private anim: DragonAnimator;
+  private topPhase = 0;
   private ctx: CanvasRenderingContext2D | null = null;
   private eggCtx: CanvasRenderingContext2D | null = null;
   private drag: { x: number; y: number; px: number; py: number } | null = null;
@@ -105,7 +106,7 @@ export class Observatory implements Overlay {
     this.stage = d.owned ? stageOf(d.level) : 'adult';
     this.marking = d.owned ? d.marking : 'default';
     this.pose = ui.save.prefs.observatoryPose;
-    this.anim.setStage(this.stage);
+    this.anim = new DragonAnimator(true, 0.2, { species: id, stage: this.stage, reducedMotion: ui.save.settings.reducedMotion });
     this.el = el(`<div class="overlay obs-overlay" role="dialog" aria-modal="true" aria-label="Dragon Observatory"><div class="panel obs-panel"></div></div>`);
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.el.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -265,6 +266,7 @@ export class Observatory implements Overlay {
     const d = this.ui.save.dragons[this.id];
     this.stage = d.owned ? stageOf(d.level) : 'adult';
     this.marking = d.owned ? d.marking : 'default';
+    this.anim.setSpecies(this.id);
     this.anim.setStage(this.stage);
     this.recenter();
   }
@@ -346,6 +348,9 @@ export class Observatory implements Overlay {
       }
       const dashing = this.pose === 'dash' && this.dashClock % 1.8 < 0.45;
       this.anim.update(dt, { vy: 0, maxVy: 400, dashing, rush: false, perch: this.pose === 'idle' });
+      // top view: accumulate the wing phase at the family rate (switching pose never jumps it)
+      const m = FAMILY_MOTION[SPECIES[this.id].family];
+      this.topPhase += dt * (this.pose === 'idle' ? 0.35 : 1) * m.freq;
     }
     this.draw();
   }
@@ -381,7 +386,7 @@ export class Observatory implements Overlay {
     } else {
       const tp = this.t;
       drawDragonTop(ctx, this.id, 0, 30, -Math.PI / 2, 2, {
-        phase: still ? 0.3 : tp * (this.pose === 'idle' ? 0.8 : 2.4),
+        phase: still ? 0.3 : this.topPhase,
         time: tp,
         dash: !still && this.pose === 'dash' && this.dashClock % 1.8 < 0.45 ? 1 : 0,
         ability: !still && this.pose === 'ability' && this.abilityClock < 0.6 ? 1 - this.abilityClock / 0.6 : 0,

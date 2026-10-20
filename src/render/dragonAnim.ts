@@ -201,6 +201,7 @@ export class DragonAnimator {
   private perchW = 0;
   private happyT = 0;
   private celebrateT = 0;
+  private celebrateDur = 1;
 
   // feeding
   private feedPh: FeedPhase = 'none';
@@ -300,6 +301,9 @@ export class DragonAnimator {
 
   /** Level up or hatch: raised fluttering wings, happy eyes and bright markings. */
   celebrate(seconds = 1.4): void {
+    // retriggering mid-celebration keeps the current onset (no restart pop)
+    if (this.celebrateT <= 0) this.celebrateDur = seconds;
+    else this.celebrateDur += seconds - this.celebrateT;
     this.celebrateT = seconds;
     this.happyT = Math.max(this.happyT, seconds);
   }
@@ -515,7 +519,8 @@ export class DragonAnimator {
     const recoil = this.recoilW;
     const squash = this.squashW;
     const ab = this.abilityState();
-    const celebrate = Math.min(1, this.celebrateT / 0.3);
+    // eases in over 0.25 s from the trigger and out over the last 0.3 s (never a one-frame pop)
+    const celebrate = this.celebrateT > 0 ? smoothstep((this.celebrateDur - this.celebrateT) / 0.25) * smoothstep(this.celebrateT / 0.3) : 0;
     const dash = this.dashW;
     const windup = this.windup;
     const breath = Math.sin(this.breathPh) * (still ? 0.35 : 1);
@@ -531,7 +536,7 @@ export class DragonAnimator {
     let bank = this.bank + 0.022 * shift;
     // neck stabilization: the head cancels most of the body's bob and bank
     let headX = 1.6 * shift + this.fx;
-    let headY = -stab * flightBob * fly + 0.6 * breath * perch + this.fy;
+    let headY = -stab * flightBob * fly + (still ? 0 : 0.6 * breath * perch) + this.fy;
     let headTurn = -this.bank * stab + 0.13 * this.glance - 0.06 * this.rushW + this.fTurn;
     let mouth = this.fJaw;
     if (celebrate > 0) {
@@ -600,7 +605,8 @@ export class DragonAnimator {
       windup,
       recoil,
       rush: Math.max(this.rushW, celebrate),
-      happy: this.happyT > 0 && this.feedPh === 'none' ? 1 : 0,
+      // happy eyes close only once the celebration has eased in, and open again as it fades
+      happy: this.happyT > 0 && this.feedPh === 'none' && (this.celebrateT <= 0 || celebrate > 0.5) ? 1 : 0,
       blink,
       mouth,
       breath,
