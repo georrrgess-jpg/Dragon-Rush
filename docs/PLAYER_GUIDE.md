@@ -2,10 +2,10 @@
 
 ## The short version
 
-1. Press **Play Dragon Rush** on Home. Steer with the mouse, click to dash through glowing chests and pods, press **E** when your ability meter is full.
+1. Press the big gold **Play** button on Home (it starts the mode shown beside it — Dragon Rush the first time). Steer with the mouse or W/S, click or Space to dash through glowing chests and pods, press **E** when your ability meter is full.
 2. After the flight, feed your dragon Emberfruit in **Dragons** to level it up.
 3. Every few minutes of play earns an **Aether Key**. Open eggs in the **Hatchery** to find new dragons.
-4. Try **Sky Trials** for medals and **Dragon Arena** for a fight, both from **Play**.
+4. Pick another mode with one click above the Play button: **Aether Ascent** (endless, opens after 2 Rush flights), **Dragon Arena** (a fight) or **Sky Trials** (medals). The menu remembers the last mode you played.
 5. The **Next goal** bar at the bottom of every screen always tells you something useful to do.
 
 ## Reading the world
@@ -22,6 +22,9 @@
 60-second flights (120 s **Expeditions** unlock after 10 full flights). The course scrolls by itself; you control height and dashes.
 
 - Coins = gold, pink fruit = Emberfruit. Chests hold 8 gold, pods 6 Emberfruit.
+- Coins and fruit come in **trails** (a dotted guide shows what's left). Collect a whole trail for bonus **score** and a little Rush charge. Score and your chain multiplier never change gold or Emberfruit, and missing an item only cancels that trail's bonus.
+- Near the end a **TREASURE** sign marks a narrow edge route with a treasure chest; the broad route stays safe. A checkered line marks the finish.
+- A hit says what happened ("Rock! Slowed briefly") and ends your score chain; nothing you collected is lost.
 - Every pickup charges **Dragon Rush**; when full you get 6 seconds of golden flight that pulls in everything nearby. Its own bonus trail can't recharge it.
 - **Regions** unlock with full flights: Sunset Canyon (4) with wind rings that charge Rush, Prism Coast (8) with hanging pods, Frostglass Reach (12) with chest corridors, Stormspire (16) with telegraphed lightning.
 - Ending a flight early from the pause menu banks what you collected. Reloading the page mid-flight loses that flight's haul.
@@ -39,11 +42,24 @@
 
 A top-down survival session of about four minutes: four waves, an elite in wave 4, and the Stormcrown Wyrm boss.
 
-- Move with W A S D; attacks fire automatically at the nearest enemy; Space dashes (you are invulnerable during the dash); E fires your ability.
-- Enemies: Bramble Grubs (slow), Dart Wisps (fast, fragile), Spore Turrets (their core glows before they fire), Plated Rams (flash red and show a lane before charging) and Treasure Imps (run away; carry lots of loot).
-- After each wave the game pauses and you choose one of three upgrades for this session.
+- Move with W A S D; attacks fire automatically and stick to one target until another is clearly closer (a reticle shows it); Space dashes (you are invulnerable during the dash); E fires your ability.
+- Enemies arrive one role at a time, announced by an arrow at the screen edge: Bramble Grubs (chase you), Dart Wisps (stop, flash, then dart), Spore Turrets (aim, then shoot), Plated Rams (show a lane, then charge), Thorn Sowers (mark a red circle where you stand, which becomes a thorn patch) and Treasure Imps (peek, then flee dropping coins). Every attack has a red wind-up with a "!" and a short dazed recovery afterwards.
+- After each wave the game pauses (all timers stop) and you choose one of three upgrades — one Attack, one Defense, one Utility — each showing its exact before → after numbers. Keys 1–3 pick.
+- The Stormcrown Wyrm has three phases; each change is announced and followed by a roar with no attack.
 - You have health here. After a hit you are briefly invulnerable. If you fall, everything you collected and the XP you earned are still banked.
 - Defeating the boss banks everything immediately (including a victory bonus). You can then continue into **endless** for a survival record; anything you collect there is banked when you stop or fall.
+
+## Aether Ascent
+
+An endless flight that opens after 2 full Rush flights. Same controls as Rush.
+
+- You have **3 wards** (shields at the top left). A collision costs one ward and gives you a moment of protection, so one bump never costs two. With no wards left the run ends.
+- Hazards are introduced one family at a time, each with a banner the first time: **floating ruins** (fly through the gaps), **wind gates** (visible currents push you), **crystal shutters** (wait for the opening; they flash red before closing), **storm lanes** (amber glow, then a strike), **sky guardians** (sentinels on a dashed track, hawks announced by a red arrow) and **breaking bridges / debris** (cracked stone glows before it falls). A calm stretch follows the hardest sections.
+- Every route can be flown without dashing; dashing is always optional.
+- At **shrines** the flight pauses for a choice of three upgrades (keys 1–3) and banks what you have earned so far.
+- Score comes from distance plus small bonuses for optional challenge routes and caches; it never changes gold or Emberfruit.
+- **Assist** (Play → Aether Ascent) adds a ward and a gentler speed-up; assisted runs keep their own record.
+- Ending from the pause menu banks everything; if the page reloads mid-run, only what shrines already banked is kept.
 
 ## Growing your dragons
 
@@ -83,4 +99,4 @@ Three contracts are active at a time (from any mode). Each pays once; one free r
 
 ## Accessibility
 
-Settings: separate volumes, mute, **reduced motion** (no screen shake, calmer menus, short fade instead of the egg reel), **low effects** (fewer particles), **auto-activate ability**, and collision outlines. All menus work with the keyboard. Rarity is always shown with a symbol and a word, not color alone.
+Settings: separate volumes, mute, **reduced motion** (still menus and portraits, no screen shake, a short calm reveal instead of the egg reel and hatching), **low effects** (fewer particles, simpler dragon detail, no glows), **screen shake** on/off, **auto-activate ability** (shown as an assist in the HUD), collision outlines, a control reference and **Show the short tutorials again**. All menus work with the keyboard; resource chips explain themselves on hover and on keyboard focus. Rarity is always shown with its own symbol shape (one gem, two gems, three gems, a crowned star) and its name, never colour alone; hazard warnings stay visible with reduced motion.
