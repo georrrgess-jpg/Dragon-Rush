@@ -270,8 +270,6 @@ export class ArenaScreen {
     if (s.showHitboxes !== undefined) this.setup.showHitboxes = this.renderer.showHitboxes = s.showHitboxes;
     if (s.screenShake !== undefined) this.setup.screenShake = this.renderer.screenShake = s.screenShake;
     if (s.autoAbility !== undefined) this.setup.autoAbility = s.autoAbility;
-    // back on the pause menu: keyboard focus returns to Resume
-    this.overlay?.querySelector<HTMLButtonElement>('[data-a=resume]')?.focus({ preventScroll: true });
   }
 
   private resume() {

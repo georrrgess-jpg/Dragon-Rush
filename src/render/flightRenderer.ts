@@ -549,7 +549,7 @@ export class FlightRenderer {
     if (this.pale) {
       // pale palettes (Leviara, Glacielle...) get a soft navy backing so they read on bright skies
       const h = paleHalo();
-      ctx.drawImage(h, sim.dragonScreenX - 118, sim.y - 74, 236, 148);
+      ctx.drawImage(h, sim.dragonScreenX - 185, sim.y - 72, 310, 144); // long: body and most of the tail
     }
     drawDragon(ctx, sim.dragonId, sim.dragonScreenX, sim.y, 0.78, pose, { stage: this.look.stage, marking: this.look.marking, detail: this.lowEffects ? 0 : 1 });
     ctx.globalAlpha = 1;
@@ -1144,12 +1144,12 @@ function currentBody(water: string): HTMLCanvasElement {
   let c = currentBodies.get(water);
   if (!c) {
     c = makeSprite(256, 96, 1, (g) => {
-      const deep = mixHex(water, '#0b2e52', 0.35);
+      const deep = mixHex(water, '#0a3f7a', 0.5);
       const across = g.createLinearGradient(0, 0, 0, 96);
       across.addColorStop(0, hexA(water, 0));
-      across.addColorStop(0.18, hexA(water, 0.55));
-      across.addColorStop(0.5, hexA(deep, 0.85));
-      across.addColorStop(0.82, hexA(water, 0.55));
+      across.addColorStop(0.14, hexA(water, 0.6));
+      across.addColorStop(0.5, hexA(deep, 0.95));
+      across.addColorStop(0.86, hexA(water, 0.6));
       across.addColorStop(1, hexA(water, 0));
       g.fillStyle = across;
       g.fillRect(0, 0, 256, 96);
@@ -1199,17 +1199,18 @@ export function drawCurrent(ctx: Ctx, o: CurrentOpts): void {
   if (o.alpha <= 0.01 || o.length <= 4) return;
   const L = o.length;
   const W = o.width;
-  const light = mixHex(o.water, '#ffffff', 0.62);
+  const light = mixHex(o.water, '#ffffff', 0.75);
+  const deep = mixHex(o.water, '#0b2e52', 0.5);
   ctx.save();
   ctx.translate(o.x, o.y);
   ctx.rotate(o.angle);
-  ctx.globalAlpha = 0.42 * o.alpha;
+  ctx.globalAlpha = 0.6 * o.alpha;
   ctx.drawImage(currentBody(o.water), 0, -W / 2, L, W);
-  // current streaks: lanes across the band, dashes flowing along it
+  // current streaks: lanes across the band, dashes flowing along it; each has a faint deep
+  // underline so it reads on pale skies (Prism Coast) as well as on dark ones
   const lanes = o.simple ? 3 : 6;
   const period = 210;
   ctx.lineCap = 'round';
-  ctx.strokeStyle = light;
   for (let i = 0; i < lanes; i++) {
     const f = -0.34 + (0.68 * i) / (lanes - 1);
     const v = f * W;
@@ -1218,32 +1219,35 @@ export function drawCurrent(ctx: Ctx, o: CurrentOpts): void {
     const dash = 70 + 60 * h;
     const speed = o.flow * (0.8 + 0.45 * h);
     const off = o.calm ? h * period : (o.time * speed + h * period) % period;
-    ctx.lineWidth = o.simple ? 2.5 : 2 + 1.5 * edge;
+    ctx.lineWidth = o.simple ? 3 : 2.5 + 1.5 * edge;
     for (let u = off - period; u < L; u += period) {
       const u0 = Math.max(0, u);
       const u1 = Math.min(L, u + dash);
       if (u1 - u0 < 8) continue;
       const mid = (u0 + u1) / 2;
       const ends = Math.min(1, mid / (0.16 * L + 1), (L - mid) / (0.16 * L + 1));
-      ctx.globalAlpha = o.alpha * (0.2 + 0.4 * edge) * Math.max(0, ends);
-      ctx.beginPath();
-      if (o.simple) {
-        ctx.moveTo(u0, v);
-        ctx.lineTo(u1, v);
-      } else {
-        const wob = o.calm ? 0 : Math.sin(o.time * 2.2 + i * 1.7) * 3;
-        ctx.moveTo(u0, v + wob);
-        ctx.quadraticCurveTo(mid, v - 6 * (i % 2 ? 1 : -1) - wob, u1, v + wob);
+      const a = o.alpha * (0.35 + 0.5 * edge) * Math.max(0, ends);
+      const wob = o.calm || o.simple ? 0 : Math.sin(o.time * 2.2 + i * 1.7) * 3;
+      const bend = o.simple ? 0 : 6 * (i % 2 ? 1 : -1);
+      for (const [dy, col, k] of [
+        [2.5, deep, 0.35],
+        [0, light, 1],
+      ] as const) {
+        ctx.globalAlpha = a * k;
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(u0, v + wob + dy);
+        ctx.quadraticCurveTo(mid, v - bend - wob + dy, u1, v + wob + dy);
+        ctx.stroke();
       }
-      ctx.stroke();
     }
   }
   if (!o.simple) {
     // foam along both edges: thin wavy lines that drift with the flow
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = light;
+    ctx.lineWidth = 2.5;
     for (const side of [-1, 1]) {
-      ctx.globalAlpha = 0.3 * o.alpha;
+      ctx.globalAlpha = 0.55 * o.alpha;
       ctx.beginPath();
       const ph = o.calm ? 0 : -o.time * o.flow * 0.03;
       for (let u = 0.08 * L; u <= 0.92 * L; u += 18) {
@@ -1296,9 +1300,9 @@ let haloSprite: HTMLCanvasElement | null = null;
 export function paleHalo(): HTMLCanvasElement {
   haloSprite ??= makeSprite(128, 128, 1, (g) => {
     const r = g.createRadialGradient(64, 64, 6, 64, 64, 64);
-    r.addColorStop(0, 'rgba(16,34,64,0.5)');
-    r.addColorStop(0.55, 'rgba(16,34,64,0.3)');
-    r.addColorStop(1, 'rgba(16,34,64,0)');
+    r.addColorStop(0, 'rgba(22,48,92,0.42)');
+    r.addColorStop(0.5, 'rgba(22,48,92,0.26)');
+    r.addColorStop(1, 'rgba(22,48,92,0)');
     g.fillStyle = r;
     g.fillRect(0, 0, 128, 128);
   });

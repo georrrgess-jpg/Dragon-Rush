@@ -120,7 +120,7 @@ Four independent critic agents reviewed the playable build (commit c71dacd) in a
 | # | Sev | Finding | Fix | Retest |
 |---|---|---|---|---|
 | 1 | M | Ability HUD stuck at "99%", never READY | Re-render key distinguishes ≥100% | Code path fixed in both screens (logic reviewed) |
-| 2 | M | Wave-4 elite survives into the boss wave in ~80% of runs | Elite retreats at the wave break, paying 15 gold + 5 Emberfruit | Unit test "elite … retreats" |
+| 2 | M | Wave-4 elite survives into the boss wave in ~80% of runs | Elite retreats at the wave break, paying 15 gold + 8 Emberfruit | Unit test "elite … retreats" |
 | 3 | M | Ember's Arena trail stacked ~12 patches (845 dmg in 4 s) | Trail burns once per enemy per step | Unit test: < 160 damage over the trail |
 | 4 | M | Idle play counted as qualified (AFK XP and keys) | Only player input (steering, movement, dash, ability) keeps time qualified | Unit tests: idle Rush and idle Arena stop at 20 s |
 | 5 | M | Level 30 in ~40 min with feeding | Quadratic XP term ×3 from level 15 | Unit test of the curve; level 30 now ≈30 000 XP (≈80 min feeding everything, ≈150 min without) |
