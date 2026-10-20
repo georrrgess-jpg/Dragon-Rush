@@ -404,3 +404,200 @@ describe('arena top-down motion', () => {
     expect(a.phase).toBeLessThan(b.phase * 0.6);
   });
 });
+
+import { GESTURE_DUR, PERSONALITY, type GestureId } from '../src/render/dragonAnim';
+import { SPECIES, SPECIES_IDS } from '../src/content/species';
+
+describe('personality: react, arrive, gestures, level-up, recovery (Update 5)', () => {
+  const perch = fly({ perch: true });
+  // per-frame limits at 144 fps: smooth motion stays well under these; a pop exceeds them
+  const LIMIT: Partial<Record<keyof DragonPose, number>> = { headX: 0.6, headY: 0.6, headTurn: 0.032, bob: 0.6, wing: 0.12, fold: 0.06, mouth: 0.08, crest: 0.05, brow: 0.06, flourish: 0.05, tailFlick: 0.14, squint: 0.08, bank: 0.01 };
+  const num = (p: DragonPose, k: keyof DragonPose) => (p[k] as number | undefined) ?? 0;
+
+  function worstJumps(a: DragonAnimator, seconds: number, each?: (t: number) => void, inp = perch) {
+    const dt = 1 / 144;
+    let prev = a.pose();
+    const worst: Record<string, number> = {};
+    for (let t = 0; t < seconds; t += dt) {
+      each?.(t);
+      a.update(dt, inp);
+      const p = a.pose();
+      for (const k of Object.keys(LIMIT) as (keyof DragonPose)[]) worst[k] = Math.max(worst[k] ?? 0, Math.abs(num(p, k) - num(prev, k)));
+      prev = p;
+    }
+    return worst;
+  }
+
+  function expectSmooth(w: Record<string, number>, label: string) {
+    for (const [k, lim] of Object.entries(LIMIT)) expect(w[k] ?? 0, `${label}: ${k}`).toBeLessThan(lim!);
+  }
+
+  it('every species has a personality with a react and an idle gesture; Epic/Legendary have a signature', () => {
+    for (const id of SPECIES_IDS) {
+      const p = PERSONALITY[id];
+      expect(GESTURE_DUR[p.react], id).toBeGreaterThan(0);
+      expect(GESTURE_DUR[p.idle], id).toBeGreaterThan(0);
+      if (SPECIES[id].rarity !== 'common') expect(p.extra, id).toBeTruthy();
+      if (SPECIES[id].rarity === 'epic' || SPECIES[id].rarity === 'legendary') expect(p.signature, id).toBeTruthy();
+    }
+    // signatures are unique motion signatures
+    const sig = SPECIES_IDS.map((id) => PERSONALITY[id].signature).filter(Boolean);
+    expect(new Set(sig).size).toBe(sig.length);
+  });
+
+  it('react() plays a visible reaction for every species and returns smoothly to rest (no pops)', () => {
+    for (const id of SPECIES_IDS) {
+      const a = new DragonAnimator(true, 0.3, { species: id, seed: 11 });
+      for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+      const rest = a.pose();
+      let moved = 0;
+      const w = worstJumps(a, 3, (t) => {
+        if (t === 0) a.react();
+        const p = a.pose();
+        moved = Math.max(moved, Math.abs(p.headTurn - rest.headTurn) + Math.abs(p.headY - rest.headY) + Math.abs(p.bob - rest.bob) + Math.abs(p.wing - rest.wing) + Math.abs(p.tailFlick) + Math.abs(p.mouth));
+      });
+      expect(moved, id).toBeGreaterThan(0.15);
+      expectSmooth(w, `${id} react`);
+      expect(a.currentAction, id).toBe(null);
+      expect(a.transients().action, id).toBe(0);
+    }
+  });
+
+  it('arrive() and levelUp() return to rest for every rarity; Legendary arrival is the biggest', () => {
+    const size: Record<string, number> = {};
+    for (const id of ['ember', 'cinder', 'pyrelisk', 'solpyre'] as const) {
+      const a = new DragonAnimator(true, 0.3, { species: id, seed: 2 });
+      for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+      let peak = 0;
+      const w = worstJumps(a, 3.2, (t) => {
+        if (t === 0) a.arrive();
+        peak = Math.max(peak, a.pose().wing);
+      });
+      size[SPECIES[id].rarity] = peak;
+      expectSmooth(w, `${id} arrive`);
+      expect(a.transients().action).toBe(0);
+      const w2 = worstJumps(a, 2.5, (t) => t === 0 && a.levelUp());
+      expectSmooth(w2, `${id} levelUp`);
+      expect(a.transients().action).toBe(0);
+    }
+    expect(size.legendary).toBeGreaterThan(size.common);
+    expect(size.epic).toBeGreaterThan(size.rare);
+  });
+
+  it('every gesture (idle, extra, signature) starts and ends at rest without single-frame jumps', () => {
+    for (const g of Object.keys(GESTURE_DUR) as GestureId[]) {
+      if (g === 'arrive' || g === 'levelUp') continue;
+      const a = new DragonAnimator(true, 0.3, { species: 'solpyre', seed: 4 });
+      for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+      const w = worstJumps(a, GESTURE_DUR[g] + 0.3, (t) => t === 0 && a.playGesture(g));
+      expectSmooth(w, g);
+    }
+  });
+
+  it('replacing an action mid-way hands over smoothly (arrive during react, react spam is ignored)', () => {
+    const a = new DragonAnimator(true, 0.3, { species: 'gale', seed: 5 });
+    for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+    const w = worstJumps(a, 4, (t) => {
+      if (Math.abs(t - 0) < 1e-9) a.react();
+      if (Math.abs(t - 0.2) < 0.004) a.react(); // ignored (first half)
+      if (Math.abs(t - 0.6) < 0.004) a.arrive(); // replaces the react via a fading carry
+      if (Math.abs(t - 1.2) < 0.004) a.react(); // ignored during the arrival
+    });
+    expectSmooth(w, 'hand-over');
+    expect(a.transients().action).toBe(0);
+  });
+
+  it('priority: a hit during a reaction wins, then a recovery plays and everything settles', () => {
+    const a = new DragonAnimator(true, 0.3, { species: 'ember', seed: 6 });
+    for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+    a.react();
+    for (let i = 0; i < 40; i++) a.update(1 / 144, perch);
+    a.recoil();
+    for (let i = 0; i < 10; i++) a.update(1 / 144, perch);
+    expect(a.pose().headX).toBeLessThan(-2.5); // the hit offset dominates
+    let sawRecovery = false;
+    for (let t = 0; t < 2; t += 1 / 144) {
+      a.update(1 / 144, perch);
+      if (a.transients().recoil === 0 && a.transients().action === 1) sawRecovery = true;
+    }
+    expect(sawRecovery).toBe(true);
+    expect(a.transients().action).toBe(0);
+    a.react(); // allowed again once recovered
+    expect(a.currentAction).toBe(PERSONALITY.ember.react);
+  });
+
+  it('level-up is distinct from feeding and waits for the swallow', () => {
+    const a = new DragonAnimator(true, 0.3, { species: 'grove', seed: 7 });
+    for (let i = 0; i < 30; i++) a.update(1 / 60, perch);
+    a.feed(0.3);
+    a.levelUp();
+    expect(a.currentAction).toBe(null); // queued while eating
+    let lvl = false;
+    let wing = -Infinity;
+    let swallowDuringLevelUp = false;
+    for (let t = 0; t < 4; t += 1 / 60) {
+      a.update(1 / 60, perch);
+      if (a.currentAction === 'levelUp') {
+        lvl = true;
+        wing = Math.max(wing, a.pose().wing);
+        if (a.pose().swallow > 0) swallowDuringLevelUp = true;
+      }
+    }
+    expect(lvl).toBe(true);
+    expect(swallowDuringLevelUp).toBe(false);
+    expect(wing).toBeGreaterThan(0.6); // wings lift (feeding keeps them folded below 0.5)
+  });
+
+  it('idle gestures: Common plays only its species gesture; Rare adds an extra; Epic a signature', () => {
+    const seen = (id: (typeof SPECIES_IDS)[number]) => {
+      const out = new Set<string>();
+      const a = new DragonAnimator(true, 0.3, { species: id, seed: 21 });
+      for (let t = 0; t < 240; t += 1 / 30) {
+        a.update(1 / 30, perch);
+        if (a.currentGesture) out.add(a.currentGesture);
+      }
+      return out;
+    };
+    expect([...seen('ember')]).toEqual([PERSONALITY.ember.idle]);
+    expect(seen('cinder').has(PERSONALITY.cinder.extra!)).toBe(true);
+    expect(seen('cinder').has('stomp')).toBe(false);
+    expect(seen('frostfang').has(PERSONALITY.frostfang.signature!)).toBe(true);
+  });
+
+  it('reduced motion: no idle gestures; react and arrive change only the expression', () => {
+    const a = new DragonAnimator(true, 0.3, { species: 'tide', seed: 8, reducedMotion: true });
+    let maxTurn = 0, maxBob = 0, wingLo = Infinity, wingHi = -Infinity, browMax = 0;
+    for (let t = 0; t < 20; t += 1 / 60) {
+      if (Math.abs(t - 2) < 0.009) a.react();
+      if (Math.abs(t - 8) < 0.009) a.arrive();
+      a.update(1 / 60, perch);
+      const p = a.pose();
+      maxTurn = Math.max(maxTurn, Math.abs(p.headTurn));
+      maxBob = Math.max(maxBob, Math.abs(p.headY), Math.abs(p.headX), Math.abs(p.tailFlick)); // (bob carries the slow still-pose breathing)
+      wingLo = Math.min(wingLo, p.wing);
+      wingHi = Math.max(wingHi, p.wing);
+      browMax = Math.max(browMax, Math.abs(p.brow ?? 0));
+      expect(a.currentGesture).toBe(null);
+    }
+    expect(maxTurn).toBeLessThan(1e-6);
+    expect(maxBob).toBeLessThan(1e-6);
+    expect(wingHi - wingLo).toBeLessThan(1e-6);
+    expect(browMax).toBeGreaterThan(0.3); // the face still answers the click
+  });
+
+  it('idle timing is desynchronized per instance (same species, same phase, no seed)', () => {
+    const blinks = () => {
+      const a = new DragonAnimator(true, 0.2, { species: 'ember' });
+      const out: number[] = [];
+      let was = false;
+      for (let t = 0; t < 20; t += 1 / 60) {
+        a.update(1 / 60, perch);
+        const c = a.pose().blink > 0.5;
+        if (c && !was) out.push(Math.round(t * 10));
+        was = c;
+      }
+      return out.join(',');
+    };
+    expect(blinks()).not.toBe(blinks());
+  });
+});

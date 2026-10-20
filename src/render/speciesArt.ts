@@ -12,6 +12,80 @@ export type WingPattern = 'veins' | 'gradient' | 'sunfan' | 'rays' | 'feather' |
 export type Accent = 'coalVents' | 'lumOrgans' | 'moss' | 'thorns' | 'chargeChannels' | 'frostEdges' | 'sheen' | 'starScales' | 'snowPatches' | 'lavaSeams' | 'pearlSheen' | 'woodgrain';
 export type FaceFeature = 'nostrilRidge' | 'browCrest' | 'mossBrow' | 'cheekFins' | 'jawPlates' | 'chinBarbel' | 'snoutHorn' | 'cheekFluff' | 'brightBrow';
 
+/**
+ * Rarity language (Update 5). Rarity is expressed through anatomy, pattern and material first;
+ * colour only supports it. Every accent is drawn on the body (no screen-space glow), so Reduced /
+ * Low effects keep it. Tiers are cumulative in spirit, not in list: each species picks the accents
+ * that suit its anatomy.
+ * - Common `charm`: one small natural detail (freckles, a tuft, a sprout) — charm, never status.
+ * - Rare: distinctive anatomy accents and refined patterned materials (horn bands, marked wing
+ *   tips, head crest spines, patterned scale groups, tail bands, cheek spurs).
+ * - Epic: more elaborate anatomy and layered materials readable at gameplay size (bold wing bands
+ *   or eyespots, a layered frill, a second armour layer, controlled emissive seams).
+ * - Legendary: a signature motif per species (solar wing fans, regal fins, crystal crown,
+ *   constellation) plus a premium trim (`gilded`: ivory/gold, pearl, crystal or starlight).
+ */
+export type RarityAccent =
+  | 'freckles'
+  | 'headTuft'
+  | 'sprout'
+  | 'hornBands'
+  | 'wingTipMarks'
+  | 'crestSpines'
+  | 'patternScales'
+  | 'tailBands'
+  | 'cheekSpurs'
+  | 'wingBands'
+  | 'wingEyespots'
+  | 'layeredFrill'
+  | 'armorLayer'
+  | 'emissiveSeams'
+  | 'solarFans'
+  | 'regalFins'
+  | 'crystalCrown'
+  | 'constellation'
+  | 'gilded';
+
+/** Per-species rarity anatomy (authority for rarity itself stays content/species.ts). */
+export const RARITY_ACCENTS: Record<SpeciesId, RarityAccent[]> = {
+  // Common: natural charm
+  ember: ['freckles'],
+  tide: ['freckles'],
+  grove: ['sprout'],
+  gale: ['headTuft'],
+  rime: ['freckles'],
+  spark: ['headTuft'],
+  // Rare: anatomy accents + refined material
+  cinder: ['hornBands', 'wingTipMarks', 'patternScales'],
+  ripple: ['wingTipMarks', 'tailBands', 'patternScales'],
+  bramble: ['crestSpines', 'patternScales', 'cheekSpurs'],
+  rootwarden: ['hornBands', 'patternScales', 'cheekSpurs'],
+  zephyr: ['wingTipMarks', 'crestSpines', 'tailBands'],
+  tempest: ['wingTipMarks', 'tailBands', 'crestSpines'],
+  snowcap: ['hornBands', 'patternScales', 'cheekSpurs'],
+  voltwing: ['crestSpines', 'wingTipMarks', 'patternScales'],
+  // Epic: layered anatomy, readable wing/scale/frill patterns, controlled emissive details
+  pyrelisk: ['armorLayer', 'emissiveSeams', 'wingBands', 'hornBands'],
+  abyssfin: ['layeredFrill', 'wingEyespots', 'emissiveSeams', 'tailBands'],
+  orchid: ['layeredFrill', 'wingEyespots', 'patternScales'],
+  cloudtail: ['layeredFrill', 'wingBands', 'tailBands'],
+  frostfang: ['armorLayer', 'wingBands', 'emissiveSeams', 'crestSpines'],
+  thundercrest: ['armorLayer', 'emissiveSeams', 'wingBands', 'hornBands'],
+  // Legendary: signature motif + premium trim
+  solpyre: ['solarFans', 'gilded', 'patternScales'],
+  leviara: ['regalFins', 'gilded', 'patternScales'],
+  glacielle: ['crystalCrown', 'gilded', 'wingBands'],
+  astralux: ['constellation', 'gilded'],
+};
+
+/** Premium trim per legendary (horn tips, claws, wrist): ivory/gold, pearl, crystal, starlight. */
+export const TRIM: Partial<Record<SpeciesId, { light: string; mid: string; dark: string }>> = {
+  solpyre: { light: '#fff6d8', mid: '#f2c14e', dark: '#a8700f' },
+  leviara: { light: '#ffffff', mid: '#f3e6ef', dark: '#a98fb0' },
+  glacielle: { light: '#ffffff', mid: '#cfeeff', dark: '#6f9cc8' },
+  astralux: { light: '#ffffff', mid: '#dfe4ff', dark: '#7f86c8' },
+};
+
 export interface SpeciesArt {
   /** Head path scale (length, height): keeps the family head but gives each species its own profile. */
   head: [number, number];
@@ -25,9 +99,11 @@ export interface SpeciesArt {
   accents: Accent[];
   /** One-line playstyle summary for comparison/observatory. */
   style: string;
+  /** Rarity anatomy (RARITY_ACCENTS): charm (Common) … signature motif (Legendary). */
+  rarityAccents: RarityAccent[];
 }
 
-export const SPECIES_ART: Record<SpeciesId, SpeciesArt> = {
+const BASE_ART: Record<SpeciesId, Omit<SpeciesArt, 'rarityAccents'>> = {
   ember: { head: [1, 1], eye: 'gentle', pupil: 'round', face: ['nostrilRidge'], material: 'overlap', belly: 'plates', feet: 'claw', wing: 'veins', accents: [], style: 'Dash-focused treasure hunter: long dash reach and a fiery free dash.' },
   cinder: { head: [0.9, 0.95], eye: 'narrow', pupil: 'slit', face: ['nostrilRidge', 'jawPlates'], material: 'soot', belly: 'scutes', feet: 'talon', wing: 'soot', accents: ['coalVents'], style: 'Combo chaser: rewards back-to-back dash breaks and kill streaks.' },
   pyrelisk: { head: [1.05, 1.08], eye: 'hooded', pupil: 'slit', face: ['jawPlates', 'snoutHorn'], material: 'basalt', belly: 'scutes', feet: 'broad', wing: 'veins', accents: ['lavaSeams'], style: 'Unshakable tank: forgiving collisions and a protective barrier.' },
@@ -53,6 +129,10 @@ export const SPECIES_ART: Record<SpeciesId, SpeciesArt> = {
   thundercrest: { head: [1.02, 1.12], eye: 'hooded', pupil: 'slit', face: ['jawPlates'], material: 'basalt', belly: 'scutes', feet: 'broad', wing: 'storm', accents: ['chargeChannels'], style: 'Heavy hitter: slow to charge, huge stunning thunderclap.' },
   astralux: { head: [1.05, 0.95], eye: 'almond', pupil: 'star', face: ['brightBrow'], material: 'smooth', belly: 'segments', feet: 'claw', wing: 'starmap', accents: ['starScales'], style: 'Builds stars to link many targets at once.' },
 };
+
+export const SPECIES_ART: Record<SpeciesId, SpeciesArt> = Object.fromEntries(
+  (Object.keys(BASE_ART) as SpeciesId[]).map((id) => [id, { ...BASE_ART[id], rarityAccents: RARITY_ACCENTS[id] }]),
+) as Record<SpeciesId, SpeciesArt>;
 
 type Ctx = CanvasRenderingContext2D;
 export type Pt = [number, number];

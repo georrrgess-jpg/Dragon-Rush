@@ -3,13 +3,20 @@
 // detail tier, reduced-motion and low-effects previews, collision and attachment-point overlays,
 // light/dark backgrounds, and a frozen deterministic time for repeatable captures.
 // Optional URL params: &species=ember,tide  &pose=dash  &t=1.2 (freezes at that time)  &bg=dark
-import { STAGES } from '../content/progression';
-import { ELEMENTS, FAMILIES, RARITIES, SPECIES_LIST } from '../content/species';
-import type { SpeciesId } from '../content/types';
+// Rarity view (Update 5): ?gallery&view=rarity — every species grouped by rarity with its card
+// frame, aura and live animator (click a dragon to react(); buttons for arrive / level up / hit),
+// a same-element tier comparison strip, DOM badges and card frames, Reduced motion / Low effects
+// toggles. Params: &stage=adult &element=fire &reduced=1 &low=1 &bg=dark &t=0.6 (frozen).
+import { STAGES, type Stage } from '../content/progression';
+import { ELEMENTS, FAMILIES, RARITIES, SPECIES, SPECIES_LIST } from '../content/species';
+import type { Element, Rarity, SpeciesId } from '../content/types';
 import type { MarkingId } from '../content/world';
 import { FLIGHT } from '../config';
-import { DRAGON_HIT_OFFSET, drawDragon, mouthPoint, stageScale, type DragonPose } from '../render/dragonArt';
-import { wingCycle } from '../render/dragonAnim';
+import { DRAGON_HIT_OFFSET, drawDragon, mouthPoint, portrait, stageScale, type DragonPose } from '../render/dragonArt';
+import { DragonAnimator, PERSONALITY, wingCycle } from '../render/dragonAnim';
+import { LEGENDARY_MOTIF, drawRarityAura, drawRarityFrame } from '../render/rarityArt';
+import { SPECIES_ART } from '../render/speciesArt';
+import { RARITY_ORDER, rarityBadge, rarityCardClass } from './rarity';
 import { drawEgg } from '../render/eggs';
 import { drawDragonTop } from '../render/topdown';
 
@@ -54,6 +61,10 @@ function sidePose(pose: Pose, t: number, reduced: boolean): Partial<DragonPose> 
 export function runGallery(): void {
   document.body.classList.add('gallery-page');
   const params = new URLSearchParams(location.search);
+  if (params.get('view') === 'rarity') {
+    runRarityGallery(params);
+    return;
+  }
   const only = (params.get('species') ?? '').split(',').filter(Boolean);
   const root = document.createElement('div');
   root.className = 'gallery';
@@ -69,6 +80,7 @@ export function runGallery(): void {
       <label><input type="checkbox" data-k="low"> Low effects</label>
       <label><input type="checkbox" data-k="hitbox"> Collision</label>
       <label><input type="checkbox" data-k="anchors"> Attachment points</label>
+      <a href="?gallery&view=rarity">Rarity view</a>
       <span class="hint">Top line: hatchling · juvenile · adult · elder (side) · egg detail tier. Bottom line: the same stages from above (Arena) · egg reel and icon tiers.</span>
     </header>`;
   document.body.innerHTML = '';
@@ -204,4 +216,172 @@ function dot(ctx: CanvasRenderingContext2D, x: number, y: number, color: string,
   ctx.fill();
   ctx.font = '600 9px system-ui';
   ctx.fillText(text, x + 4, y - 4);
+}
+
+// --- rarity view ------------------------------------------------------------------------------------
+
+const RC_W = 250;
+const RC_H = 200;
+
+interface RarityCell {
+  id: SpeciesId;
+  anim: DragonAnimator;
+  x: number;
+  y: number;
+}
+
+const TIER_NOTE: Record<Rarity, string> = {
+  common: 'Natural scales, readable anatomy, expressive eyes; one species idle gesture and one small charm. No aura.',
+  rare: 'Anatomy accents (horn bands, crest spines, marked wing tips, tail bands, cheek spurs), patterned scale groups, an extra idle gesture with a subtle elemental accent. Faint ground ring.',
+  epic: 'Layered anatomy (frills, armour), bold wing bands or eyespots, controlled emissive seams, a motion signature with an elemental flourish, an arrival pose. Subtle aura.',
+  legendary: 'A signature motif per species and premium trim, an expressive signature, a long arrival and a distinctive aura in menus and inspection only.',
+};
+
+function runRarityGallery(params: URLSearchParams): void {
+  const tParam = params.get('t');
+  const o = {
+    stage: ((params.get('stage') as Stage) || 'adult') as Stage,
+    element: ((params.get('element') as Element) || 'fire') as Element,
+    reduced: params.get('reduced') === '1',
+    low: params.get('low') === '1',
+    dark: params.get('bg') === 'dark',
+    freeze: tParam !== null,
+    time: Number(tParam) || 0,
+  };
+  const root = document.createElement('div');
+  root.className = 'gallery';
+  document.body.innerHTML = '';
+  document.body.appendChild(root);
+  const holder = document.createElement('div');
+  const apply = () => {
+    document.body.classList.toggle('reduced-motion', o.reduced);
+    document.body.classList.toggle('low-effects', o.low);
+    document.body.style.background = o.dark ? '#152030' : '';
+    holder.style.color = o.dark ? '#dbe7ef' : '';
+  };
+  root.innerHTML = `
+    <header><h1>Rarity language</h1>
+      <a href="?gallery">Species gallery</a>
+      <label>Stage <select data-r="stage">${STAGES.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></label>
+      <label>Compare element <select data-r="element">${(Object.keys(ELEMENTS) as Element[]).map((e) => `<option value="${e}">${ELEMENTS[e].name}</option>`).join('')}</select></label>
+      <label><input type="checkbox" data-r="reduced"> Reduced motion</label>
+      <label><input type="checkbox" data-r="low"> Low effects</label>
+      <label><input type="checkbox" data-r="dark"> Dark</label>
+      <button data-act="arrive">Arrive all</button> <button data-act="levelUp">Level up all</button> <button data-act="hit">Hit all</button> <button data-act="react">React all</button>
+      <span class="hint">Click a dragon to react(). Auras and frames are menu/inspection presentation only (never in gameplay).</span>
+    </header>
+    <section class="g-dom" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:8px 0 14px">
+      ${RARITY_ORDER.map((r) => rarityBadge(r)).join(' ')} ${RARITY_ORDER.map((r) => rarityBadge(r, { compact: true })).join(' ')}
+      <span style="display:flex;gap:10px">${(['ember', 'cinder', 'pyrelisk', 'solpyre'] as SpeciesId[])
+        .map((id) => `<button class="dcard2 ${rarityCardClass(SPECIES[id].rarity)}" style="width:118px"><img src="${portrait(id, o.stage, 'default', 120, 90).toDataURL()}" alt="" width="104" height="78"><span class="dc-name">${SPECIES[id].name}</span><span class="dc-meta">${rarityBadge(SPECIES[id].rarity, { compact: true })}</span></button>`)
+        .join('')}</span>
+    </section>`;
+  root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-r]').forEach((el) => {
+    const k = el.dataset.r as keyof typeof o;
+    if (el instanceof HTMLInputElement) el.checked = !!o[k];
+    else el.value = String(o[k]);
+    el.addEventListener('input', () => {
+      (o as Record<string, unknown>)[k] = el instanceof HTMLInputElement ? el.checked : el.value;
+      if (k === 'stage' || k === 'element') build();
+      apply();
+    });
+  });
+  apply();
+  let groups: { ctx: CanvasRenderingContext2D; cells: RarityCell[]; canvas: HTMLCanvasElement }[] = [];
+  root.appendChild(holder);
+  const build = () => {
+    holder.innerHTML = '';
+    groups = [];
+    const sections: { title: string; note: string; ids: SpeciesId[] }[] = [
+      { title: `Tier comparison · ${ELEMENTS[o.element].name}`, note: 'One dragon per tier of the same element, same stage.', ids: RARITY_ORDER.map((r) => SPECIES_LIST.find((sp) => sp.element === o.element && sp.rarity === r)?.id).filter(Boolean) as SpeciesId[] },
+      ...RARITY_ORDER.map((r) => ({ title: `${rarityBadge(r)}`, note: TIER_NOTE[r], ids: SPECIES_LIST.filter((sp) => sp.rarity === r).map((sp) => sp.id as SpeciesId) })),
+    ];
+    for (const sec of sections) {
+      const el = document.createElement('section');
+      el.className = 'g-row';
+      el.innerHTML = `<div class="g-label" style="max-width:none"><b>${sec.title}</b><span>${sec.note}</span></div>`;
+      const cols = Math.min(4, sec.ids.length);
+      const rows = Math.ceil(sec.ids.length / cols);
+      const c = document.createElement('canvas');
+      c.width = RC_W * cols * 2;
+      c.height = RC_H * rows * 2;
+      c.style.width = `${RC_W * cols}px`;
+      c.style.height = `${RC_H * rows}px`;
+      c.style.cursor = 'pointer';
+      el.appendChild(c);
+      holder.appendChild(el);
+      const cells: RarityCell[] = sec.ids.map((id, i) => ({
+        id,
+        anim: new DragonAnimator(true, 0.2, { species: id, stage: o.stage, reducedMotion: o.reduced }),
+        x: (i % cols) * RC_W,
+        y: Math.floor(i / cols) * RC_H,
+      }));
+      c.addEventListener('click', (e) => {
+        const r = c.getBoundingClientRect();
+        const px = e.clientX - r.left;
+        const py = e.clientY - r.top;
+        cells.find((cl) => px >= cl.x && px < cl.x + RC_W && py >= cl.y && py < cl.y + RC_H)?.anim.react();
+      });
+      groups.push({ ctx: c.getContext('2d')!, cells, canvas: c });
+    }
+  };
+  build();
+  root.querySelectorAll<HTMLButtonElement>('[data-act]').forEach((b) =>
+    b.addEventListener('click', () => {
+      for (const g of groups)
+        for (const cl of g.cells) {
+          const act = b.dataset.act;
+          if (act === 'arrive') cl.anim.arrive();
+          else if (act === 'levelUp') cl.anim.levelUp();
+          else if (act === 'hit') cl.anim.recoil();
+          else cl.anim.react();
+        }
+    }),
+  );
+  let last = performance.now();
+  let clock = o.time;
+  const frame = (now: number) => {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (!o.freeze) clock += dt;
+    for (const g of groups) {
+      const r = g.canvas.getBoundingClientRect();
+      if (!o.freeze && (r.bottom < -50 || r.top > innerHeight + 50)) continue;
+      const ctx = g.ctx;
+      ctx.setTransform(2, 0, 0, 2, 0, 0);
+      ctx.clearRect(0, 0, g.canvas.width, g.canvas.height);
+      for (const cl of g.cells) {
+        if (!o.freeze) {
+          cl.anim.setReducedMotion(o.reduced);
+          cl.anim.update(dt, { vy: 0, maxVy: 1000, dashing: false, rush: false, perch: true, reducedMotion: o.reduced });
+        }
+        const rar = SPECIES[cl.id].rarity;
+        ctx.fillStyle = o.dark ? '#1c2a3a' : '#f3f8fa';
+        ctx.beginPath();
+        ctx.roundRect(cl.x + 8, cl.y + 10, RC_W - 16, RC_H - 18, 12);
+        ctx.fill();
+        const scale = 0.66;
+        const cx = cl.x + RC_W * 0.54;
+        const cy = cl.y + RC_H * 0.55;
+        if (!o.low) drawRarityAura(ctx, cl.id, cx, cy, scale * stageScale(o.stage), clock, o.reduced);
+        else drawRarityAura(ctx, cl.id, cx, cy, scale * stageScale(o.stage), 0, true);
+        const pose = cl.anim.pose();
+        pose.bob *= 1 - pose.perch;
+        if (o.freeze) pose.time = clock;
+        drawDragon(ctx, cl.id, cx, cy, scale, pose, { stage: o.stage, detail: o.low ? 1 : 2 });
+        drawRarityFrame(ctx, rar, cl.x + 8, cl.y + 10, RC_W - 16, RC_H - 18, { reduced: o.reduced, low: o.low, time: clock, species: cl.id });
+        ctx.fillStyle = o.dark ? '#dbe7ef' : '#2b3a48';
+        ctx.font = '700 12px system-ui';
+        ctx.fillText(SPECIES[cl.id].name, cl.x + 18, cl.y + 30);
+        ctx.font = '11px system-ui';
+        ctx.fillStyle = o.dark ? '#a9bccb' : '#5a6a78';
+        const p = PERSONALITY[cl.id];
+        ctx.fillText(`${p.kind} · ${cl.anim.currentAction ?? cl.anim.currentGesture ?? 'idle'}`, cl.x + 18, cl.y + RC_H - 18);
+        const motif = LEGENDARY_MOTIF[cl.id] ?? SPECIES_ART[cl.id].rarityAccents.join(', ');
+        ctx.fillText(motif.length > 40 ? `${motif.slice(0, 39)}…` : motif, cl.x + 18, cl.y + 44);
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }

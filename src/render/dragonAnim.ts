@@ -1,16 +1,25 @@
 // Dragon animation state machine. It turns gameplay signals (vertical speed, dash,
 // collision, Rush, perching, feeding) into a blended pose for drawDragon().
 //
-// Layers, lowest to highest priority: flight/idle base → ability → dash → hit. Each layer has
-// a weight that eases in and out and is blended over the layers below it, so a higher layer
-// overrides a lower one without snapping, and the wingbeat phase is never reset.
+// Layers, lowest to highest priority: flight/idle base → idle gestures → react → feeding →
+// celebrate / level-up → arrival → ability → dash → hit (then the post-hit recovery). Each layer
+// has a weight that eases in and out and is blended over the layers below it, so a higher layer
+// overrides a lower one without snapping, and the wingbeat phase is never reset. Gestures and
+// actions are additive offsets whose envelopes start and end at exactly 0; an action that replaces
+// another hands its current offset to a fading carry, so nothing pops.
+//
+// Update 5 adds personality (PERSONALITY): one species idle gesture for every tier, an extra
+// expressive gesture (with a subtle elemental accent) for Rare and above, a motion signature with
+// an elemental flourish for Epic and Legendary, react() for clicks on the hero, arrive() for
+// reveals, levelUp() (distinct from feeding and from celebrate) and a short recovery after a hit.
+// Idle timing is seeded per instance (species + instance counter), so two dragons never sync.
 //
 // Everything advances only in update(dt): elapsed-time based, dt clamped, nothing moves while
 // paused (dt <= 0), no wall clock or Math.random in the pose math (blinks, glances and weight
 // shifts use a seeded generator). pose() is pure and cheap and can be called any number of times.
 import type { Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
-import type { Family, SpeciesId } from '../content/types';
+import type { Family, Rarity, SpeciesId } from '../content/types';
 import type { DragonPose } from './dragonArt';
 
 export interface AnimInput {
@@ -84,6 +93,7 @@ const ABILITY = ABILITY_ANTIC + ABILITY_RELEASE + ABILITY_SETTLE;
 const BLINK = 0.16;
 const FLICK = 0.7;
 const FEED = { bite: 0.14, chew: 0.45, swallow: 0.6 };
+const RECOVER = 0.75;
 const TAU = Math.PI * 2;
 const EPS = 1e-3;
 
@@ -152,6 +162,415 @@ export function wingCycle(phase: number, m: FamilyMotion = FAMILY_MOTION.classic
 
 type FeedPhase = 'none' | 'reach' | 'bite' | 'chew' | 'swallow';
 
+// --- personality and gestures ------------------------------------------------------------------
+
+export type Personality = 'curious' | 'stately' | 'playful' | 'alert' | 'sleepy' | 'mischievous' | 'graceful' | 'stoic';
+
+export type GestureId =
+  // personality reactions and idle gestures
+  | 'hop'
+  | 'headRaise'
+  | 'yawn'
+  | 'tailFlick'
+  | 'headTilt'
+  | 'lookAround'
+  | 'preen'
+  | 'stomp'
+  | 'snort'
+  | 'sniff'
+  | 'shake'
+  | 'wingStretch'
+  | 'flutter'
+  | 'crestFlare'
+  // Epic / Legendary motion signatures
+  | 'lureSway'
+  | 'bloom'
+  | 'fluffShake'
+  | 'prowl'
+  | 'roar'
+  | 'sunSalute'
+  | 'tideSway'
+  | 'crystalChime'
+  | 'stargaze'
+  // actions
+  | 'arrive'
+  | 'levelUp';
+
+export interface PersonalityDef {
+  kind: Personality;
+  /** react(): the click reaction. */
+  react: GestureId;
+  /** Species idle gesture (every tier). */
+  idle: GestureId;
+  /** Extra expressive idle gesture (Rare and above), with a subtle elemental accent. */
+  extra?: GestureId;
+  /** Motion signature (Epic and Legendary), with an elemental action flourish. */
+  signature?: GestureId;
+}
+
+/** Per-species personality (rarity decides which of the idle gestures play). */
+export const PERSONALITY: Record<SpeciesId, PersonalityDef> = {
+  ember: { kind: 'playful', react: 'hop', idle: 'snort' },
+  cinder: { kind: 'mischievous', react: 'tailFlick', idle: 'sniff', extra: 'wingStretch' },
+  pyrelisk: { kind: 'stoic', react: 'snort', idle: 'sniff', extra: 'crestFlare', signature: 'stomp' },
+  solpyre: { kind: 'stately', react: 'headRaise', idle: 'preen', extra: 'wingStretch', signature: 'sunSalute' },
+  tide: { kind: 'curious', react: 'headTilt', idle: 'shake' },
+  ripple: { kind: 'playful', react: 'hop', idle: 'shake', extra: 'flutter' },
+  abyssfin: { kind: 'curious', react: 'headTilt', idle: 'sniff', extra: 'lookAround', signature: 'lureSway' },
+  leviara: { kind: 'stately', react: 'headRaise', idle: 'preen', extra: 'crestFlare', signature: 'tideSway' },
+  grove: { kind: 'sleepy', react: 'yawn', idle: 'sniff' },
+  bramble: { kind: 'mischievous', react: 'tailFlick', idle: 'sniff', extra: 'crestFlare' },
+  orchid: { kind: 'graceful', react: 'preen', idle: 'sniff', extra: 'wingStretch', signature: 'bloom' },
+  rootwarden: { kind: 'sleepy', react: 'yawn', idle: 'sniff', extra: 'stomp' },
+  gale: { kind: 'alert', react: 'lookAround', idle: 'preen' },
+  zephyr: { kind: 'playful', react: 'hop', idle: 'flutter', extra: 'lookAround' },
+  cloudtail: { kind: 'sleepy', react: 'yawn', idle: 'shake', extra: 'flutter', signature: 'fluffShake' },
+  tempest: { kind: 'alert', react: 'lookAround', idle: 'wingStretch', extra: 'crestFlare' },
+  rime: { kind: 'curious', react: 'headTilt', idle: 'sniff' },
+  snowcap: { kind: 'sleepy', react: 'yawn', idle: 'shake', extra: 'stomp' },
+  frostfang: { kind: 'alert', react: 'lookAround', idle: 'sniff', extra: 'wingStretch', signature: 'prowl' },
+  glacielle: { kind: 'stately', react: 'headRaise', idle: 'preen', extra: 'crestFlare', signature: 'crystalChime' },
+  spark: { kind: 'playful', react: 'hop', idle: 'shake' },
+  voltwing: { kind: 'alert', react: 'lookAround', idle: 'shake', extra: 'crestFlare' },
+  thundercrest: { kind: 'stoic', react: 'stomp', idle: 'sniff', extra: 'wingStretch', signature: 'roar' },
+  astralux: { kind: 'curious', react: 'headTilt', idle: 'preen', extra: 'lookAround', signature: 'stargaze' },
+};
+
+/** Gesture length (s). */
+export const GESTURE_DUR: Record<GestureId, number> = {
+  hop: 1.0,
+  headRaise: 1.5,
+  yawn: 1.9,
+  tailFlick: 1.2,
+  headTilt: 1.6,
+  lookAround: 1.8,
+  preen: 1.7,
+  stomp: 1.1,
+  snort: 0.9,
+  sniff: 1.3,
+  shake: 0.9,
+  wingStretch: 1.7,
+  flutter: 1.0,
+  crestFlare: 1.4,
+  lureSway: 2.2,
+  bloom: 2.0,
+  fluffShake: 1.4,
+  prowl: 2.0,
+  roar: 1.6,
+  sunSalute: 2.4,
+  tideSway: 2.6,
+  crystalChime: 2.0,
+  stargaze: 2.4,
+  arrive: 2.0,
+  levelUp: 1.8,
+};
+
+/** Additive pose offsets produced by gestures and actions (all 0 at rest). */
+interface Delta {
+  headX: number;
+  headY: number;
+  headTurn: number;
+  bob: number;
+  bank: number;
+  wing: number;
+  fold: number;
+  mouth: number;
+  squint: number;
+  blink: number;
+  brow: number;
+  crest: number;
+  flourish: number;
+  tailFlick: number;
+  happy: number;
+  breath: number;
+}
+
+const ZERO: Delta = { headX: 0, headY: 0, headTurn: 0, bob: 0, bank: 0, wing: 0, fold: 0, mouth: 0, squint: 0, blink: 0, brow: 0, crest: 0, flourish: 0, tailFlick: 0, happy: 0, breath: 0 };
+const KEYS = Object.keys(ZERO) as (keyof Delta)[];
+
+/** Flourish strength by rarity: none for Common, a subtle accent for Rare, a full flourish above. */
+const FLOURISH: Record<Rarity, number> = { common: 0, rare: 0.4, epic: 0.75, legendary: 1 };
+
+/** Envelope 0 → 1 → 0 with eased ends (exactly 0 at u = 0 and u = 1). */
+function env(u: number, a = 0.18, b = 0.3): number {
+  return smoothstep(u / a) * smoothstep((1 - u) / b);
+}
+
+/** Bump centred at c with half-width w (smooth, 0 outside). */
+function bump(u: number, c: number, w: number): number {
+  const x = Math.abs(u - c) / w;
+  return x >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * x);
+}
+
+/**
+ * Keyframes of every gesture as additive offsets at progress u (0..1). `fl` is the flourish
+ * allowance for this dragon's rarity; `big` scales arrival/level-up for Epic/Legendary.
+ */
+function gestureDelta(id: GestureId, u: number, d: Delta, fl: number, big: number): void {
+  const e = env(u);
+  const S = Math.sin;
+  switch (id) {
+    case 'hop': {
+      // playful: a little hop with a wing flick and a chirp
+      const h = bump(u, 0.38, 0.3);
+      d.bob = -7 * h + 1.5 * bump(u, 0.12, 0.1) + 1.2 * bump(u, 0.7, 0.12);
+      d.wing = 0.45 * h;
+      d.fold = -0.3 * h;
+      d.headY = -2 * h;
+      d.headTurn = -0.08 * h;
+      d.mouth = 0.32 * bump(u, 0.45, 0.25);
+      d.happy = bump(u, 0.45, 0.32);
+      d.tailFlick = 0.8 * S(u * Math.PI * 2) * e;
+      d.brow = 0.6 * e;
+      break;
+    }
+    case 'headRaise':
+      // stately: nose lifts, crest rises, a slow regal blink
+      d.headY = -4.5 * e;
+      d.headX = -1.5 * e;
+      d.headTurn = -0.17 * e;
+      d.crest = 0.85 * e;
+      d.brow = 0.35 * e;
+      d.squint = 0.45 * bump(u, 0.62, 0.14);
+      d.breath = 0.6 * e;
+      d.flourish = fl * 0.5 * bump(u, 0.5, 0.25);
+      break;
+    case 'yawn':
+      // sleepy: head tips back, jaw opens wide, eyes close, then a little shake
+      d.headTurn = -0.2 * bump(u, 0.4, 0.32) + 0.05 * S(u * 26) * bump(u, 0.82, 0.12);
+      d.headY = 1.5 * bump(u, 0.4, 0.3);
+      d.mouth = 0.95 * bump(u, 0.4, 0.26);
+      d.blink = 0.95 * bump(u, 0.42, 0.24);
+      d.brow = 0.8 * bump(u, 0.4, 0.3);
+      d.fold = -0.15 * bump(u, 0.4, 0.3);
+      d.wing = 0.12 * bump(u, 0.4, 0.3);
+      break;
+    case 'tailFlick':
+      // mischievous: a sly glance back while the tail snaps twice
+      d.tailFlick = (1.6 * S(u * Math.PI * 4)) * e;
+      d.headTurn = 0.22 * bump(u, 0.35, 0.3);
+      d.squint = 0.38 * e;
+      d.brow = -0.5 * e;
+      d.mouth = 0.12 * bump(u, 0.6, 0.2);
+      break;
+    case 'headTilt':
+      // curious: lean in, tilt one way then the other, brows up, one blink
+      d.headX = 3 * e;
+      d.headTurn = (0.17 * S(u * Math.PI * 2.4)) * e;
+      d.brow = 1 * e;
+      d.blink = bump(u, 0.55, 0.06);
+      d.flourish = fl * 0.4 * bump(u, 0.6, 0.2);
+      break;
+    case 'lookAround':
+      // alert: crest up, scan left and right
+      d.crest = 0.9 * e;
+      d.headY = -3 * e;
+      d.headTurn = (-0.14 * S(u * Math.PI * 2)) * e;
+      d.brow = 0.6 * e;
+      d.wing = 0.12 * e;
+      d.flourish = fl * 0.5 * bump(u, 0.5, 0.2);
+      break;
+    case 'preen':
+      // graceful: the head turns back toward the wing, a contented squint
+      d.headX = -4 * e;
+      d.headTurn = 0.3 * e + 0.03 * S(u * 30) * bump(u, 0.55, 0.2);
+      d.headY = 2 * e;
+      d.wing = 0.2 * e;
+      d.squint = 0.55 * e;
+      break;
+    case 'stomp':
+      // stoic: weight drops onto the front feet, a grunt
+      d.bob = 3.2 * bump(u, 0.35, 0.18) - 1.2 * bump(u, 0.55, 0.12);
+      d.headY = 2.4 * bump(u, 0.35, 0.22);
+      d.brow = -0.7 * e;
+      d.mouth = 0.18 * bump(u, 0.38, 0.12);
+      d.tailFlick = 0.4 * bump(u, 0.45, 0.2);
+      d.flourish = fl * bump(u, 0.45, 0.3);
+      break;
+    case 'snort':
+      // a short huff: head dips, jaw cracks, nostrils puff (smoke for fire species via flourish)
+      d.headY = 2 * bump(u, 0.35, 0.25);
+      d.headTurn = 0.06 * bump(u, 0.35, 0.25) - 0.05 * bump(u, 0.62, 0.15);
+      d.mouth = 0.18 * bump(u, 0.55, 0.12);
+      d.squint = 0.45 * bump(u, 0.55, 0.15);
+      d.flourish = Math.max(fl, 0.35) * bump(u, 0.65, 0.3);
+      break;
+    case 'sniff':
+      // nose down and forward, quick small sniffs
+      d.headX = 2.5 * e;
+      d.headY = 2.6 * e + 0.6 * S(u * 48) * e;
+      d.headTurn = 0.1 * e;
+      d.brow = 0.4 * e;
+      break;
+    case 'shake':
+      // a quick shake (water off the scales, static out of the fur)
+      d.headTurn = 0.1 * S(u * 38) * e;
+      d.bank = 0.025 * S(u * 38 + 0.6) * e;
+      d.squint = 0.6 * e;
+      d.fold = -0.1 * e;
+      d.flourish = fl * 0.5 * e;
+      break;
+    case 'wingStretch':
+      // wings rise and open fully, then fold back
+      d.wing = 0.62 * e;
+      d.fold = -0.55 * e;
+      d.headY = -1.5 * e;
+      d.headTurn = -0.06 * e;
+      d.squint = 0.3 * bump(u, 0.5, 0.2);
+      d.flourish = fl * 0.6 * bump(u, 0.5, 0.25);
+      break;
+    case 'flutter':
+      d.wing = (0.4 + 0.25 * S(u * 44)) * e;
+      d.fold = -0.4 * e;
+      d.bob = -2.5 * e;
+      d.happy = bump(u, 0.5, 0.3);
+      break;
+    case 'crestFlare':
+      d.crest = e;
+      d.headY = -2 * e;
+      d.brow = 0.5 * e;
+      d.mouth = 0.15 * e;
+      d.flourish = fl * 0.7 * bump(u, 0.5, 0.3);
+      break;
+    // --- motion signatures (Epic / Legendary) ---
+    case 'lureSway':
+      // Abyssfin: the head sinks low and sways the glowing lure from side to side
+      d.headY = 4 * e;
+      d.headX = 2 * e;
+      d.headTurn = (0.12 * S(u * Math.PI * 3)) * e;
+      d.tailFlick = 0.5 * S(u * Math.PI * 3 + 1) * e;
+      d.flourish = fl * e;
+      break;
+    case 'bloom':
+      // Orchid: petals fan open, the head lifts gracefully, leaves drift
+      d.crest = e;
+      d.headY = -3 * e;
+      d.headTurn = -0.1 * e;
+      d.wing = 0.3 * e;
+      d.fold = -0.3 * e;
+      d.squint = 0.5 * bump(u, 0.55, 0.2);
+      d.flourish = fl * e;
+      break;
+    case 'fluffShake':
+      // Cloudtail: a full-body fluff shake that ends with a contented puff
+      d.headTurn = 0.12 * S(u * 34) * bump(u, 0.4, 0.3);
+      d.bank = 0.04 * S(u * 34 + 0.5) * bump(u, 0.4, 0.3);
+      d.bob = -2 * bump(u, 0.4, 0.3);
+      d.squint = 0.7 * e;
+      d.happy = bump(u, 0.8, 0.15);
+      d.flourish = fl * bump(u, 0.75, 0.25);
+      break;
+    case 'prowl':
+      // Frostfang: crouches low, head forward, fangs bared, a frost breath
+      d.bob = 3 * e;
+      d.headX = 4 * e;
+      d.headY = 3 * e;
+      d.headTurn = 0.06 * e;
+      d.brow = -0.9 * e;
+      d.mouth = 0.35 * bump(u, 0.6, 0.25);
+      d.fold = 0.2 * e;
+      d.flourish = fl * bump(u, 0.62, 0.25);
+      break;
+    case 'roar':
+      // Thundercrest: head thrown up, a wide roar, sparks crackle on the crest
+      d.headTurn = -0.24 * e;
+      d.headY = -3 * e;
+      d.headX = -2 * bump(u, 0.15, 0.12);
+      d.mouth = 0.9 * bump(u, 0.5, 0.26);
+      d.crest = e;
+      d.brow = -0.6 * e;
+      d.wing = 0.25 * e;
+      d.flourish = fl * bump(u, 0.5, 0.3);
+      break;
+    case 'sunSalute':
+      // Solpyre: wings spread high to the sun, solar fans open, head raised
+      d.wing = 0.65 * e;
+      d.fold = -0.55 * e;
+      d.headY = -4 * e;
+      d.headTurn = -0.2 * e;
+      d.crest = e;
+      d.squint = 0.5 * bump(u, 0.55, 0.25);
+      d.breath = 0.8 * e;
+      d.flourish = fl * bump(u, 0.55, 0.35);
+      break;
+    case 'tideSway':
+      // Leviara: a slow wave runs through the neck and tail, fins flow
+      d.headTurn = (0.12 * S(u * Math.PI * 2)) * e;
+      d.headY = (2.5 * S(u * Math.PI * 2 + 1.2)) * e;
+      d.bank = (0.02 * S(u * Math.PI * 2 - 0.6)) * e;
+      d.tailFlick = 0.7 * S(u * Math.PI * 2 - 1) * e;
+      d.crest = 0.6 * e;
+      d.squint = 0.35 * e;
+      d.flourish = fl * bump(u, 0.5, 0.35);
+      break;
+    case 'crystalChime':
+      // Glacielle: a precise tilt, crown raised, glints of frost
+      d.headTurn = 0.13 * bump(u, 0.35, 0.2) - 0.1 * bump(u, 0.7, 0.18);
+      d.headY = -2.5 * e;
+      d.crest = e;
+      d.brow = 0.5 * e;
+      d.flourish = fl * e;
+      break;
+    case 'stargaze':
+      // Astralux: looks up at the sky, a long slow blink, stars stir
+      d.headTurn = -0.3 * e;
+      d.headY = -3.5 * e;
+      d.headX = -2 * e;
+      d.brow = 0.7 * e;
+      d.blink = 0.9 * bump(u, 0.6, 0.1);
+      d.flourish = fl * bump(u, 0.55, 0.35);
+      break;
+    // --- actions ---
+    case 'arrive': {
+      // arrival pose: anticipation crouch, rise with wings spread and crest up, hold, settle
+      const crouch = bump(u, 0.1, 0.1);
+      const disp = smoothstep((u - 0.12) / 0.2) * smoothstep((1 - u) / 0.3);
+      d.bob = 2.5 * crouch * big - 2.5 * disp * big;
+      d.headY = 2 * crouch - 4.5 * disp;
+      d.headX = -1.5 * crouch;
+      d.headTurn = -0.16 * disp;
+      d.wing = (-0.1 * crouch + 0.62 * disp + 0.08 * S(u * 30) * disp * (big > 1.2 ? 1 : 0)) * Math.min(1, big);
+      d.fold = -0.55 * disp;
+      d.crest = disp;
+      d.brow = 0.5 * disp;
+      d.mouth = 0.22 * bump(u, 0.45, 0.2);
+      d.breath = disp;
+      d.flourish = fl * disp;
+      break;
+    }
+    case 'levelUp': {
+      // level up: a quick crouch, a proud lift with fluttering wings, happy eyes, a roar of joy
+      const crouch = bump(u, 0.1, 0.1);
+      const up = smoothstep((u - 0.12) / 0.16) * smoothstep((1 - u) / 0.32);
+      d.bob = 2 * crouch - 5 * up;
+      d.headY = 1.5 * crouch - 4 * up;
+      d.headTurn = -0.18 * up;
+      d.wing = 0.55 * up + 0.18 * S(u * 40) * up;
+      d.fold = -0.5 * up;
+      d.crest = up;
+      d.mouth = 0.4 * bump(u, 0.4, 0.2);
+      d.happy = bump(u, 0.62, 0.22);
+      d.breath = 0.8 * up;
+      d.flourish = Math.max(0.5, fl) * up;
+      break;
+    }
+  }
+}
+
+/** Reduced motion: keep the expression (brows, eyes, a small mouth), drop all body motion. */
+function calmDelta(d: Delta): void {
+  d.headX = d.headY = d.headTurn = d.bob = d.bank = d.wing = d.fold = d.tailFlick = d.crest = d.flourish = d.breath = 0;
+  d.mouth = Math.min(d.mouth, 0.2);
+}
+
+let INSTANCE = 0;
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
 /** Transient weights (all return to exactly 0 once their trigger is over). */
 export interface AnimTransients {
   windup: number;
@@ -163,6 +582,20 @@ export interface AnimTransients {
   celebrate: number;
   flick: number;
   glance: number;
+  /** 1 while react / arrive / level-up / post-hit recovery (or a fading hand-over) is active. */
+  action: number;
+  /** 1 while an idle gesture is playing (idle life, like glance and flick). */
+  gesture: number;
+}
+
+interface Slot {
+  id: GestureId;
+  t: number;
+  dur: number;
+  /** Arrival / level-up size (Epic/Legendary bigger). */
+  big: number;
+  /** Reduced motion: expression only (brows, eyes, mouth), no body motion. */
+  calm: boolean;
 }
 
 export class DragonAnimator {
@@ -196,6 +629,7 @@ export class DragonAnimator {
 
   // hit, ability, celebrations
   private recoilT = 0;
+  private hitPending = false;
   private abilityT = 0;
   private rushW = 0;
   private perchW = 0;
@@ -227,14 +661,32 @@ export class DragonAnimator {
   private flickT = 0;
   private flickWait: number;
 
+  // personality (Update 5)
+  private speciesId: SpeciesId | null = null;
+  private rarity: Rarity = 'common';
+  private gestureSlot: Slot | null = null;
+  private gestureGate = 0;
+  private gestureWait: number;
+  private actionSlot: Slot | null = null;
+  private carry: Delta = { ...ZERO };
+  private carryK = 0;
+  private recoverT = 0;
+  private pendingLevelUp = false;
+  private dashingNow = false;
+  private readonly tmp: Delta = { ...ZERO };
+  private readonly sum: Delta = { ...ZERO };
+
   constructor(perch = false, phase = Math.random(), opts: AnimOptions = {}) {
     this.perchW = perch ? 1 : 0;
     this.phase = phase;
-    this.rand = rng(opts.seed ?? Math.floor(phase * 2147483647) + 17);
+    // seeded per instance: species and an instance counter desynchronize dragons that share a phase
+    const inst = Math.imul(++INSTANCE, 0x9e3779b1);
+    this.rand = rng(opts.seed ?? ((Math.floor(phase * 2147483647) + 17) ^ hashStr(opts.species ?? opts.family ?? '') ^ inst));
     this.blinkWait = 1.2 + this.rand() * 2.5;
     this.glanceWait = 2 + this.rand() * 3;
     this.shiftWait = 4 + this.rand() * 4;
     this.flickWait = 3 + this.rand() * 4;
+    this.gestureWait = 3 + this.rand() * 7;
     if (opts.species) this.setSpecies(opts.species);
     else if (opts.family) this.setFamily(opts.family);
     if (opts.stage) this.setStage(opts.stage);
@@ -248,6 +700,92 @@ export class DragonAnimator {
 
   setSpecies(id: SpeciesId): void {
     this.setFamily(SPECIES[id].family);
+    this.speciesId = id;
+    this.rarity = SPECIES[id].rarity;
+  }
+
+  /** Personality of the species (defaults to playful Ember timing when no species was given). */
+  get personality(): PersonalityDef {
+    return PERSONALITY[this.speciesId ?? 'ember'];
+  }
+
+  /**
+   * Click reaction on the hero dragon: a short personality gesture (playful hop and chirp, stately
+   * head raise, sleepy yawn, mischievous tail flick, curious head tilt, alert look-around…) that
+   * returns smoothly to idle. Ignored while feeding, arriving, levelling up, hit/recovering or using
+   * the ability; a click during the first half of a reaction is ignored (no restart pops). Under
+   * reduced motion only the expression changes (brows, eyes, mouth).
+   */
+  react(): void {
+    const a = this.actionSlot;
+    if (this.feedPh !== 'none' || this.recoilT > 0 || this.recoverT > 0 || this.abilityT > 0) return;
+    if (a && (a.id === 'arrive' || a.id === 'levelUp')) return;
+    if (a && a.t < a.dur * 0.55) return;
+    const id = this.personality.react;
+    this.startAction(id, GESTURE_DUR[id], 1);
+  }
+
+  /**
+   * Arrival pose (hatch reveal, results, inspection): anticipation, rise with wings spread and crest
+   * up, hold with an elemental flourish, settle. Epic and Legendary get the full display (Legendary
+   * longest); Common and Rare a short greeting. Under reduced motion: expression only.
+   */
+  arrive(): void {
+    const r = this.rarity;
+    const dur = r === 'legendary' ? 2.4 : r === 'epic' ? 2.0 : 1.3;
+    this.startAction('arrive', dur, r === 'legendary' ? 1.3 : r === 'epic' ? 1.1 : 0.6);
+  }
+
+  /**
+   * Level-up reaction, distinct from feeding (no reach or bite) and from celebrate(): a crouch, a
+   * proud lift with fluttering wings and crest, happy eyes and an elemental flourish. If the dragon
+   * is still eating it waits for the swallow to finish.
+   */
+  levelUp(): void {
+    if (this.feedPh !== 'none') {
+      this.pendingLevelUp = true;
+      return;
+    }
+    this.startAction('levelUp', GESTURE_DUR.levelUp, 1);
+  }
+
+  /** The idle gesture playing now, and the action (react / arrive / levelUp) playing now. */
+  get currentGesture(): GestureId | null {
+    return this.gestureSlot?.id ?? null;
+  }
+
+  get currentAction(): GestureId | null {
+    return this.actionSlot?.id ?? null;
+  }
+
+  /** Plays one gesture now as an idle gesture (gallery and tests); ignored while another runs. */
+  playGesture(id: GestureId): void {
+    if (this.gestureSlot) return;
+    this.gestureSlot = { id, t: 0, dur: GESTURE_DUR[id], big: 1, calm: this.rm };
+  }
+
+  private startAction(id: GestureId, dur: number, big: number) {
+    const a = this.actionSlot;
+    if (a || this.carryK > 0) {
+      // hand the current offset to a fading carry so the new action starts from where we are
+      const cur = this.actionOffset();
+      const k = this.carryK;
+      for (const key of KEYS) this.carry[key] = cur[key] + this.carry[key] * k;
+      this.carryK = 1;
+    }
+    this.actionSlot = { id, t: 0, dur, big, calm: this.rm };
+  }
+
+  /** Current action offset (into this.tmp). */
+  private actionOffset(): Delta {
+    const d = this.tmp;
+    Object.assign(d, ZERO);
+    const a = this.actionSlot;
+    if (a) {
+      gestureDelta(a.id, clamp01(a.t / a.dur), d, FLOURISH[this.rarity], a.big);
+      if (a.calm) calmDelta(d);
+    }
+    return d;
   }
 
   setStage(stage: Stage): void {
@@ -264,6 +802,7 @@ export class DragonAnimator {
   /** Short readable recoil after hitting a rock (highest priority). */
   recoil(): void {
     this.recoilT = RECOIL;
+    this.recoverT = 0;
   }
 
   /** Alias of recoil(). */
@@ -355,8 +894,49 @@ export class DragonAnimator {
     this.rushW = approach(this.rushW, inp.rush ? 1 : 0, inp.rush ? 5 : 2, dt);
     this.happyT = Math.max(0, this.happyT - dt);
     this.celebrateT = Math.max(0, this.celebrateT - dt);
+    this.dashingNow = inp.dashing;
     this.updateFeed(dt);
     this.updateIdle(dt, perch, still);
+    this.updatePersonality(dt, perch, still);
+  }
+
+  private updatePersonality(dt: number, perch: number, still: boolean) {
+    // post-hit recovery starts the moment the recoil envelope has fully settled
+    if (this.recoverT > 0) this.recoverT = Math.max(0, this.recoverT - dt);
+    if (this.recoilT <= 0 && this.hitPending) {
+      this.hitPending = false;
+      this.recoverT = RECOVER;
+    }
+    if (this.recoilT > 0) this.hitPending = true;
+    // actions
+    if (this.actionSlot) {
+      this.actionSlot.t += dt;
+      if (this.actionSlot.t >= this.actionSlot.dur) this.actionSlot = null;
+    }
+    if (this.pendingLevelUp && this.feedPh === 'none') {
+      this.pendingLevelUp = false;
+      this.startAction('levelUp', GESTURE_DUR.levelUp, 1);
+    }
+    if (this.carryK > 0) this.carryK = approach(this.carryK, 0, 6, dt);
+    // idle gestures: only while perched, idle and not held still by reduced motion
+    const busy = !!this.actionSlot || this.feedPh !== 'none' || this.abilityT > 0 || this.recoilT > 0 || this.recoverT > 0 || this.celebrateT > 0 || this.dashW > 0.01 || this.dashingNow;
+    const idle = perch > 0.5 && !still && !this.rm;
+    this.gestureGate = approach(this.gestureGate, idle && !busy ? 1 : 0, 6, dt);
+    if (this.gestureSlot) {
+      this.gestureSlot.t += dt;
+      if (this.gestureSlot.t >= this.gestureSlot.dur) this.gestureSlot = null;
+    } else if (idle && !busy) {
+      this.gestureWait -= dt;
+      if (this.gestureWait <= 0) {
+        const p = this.personality;
+        const pool: GestureId[] = [p.idle, p.idle];
+        if (this.rarity !== 'common' && p.extra) pool.push(p.extra);
+        if ((this.rarity === 'epic' || this.rarity === 'legendary') && p.signature) pool.push(p.signature, p.signature);
+        const id = pool[Math.floor(this.rand() * pool.length) % pool.length];
+        this.gestureSlot = { id, t: 0, dur: GESTURE_DUR[id], big: 1, calm: false };
+        this.gestureWait = 6 + this.rand() * 8;
+      }
+    }
   }
 
   private updateFeed(dt: number) {
@@ -507,7 +1087,40 @@ export class DragonAnimator {
       celebrate: this.celebrateT > 0 ? 1 : 0,
       flick: this.flickT > 0 ? 1 : 0,
       glance: Math.abs(this.glance),
+      action: this.actionSlot || this.carryK > 0 || this.recoverT > 0 || this.pendingLevelUp ? 1 : 0,
+      gesture: this.gestureSlot ? 1 : 0,
     };
+  }
+
+  /** Sum of gesture, action, hand-over carry and recovery offsets for this frame. */
+  private offsets(): Delta {
+    const s = this.sum;
+    Object.assign(s, ZERO);
+    const fl = FLOURISH[this.rarity];
+    const g = this.gestureSlot;
+    if (g && this.gestureGate > 0) {
+      const d = this.tmp;
+      Object.assign(d, ZERO);
+      gestureDelta(g.id, clamp01(g.t / g.dur), d, fl, 1);
+      for (const k of KEYS) s[k] += d[k] * this.gestureGate;
+    }
+    if (this.actionSlot) {
+      const d = this.actionOffset();
+      for (const k of KEYS) s[k] += d[k];
+    }
+    if (this.carryK > 0) for (const k of KEYS) s[k] += this.carry[k] * this.carryK;
+    if (this.recoverT > 0) {
+      // shake it off: a slow head shake, a small dip and rise, the lids open again
+      const u = 1 - this.recoverT / RECOVER;
+      const e = env(u, 0.2, 0.4);
+      s.headTurn += 0.07 * Math.sin(u * TAU) * e;
+      s.headY += 1.6 * bump(u, 0.35, 0.3);
+      s.squint = Math.max(s.squint, 0.35 * bump(u, 0.3, 0.3));
+      s.brow -= 0.3 * e;
+      s.wing -= 0.06 * e;
+      if (this.rm) calmDelta(s);
+    }
+    return s;
   }
 
   pose(): DragonPose {
@@ -544,6 +1157,17 @@ export class DragonAnimator {
       fold *= 1 - celebrate;
       mouth = Math.max(mouth, 0.25 * celebrate);
     }
+
+    // --- personality layer: idle gestures, react, arrival, level-up, recovery (additive) -------
+    const o = this.offsets();
+    wing = Math.max(-0.8, Math.min(1, wing + o.wing));
+    fold = clamp01(fold + o.fold);
+    bob += o.bob;
+    bank += o.bank;
+    headX += o.headX;
+    headY += o.headY;
+    headTurn += o.headTurn;
+    mouth = Math.max(mouth, o.mouth);
 
     // --- ability layer: anticipation (wings up, head back) → release (flare, head forward) --
     if (ab.w > 0) {
@@ -606,20 +1230,23 @@ export class DragonAnimator {
       recoil,
       rush: Math.max(this.rushW, celebrate),
       // happy eyes close only once the celebration has eased in, and open again as it fades
-      happy: this.happyT > 0 && this.feedPh === 'none' && (this.celebrateT <= 0 || celebrate > 0.5) ? 1 : 0,
-      blink,
+      happy: (this.happyT > 0 && this.feedPh === 'none' && (this.celebrateT <= 0 || celebrate > 0.5)) || o.happy > 0.5 ? 1 : 0,
+      blink: Math.max(blink, clamp01(o.blink)),
       mouth,
-      breath,
+      breath: breath + o.breath,
       perch,
       ability: ab.glow,
       time: still ? 0 : this.t,
       headX,
       headY,
       squash: squash * 0.9,
-      squint: Math.max(recoil * 0.85, this.fLid),
+      squint: Math.max(recoil * 0.85, this.fLid, clamp01(o.squint) * (1 - recoil)),
       swallow: this.feedPh === 'swallow' ? clamp01(this.feedT / FEED.swallow) : 0,
       frillLag,
-      tailFlick: flick,
+      tailFlick: flick + o.tailFlick * maxBend * (1 - recoil),
+      brow: Math.max(-1, Math.min(1, o.brow * (1 - recoil))),
+      crest: clamp01(o.crest * (1 - dash) * (1 - recoil)),
+      flourish: clamp01(o.flourish),
     };
   }
 }

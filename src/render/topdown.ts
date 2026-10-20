@@ -8,7 +8,7 @@ import type { Family, Look, Palette, SpeciesId } from '../content/types';
 import type { MarkingId } from '../content/world';
 import { FAMILY_MOTION, wingCycle } from './dragonAnim';
 import { STAGE_RIG, detailFor, leaf, mixHex, paletteFor } from './dragonArt';
-import { SPECIES_ART, type WingPattern } from './speciesArt';
+import { SPECIES_ART, TRIM, type RarityAccent, type WingPattern } from './speciesArt';
 
 type Ctx = CanvasRenderingContext2D;
 type Pt = [number, number];
@@ -179,6 +179,8 @@ export class TopDragonMotion {
     return { ...DEFAULT_TOP, ...p, phase: this.phase, turn: this.turn, tail: this.ready ? this.tail() : null };
   }
 }
+
+const accentSets = new Map<SpeciesId, Set<RarityAccent>>();
 
 /** Pale rim for very dark palettes (set per draw) so they read on dark Arena floors. */
 let TOP_RIM: string | null = null;
@@ -641,6 +643,20 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   tail.lineTo(lay.root + 8, right[0][1]);
   tail.closePath();
   outlined(ctx, tail, c.body, c.outline);
+  if (art.rarityAccents.includes('tailBands')) {
+    ctx.save();
+    ctx.clip(tail);
+    ctx.lineCap = 'butt';
+    for (const i of [Math.round(N * 0.4), Math.round(N * 0.56), Math.round(N * 0.72)]) {
+      ctx.beginPath();
+      ctx.moveTo(left[i][0], left[i][1]);
+      ctx.lineTo(right[i][0], right[i][1]);
+      ctx.strokeStyle = mixHex(c.shade, c.outline, 0.35);
+      ctx.lineWidth = 3.6;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   // tail tip
   const tip = pts[N];
   const ta = Math.atan2(pts[N][1] - pts[N - 1][1], pts[N][0] - pts[N - 1][0]);
@@ -665,8 +681,12 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   const flap = (0.58 + 0.42 * Math.cos(elev * 0.95)) * (1 - 0.32 * fold);
   const span = look.wingSpan * st.wing * (fam === 'serpent' ? 0.75 : fam === 'drake' ? 0.85 : 1) * (1 - 0.3 * p.dash) * flap;
   const sweep = -10 * fold - 8 * p.dash;
+  let ra = accentSets.get(id);
+  if (!ra) accentSets.set(id, (ra = new Set<RarityAccent>(art.rarityAccents)));
+  const trim = TRIM[id];
   for (const side of [-1, 1] as const) {
     const w = wingPath(look, span, side, fam, st.finger, sweep);
+    if (ra.has('solarFans')) solarFanTop(ctx, w, trim?.mid ?? '#f2c14e', trim?.light ?? '#fff6d8', c.outline);
     const g = ctx.createLinearGradient(0, 0, 0, 60 * side);
     g.addColorStop(0, look.wings === 'starry' ? '#26205a' : c.membrane);
     g.addColorStop(1, c.membraneLight);
@@ -675,6 +695,7 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
     ctx.fill(w.path);
     ctx.globalAlpha = 1;
     if (detail > 0) wingPatternTop(ctx, art.wing, w, c, p.ability);
+    wingRarityTop(ctx, ra, w, c);
     ctx.lineWidth = 2.4;
     ctx.strokeStyle = c.outline;
     ctx.stroke(w.path);
@@ -708,6 +729,7 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   bg.addColorStop(1, c.shade);
   outlined(ctx, bp, bg, c.outline);
   if (detail > 0) markingsTop(ctx, look, c, serp ? 0.8 : L, T, st.mark + 0.35 + p.ability, p.ability);
+  bodyRarityTop(ctx, art.rarityAccents, c, serp ? 0.8 : L, T, detail, p.ability, trim ?? null);
   // spine ridge
   ctx.fillStyle = look.ridge === 'crystals' ? c.membraneLight : look.ridge === 'leaves' ? c.membrane : look.ridge === 'plates' ? c.bone : c.accent;
   ctx.strokeStyle = c.outline;
@@ -741,8 +763,26 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   ctx.translate(hx, 0);
   const hs = st.head * 0.95;
   ctx.scale(hs, hs);
+  if (ra.has('layeredFrill')) layeredFrillTop(ctx, c);
+  if (ra.has('regalFins')) regalFinsTop(ctx, c, p.time);
   frillTop(ctx, look, c, st.horn, p.time);
+  if (ra.has('crystalCrown')) crystalCrownTop(ctx, c, st.horn);
+  if (stage === 'elder') elderTop(ctx, fam, look, c, id);
   hornsTop(ctx, look, c, st.horn);
+  if (ra.has('crestSpines')) {
+    ctx.fillStyle = c.accent;
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-2 - i * 5, -2.4);
+      ctx.lineTo(-9 - i * 5, 0);
+      ctx.lineTo(-2 - i * 5, 2.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
   const head = new Path2D();
   const young = stage === 'hatchling' ? 0.82 : stage === 'juvenile' ? 0.92 : 1;
   const snout = (look.head === 'long' || look.head === 'sleek' ? 30 : look.head === 'snub' ? 20 : look.head === 'wedge' ? 28 : 24) * art.head[0] * young;
@@ -837,13 +877,19 @@ function hornsTop(ctx: Ctx, look: Look, c: Palette, g: number) {
       pair(-10, 6, -18 - 6 * g, 9);
       break;
     case 'crown':
+      // outlined tines so the crown reads against any floor
       for (let i = 0; i < 5; i++) {
         const a = Math.PI * (0.65 + i * 0.175);
+        const r1 = 15 + 7 * g;
         ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
-        ctx.lineTo(Math.cos(a) * (14 + 6 * g), Math.sin(a) * (14 + 6 * g));
-        ctx.strokeStyle = i % 2 ? c.mark : fill;
-        ctx.lineWidth = 3;
+        ctx.moveTo(Math.cos(a - 0.12) * 8, Math.sin(a - 0.12) * 8);
+        ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+        ctx.lineTo(Math.cos(a + 0.12) * 8, Math.sin(a + 0.12) * 8);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 ? c.mark : fill;
+        ctx.fill();
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
       break;
@@ -861,17 +907,28 @@ function hornsTop(ctx: Ctx, look: Look, c: Palette, g: number) {
       break;
     case 'branch':
     case 'antlers': {
-      const k = (look.horns === 'antlers' ? 1.3 : 0.9) * g;
-      ctx.strokeStyle = c.accent;
-      ctx.lineWidth = 3;
+      // outlined beams with a second tine and a leaf: readable from above at gameplay scale
+      const k = (look.horns === 'antlers' ? 1.35 : 0.95) * g;
       for (const s of [-1, 1]) {
-        ctx.beginPath();
-        ctx.moveTo(-4, 6 * s);
-        ctx.lineTo(-12 * k, 18 * k * s);
-        ctx.moveTo(-8 * k, 12 * k * s);
-        ctx.lineTo(-2 * k, 20 * k * s);
+        const beam = () => {
+          ctx.beginPath();
+          ctx.moveTo(-4, 6 * s);
+          ctx.lineTo(-12 * k, 18 * k * s);
+          ctx.lineTo(-20 * k, 20 * k * s);
+          ctx.moveTo(-8 * k, 12 * k * s);
+          ctx.lineTo(-1 * k, 21 * k * s);
+          ctx.moveTo(-12 * k, 18 * k * s);
+          ctx.lineTo(-14 * k, 26 * k * s);
+        };
+        beam();
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 5.4;
         ctx.stroke();
-        leaf(ctx, -12 * k, 18 * k * s, s * 1.8, 8, 3, c.membrane, c.outline, c.bone);
+        beam();
+        ctx.strokeStyle = c.accent;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        leaf(ctx, -20 * k, 20 * k * s, s * 2.2 + Math.PI, 8, 3, c.membrane, c.outline, c.bone);
       }
       break;
     }
@@ -929,14 +986,15 @@ function tailTipTop(ctx: Ctx, look: Look, c: Palette, [x, y]: Pt, a: number) {
       leaf(ctx, -2, 0, 0, 22, 8, c.membrane, c.outline, c.bone);
       break;
     case 'ribbon':
+      // two long streamers (wider, outlined) so the ribbon tail reads from above
       ctx.moveTo(-2, -2);
-      ctx.quadraticCurveTo(14, -10, 26, -4);
-      ctx.quadraticCurveTo(14, -2, -2, 2);
+      ctx.bezierCurveTo(10, -14, 24, -6, 36, -12);
+      ctx.quadraticCurveTo(26, -1, -2, 2);
       fill(c.accent);
       ctx.beginPath();
       ctx.moveTo(-2, 2);
-      ctx.quadraticCurveTo(14, 10, 26, 4);
-      ctx.quadraticCurveTo(14, 2, -2, -2);
+      ctx.bezierCurveTo(10, 14, 24, 6, 36, 12);
+      ctx.quadraticCurveTo(26, 1, -2, -2);
       fill(c.mark);
       break;
     case 'spade':
@@ -982,6 +1040,338 @@ function tailTipTop(ctx: Ctx, look: Look, c: Palette, [x, y]: Pt, a: number) {
       ctx.closePath();
       fill(c.mark);
       break;
+  }
+  ctx.restore();
+}
+
+// --- rarity and elder ornaments from above -----------------------------------------------------------
+
+/** Solpyre's solar fans from above: ivory/gold rays opening past the wing edge. */
+function solarFanTop(ctx: Ctx, w: TopWing, mid: string, light: string, outline: string) {
+  const [F1, , F3] = w.tips;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < 5; i++) {
+    const t = mixPt(F1, F3, (i + 0.5) / 5);
+    const dx = t[0] - w.W[0];
+    const dy = t[1] - w.W[1];
+    const k = i % 2 ? 1.42 : 1.62;
+    const nx = -dy * 0.08;
+    const ny = dx * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(w.W[0] + dx * 0.5 + nx, w.W[1] + dy * 0.5 + ny);
+    ctx.lineTo(w.W[0] + dx * k, w.W[1] + dy * k);
+    ctx.lineTo(w.W[0] + dx * 0.5 - nx, w.W[1] + dy * 0.5 - ny);
+    ctx.closePath();
+    ctx.fillStyle = i % 2 ? light : mid;
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function wingRarityTop(ctx: Ctx, ra: Set<RarityAccent>, w: TopWing, c: Palette) {
+  if (!ra.has('wingTipMarks') && !ra.has('wingBands') && !ra.has('wingEyespots') && !ra.has('constellation')) return;
+  const [F1, F2, F3] = w.tips;
+  ctx.save();
+  ctx.clip(w.path);
+  if (ra.has('wingTipMarks')) {
+    const n = parseInt(c.membrane.slice(1), 16);
+    const lum = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+    ctx.fillStyle = lum < 0.3 ? mixHex(c.membraneLight, '#ffffff', 0.25) : mixHex(c.membrane, c.outline, 0.5);
+    for (const t of w.tips) {
+      ctx.beginPath();
+      ctx.arc(t[0], t[1], 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (ra.has('wingBands')) {
+    const edge = [F1, F2, F3, w.R];
+    ctx.beginPath();
+    edge.forEach((e, i) => (i ? ctx.lineTo(...mixPt(w.W, e, 0.55)) : ctx.moveTo(...mixPt(w.W, e, 0.55))));
+    edge
+      .slice()
+      .reverse()
+      .forEach((e) => ctx.lineTo(...mixPt(w.W, e, 0.72)));
+    ctx.closePath();
+    ctx.fillStyle = ra.has('crystalCrown') ? 'rgba(130,190,230,0.55)' : mixHex(c.bone, c.mark, 0.4);
+    ctx.globalAlpha = 0.75;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (ra.has('wingEyespots')) {
+    const m = mixPt(w.W, mixPt(F1, F2, 0.5), 0.62);
+    ctx.beginPath();
+    ctx.arc(m[0], m[1], 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = mixHex(c.bone, c.mark, 0.3);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(m[0], m[1], 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = c.outline;
+    ctx.fill();
+  }
+  if (ra.has('constellation')) {
+    ctx.strokeStyle = 'rgba(220,226,255,0.8)';
+    ctx.lineWidth = 1.2;
+    const a = mixPt(w.W, F1, 0.6);
+    const b = mixPt(w.W, F3, 0.6);
+    const m = mixPt(w.W, F2, 0.75);
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.quadraticCurveTo(m[0], m[1], b[0], b[1]);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Body rarity anatomy from above (armour layer, emissive seams, constellation, trim). */
+function bodyRarityTop(ctx: Ctx, accents: RarityAccent[], c: Palette, L: number, T: number, detail: number, glow: number, trim: { light: string; mid: string } | null) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const a of accents) {
+    switch (a) {
+      case 'armorLayer':
+        ctx.fillStyle = mixHex(c.bone, c.shade, 0.35);
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.1;
+        for (const s of [-1, 1])
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.ellipse((10 - i * 11) * L, s * 6.5 * T, 4.6, 3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          }
+        break;
+      case 'emissiveSeams':
+        ctx.strokeStyle = `rgba(${c.glow},${0.65 + 0.3 * glow})`;
+        ctx.lineWidth = 1.6;
+        for (const s of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(18 * L, s * 9 * T);
+          ctx.lineTo(4 * L, s * 11 * T);
+          ctx.lineTo(-8 * L, s * 9.5 * T);
+          ctx.lineTo(-20 * L, s * 10.5 * T);
+          ctx.stroke();
+        }
+        break;
+      case 'constellation': {
+        const stars: [number, number][] = [
+          [14, -5],
+          [4, 4],
+          [-6, -6],
+          [-16, 3],
+        ];
+        ctx.strokeStyle = 'rgba(210,220,255,0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        stars.forEach(([x, y], i) => (i ? ctx.lineTo(x * L, y * T) : ctx.moveTo(x * L, y * T)));
+        ctx.stroke();
+        ctx.fillStyle = '#fff6d6';
+        for (const [x, y] of stars) {
+          ctx.beginPath();
+          ctx.arc(x * L, y * T, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'gilded':
+        if (trim && detail > 0) {
+          ctx.strokeStyle = trim.mid;
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 1.6;
+          for (const s of [-1, 1]) {
+            ctx.beginPath();
+            ctx.moveTo(18 * L, s * 3 * T);
+            ctx.lineTo(-20 * L, s * 3 * T);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        }
+        break;
+      case 'patternScales':
+        if (detail > 0) {
+          ctx.fillStyle = mixHex(c.body, c.mark, 0.5);
+          ctx.globalAlpha = 0.6;
+          for (const s of [-1, 1])
+            for (let i = 0; i < 3; i++) {
+              ctx.beginPath();
+              ctx.ellipse((8 - i * 12) * L, s * 9 * T, 2.6, 1.8, 0, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          ctx.globalAlpha = 1;
+        }
+        break;
+    }
+  }
+  ctx.restore();
+}
+
+/** Layered frill from above: a fan of two layers behind the skull. */
+function layeredFrillTop(ctx: Ctx, c: Palette) {
+  for (const [r, col] of [
+    [20, c.membraneLight],
+    [15, c.mark],
+  ] as const) {
+    ctx.beginPath();
+    ctx.moveTo(-2, 0);
+    for (let i = 0; i <= 6; i++) {
+      const a = Math.PI * (0.62 + (i / 6) * 0.76);
+      const rr = i % 2 ? r * 0.8 : r;
+      ctx.lineTo(-4 + Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  }
+}
+
+/** Leviara's regal fins from above: long flowing fins trailing from the head over the shoulders. */
+function regalFinsTop(ctx: Ctx, c: Palette, t: number) {
+  for (const s of [-1, 1]) {
+    const w = Math.sin(t * 1.3 + s) * 3;
+    ctx.beginPath();
+    ctx.moveTo(-2, 5 * s);
+    ctx.bezierCurveTo(-16, (20 + w) * s, -34, (24 + w) * s, -54, (18 + w) * s);
+    ctx.bezierCurveTo(-34, (13 + w * 0.5) * s, -16, 8 * s, -6, 2 * s);
+    ctx.closePath();
+    ctx.fillStyle = c.membrane;
+    ctx.fill();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-6, 6 * s);
+    ctx.quadraticCurveTo(-24, (17 + w) * s, -46, (18 + w) * s);
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.arc(-3, 5 * s, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff8ee';
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** Glacielle's crystal crown from above: translucent shards fanning back from the skull. */
+function crystalCrownTop(ctx: Ctx, c: Palette, g: number) {
+  for (let i = 0; i < 5; i++) {
+    const a = Math.PI * (0.7 + i * 0.15);
+    const r = (i % 2 ? 24 : 32) * (0.6 + 0.4 * g);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a - 0.22) * 6, Math.sin(a - 0.22) * 6);
+    ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    ctx.lineTo(Math.cos(a + 0.22) * 6, Math.sin(a + 0.22) * 6);
+    ctx.closePath();
+    ctx.fillStyle = '#f4fbff';
+    ctx.fill();
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(a) * r * 0.9, Math.sin(a) * r * 0.9);
+    ctx.strokeStyle = 'rgba(120,170,230,0.8)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/** Elder ornaments seen from above (the side view's elder trait has a top-down counterpart). */
+function elderTop(ctx: Ctx, fam: Family, look: Look, c: Palette, id: SpeciesId) {
+  ctx.save();
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = 1.4;
+  switch (fam) {
+    case 'drake':
+      // bony jaw plates flaring at the cheeks
+      ctx.fillStyle = mixHex(c.bone, '#ffffff', 0.25);
+      for (const s of [-1, 1])
+        for (let i = 0; i < 2; i++) {
+          ctx.beginPath();
+          ctx.ellipse(6 - i * 7, s * (12 + i), 4, 2.8, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      break;
+    case 'serpent':
+      // long barbels trailing from the snout
+      ctx.strokeStyle = mixHex(c.mark, '#ffffff', 0.2);
+      ctx.lineWidth = 1.8;
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(18, 4 * s);
+        ctx.quadraticCurveTo(8, 18 * s, -14, 22 * s);
+        ctx.stroke();
+      }
+      break;
+    case 'crystal':
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(4, 9 * s);
+        ctx.lineTo(-6, 18 * s);
+        ctx.lineTo(-2, 8 * s);
+        ctx.closePath();
+        ctx.fillStyle = c.membraneLight;
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    case 'cloud':
+      ctx.fillStyle = id === 'spark' ? mixHex(c.mark, '#ffffff', 0.35) : id === 'ripple' ? c.membraneLight : c.belly;
+      for (const s of [-1, 1])
+        for (const [x, y] of [
+          [-8, 10],
+          [-14, 6],
+        ]) {
+          ctx.beginPath();
+          ctx.arc(x, y * s, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      break;
+    case 'wyvern':
+      ctx.fillStyle = mixHex(c.accent, '#ffffff', 0.2);
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(2, 8 * s);
+        ctx.lineTo(-14, 16 * s);
+        ctx.lineTo(-4, 6 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    default:
+      // classic elders: a second, smaller horn pair (or the species ornament's crest)
+      if (look.horns !== 'none' && look.horns !== 'ears') {
+        ctx.fillStyle = mixHex(c.accent, '#ffffff', 0.2);
+        for (const s of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(6, 5 * s);
+          ctx.lineTo(-4, 13 * s);
+          ctx.lineTo(1, 4 * s);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = id === 'tide' ? '#fff8ee' : c.mark;
+        for (const s of [-1, 1])
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(-2 - i * 4, s * (8 + i * 1.5), 1.8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          }
+      }
   }
   ctx.restore();
 }

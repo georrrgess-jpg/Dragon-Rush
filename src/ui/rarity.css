@@ -1,0 +1,126 @@
+/* Update 5 — rarity language for DOM (see src/ui/rarity.ts). Shape first, colour supports:
+   badges carry a distinct symbol silhouette + the word; card frames are inset lines + corner
+   ornaments (pseudo-elements) so the card's border stays free for selection and focus. */
+
+/* --- badges --- */
+.rbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 5px;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: nowrap;
+  vertical-align: middle;
+  position: relative;
+}
+.rbadge .rs { flex: none; overflow: visible; }
+.rs .rs-gem { fill: currentColor; stroke: var(--rs-dark, #222); stroke-width: 1.1; stroke-linejoin: round; }
+.rs .rs-facet { fill: #fff; opacity: 0.55; }
+.rs .rs-ring { fill: #fff4cc; stroke: var(--rs-dark, #222); stroke-width: 1; }
+.rs-common { color: #7d8c99; --rs-dark: #44515c; }
+.rs-rare { color: #2f86d6; --rs-dark: #174a7c; }
+.rs-epic { color: #8f4fd6; --rs-dark: #4c2384; }
+.rs-legendary { color: #d99a16; --rs-dark: #7a4d05; }
+.rbadge-common { color: #4f5d69; background: #f3f6f8; border-color: #aab6c0; }
+.rbadge-rare { color: #1d5f9e; background: #edf5fd; border-color: #2f86d6; }
+.rbadge-epic {
+  color: #5b2a99;
+  background: #f6efff;
+  border-color: #8f4fd6;
+  box-shadow: inset 0 0 0 1.5px #fff, inset 0 0 0 2.5px rgba(143, 79, 214, 0.35);
+}
+.rbadge-legendary {
+  color: #6e4404;
+  background: linear-gradient(#fffaf0, #ffecb0);
+  border: 2px solid #d99a16;
+  box-shadow: 0 1px 0 rgba(122, 77, 5, 0.35);
+}
+.rbadge-compact { padding: 0 4px; }
+.rbadge-compact .rbadge-word {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --- card frames --- */
+.rframe { position: relative; isolation: isolate; }
+.rframe::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+}
+.rframe-common { box-shadow: 0 3px 0 rgba(15, 79, 88, 0.2), inset 0 0 0 1px #c3ccd3; }
+.rframe-rare { box-shadow: 0 3px 0 rgba(15, 79, 88, 0.2), inset 0 0 0 2px #2f86d6; }
+.rframe-rare::after {
+  inset: 4px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cg transform=''%3E%3Cpath d='M5 1L9 5L5 9L1 5Z' fill='%23cfe6fb' stroke='%232f86d6' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") top left / 9px 9px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cg transform='translate(10,0) scale(-1,1)'%3E%3Cpath d='M5 1L9 5L5 9L1 5Z' fill='%23cfe6fb' stroke='%232f86d6' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") top right / 9px 9px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cg transform='translate(0,10) scale(1,-1)'%3E%3Cpath d='M5 1L9 5L5 9L1 5Z' fill='%23cfe6fb' stroke='%232f86d6' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") bottom left / 9px 9px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cg transform='translate(10,0) scale(-1,1) translate(0,10) scale(1,-1)'%3E%3Cpath d='M5 1L9 5L5 9L1 5Z' fill='%23cfe6fb' stroke='%232f86d6' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E") bottom right / 9px 9px no-repeat;
+}
+.rframe-epic {
+  box-shadow: 0 3px 0 rgba(15, 79, 88, 0.2), inset 0 0 0 2px #8f4fd6, inset 0 0 0 5px rgba(255, 255, 255, 0.9), inset 0 0 0 6px rgba(143, 79, 214, 0.45);
+}
+.rframe-epic::after {
+  inset: 1px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 16'%3E%3Cpath d='M5 4L8.5 9L5 14L1.5 9Z M19 4L22.5 9L19 14L15.5 9Z' fill='%238f4fd6' stroke='%234c2384' stroke-width='1'/%3E%3Cpath d='M12 0.6L16.5 7.6L12 14.6L7.5 7.6Z' fill='%238f4fd6' stroke='%234c2384' stroke-width='1'/%3E%3Cpath d='M12 0.6L7.5 7.6L12 7.6Z' fill='%23eadcff'/%3E%3C/svg%3E") top center / 24px 14px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg transform=''%3E%3Cpath d='M2 18Q2 2 18 2' fill='none' stroke='%234c2384' stroke-width='1.6'/%3E%3Cpath d='M7 13Q7.5 7.5 13 7' fill='none' stroke='%238f4fd6' stroke-width='1.3'/%3E%3Cpath d='M7 4L10 7L7 10L4 7Z' fill='%23eadcff' stroke='%238f4fd6' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E") top left / 18px 18px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg transform='translate(20,0) scale(-1,1)'%3E%3Cpath d='M2 18Q2 2 18 2' fill='none' stroke='%234c2384' stroke-width='1.6'/%3E%3Cpath d='M7 13Q7.5 7.5 13 7' fill='none' stroke='%238f4fd6' stroke-width='1.3'/%3E%3Cpath d='M7 4L10 7L7 10L4 7Z' fill='%23eadcff' stroke='%238f4fd6' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E") top right / 18px 18px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg transform='translate(0,20) scale(1,-1)'%3E%3Cpath d='M2 18Q2 2 18 2' fill='none' stroke='%234c2384' stroke-width='1.6'/%3E%3Cpath d='M7 13Q7.5 7.5 13 7' fill='none' stroke='%238f4fd6' stroke-width='1.3'/%3E%3Cpath d='M7 4L10 7L7 10L4 7Z' fill='%23eadcff' stroke='%238f4fd6' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E") bottom left / 18px 18px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg transform='translate(20,0) scale(-1,1) translate(0,20) scale(1,-1)'%3E%3Cpath d='M2 18Q2 2 18 2' fill='none' stroke='%234c2384' stroke-width='1.6'/%3E%3Cpath d='M7 13Q7.5 7.5 13 7' fill='none' stroke='%238f4fd6' stroke-width='1.3'/%3E%3Cpath d='M7 4L10 7L7 10L4 7Z' fill='%23eadcff' stroke='%238f4fd6' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E") bottom right / 18px 18px no-repeat;
+}
+.rframe-legendary {
+  box-shadow: 0 3px 0 rgba(122, 77, 5, 0.25), inset 0 0 0 3px #d99a16, inset 0 0 0 4px #f6d27a, inset 0 0 0 6px #fff6dc, inset 0 0 0 7px rgba(122, 77, 5, 0.3);
+}
+.rframe-legendary::after {
+  inset: 1px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 16'%3E%3Ccircle cx='9' cy='10' r='5.6' fill='%23fff4cc' stroke='%237a4d05' stroke-width='1'/%3E%3Cpath d='M5 4.6L6.2 1.6L7.4 4.6ZM7.8 4.2L9 0.8L10.2 4.2ZM10.6 4.6L11.8 1.6L13 4.6Z' fill='%23d99a16' stroke='%237a4d05' stroke-width='0.8'/%3E%3Cpath d='M9 5.2L10.4 8.6L14 9L11.2 11.2L12.2 14.6L9 12.7L5.8 14.6L6.8 11.2L4 9L7.6 8.6Z' fill='%23d99a16' stroke='%237a4d05' stroke-width='0.8'/%3E%3C/svg%3E") top center / 20px 17px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cg transform=''%3E%3Cpath d='M7 1L8.4 5.6L13 7L8.4 8.4L7 13L5.6 8.4L1 7L5.6 5.6Z' fill='%23fff4cc' stroke='%237a4d05' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") top left / 13px 13px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cg transform='translate(14,0) scale(-1,1)'%3E%3Cpath d='M7 1L8.4 5.6L13 7L8.4 8.4L7 13L5.6 8.4L1 7L5.6 5.6Z' fill='%23fff4cc' stroke='%237a4d05' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") top right / 13px 13px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cg transform='translate(0,14) scale(1,-1)'%3E%3Cpath d='M7 1L8.4 5.6L13 7L8.4 8.4L7 13L5.6 8.4L1 7L5.6 5.6Z' fill='%23fff4cc' stroke='%237a4d05' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") bottom left / 13px 13px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cg transform='translate(14,0) scale(-1,1) translate(0,14) scale(1,-1)'%3E%3Cpath d='M7 1L8.4 5.6L13 7L8.4 8.4L7 13L5.6 8.4L1 7L5.6 5.6Z' fill='%23fff4cc' stroke='%237a4d05' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") bottom right / 13px 13px no-repeat;
+}
+/* a slow shimmer that travels along the legendary band only (masked to the ring) */
+.rframe-legendary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.85) 50%, transparent 58%) 0 0 / 300% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: rframe-shine 5.5s linear infinite;
+}
+@keyframes rframe-shine {
+  from { background-position: 100% 0; }
+  to { background-position: -50% 0; }
+}
+.reduced-motion .rframe-legendary::before,
+.low-effects .rframe-legendary::before {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rframe-legendary::before { animation: none; display: none; }
+}
+/* Low effects keeps the structure (lines, ornaments, crest), drops the soft outer shadow tint */
+.low-effects .rframe-legendary {
+  box-shadow: 0 3px 0 rgba(15, 79, 88, 0.2), inset 0 0 0 3px #d99a16, inset 0 0 0 6px #fff6dc, inset 0 0 0 7px rgba(122, 77, 5, 0.3);
+}
