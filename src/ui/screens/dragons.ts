@@ -608,6 +608,11 @@ export class DragonsScreen implements Screen {
     return `<table class="records">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>`;
   }
 
+  /** Window resized: rebuild the inspector canvas at the new stage scale. */
+  resize(): void {
+    this.render();
+  }
+
   update(dt: number): void {
     if (!this.ctx) return;
     const s = this.ui.save;

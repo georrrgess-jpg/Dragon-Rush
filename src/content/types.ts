@@ -32,6 +32,8 @@ export type SpeciesId =
 
 export type RegionId = 'isles' | 'canyon' | 'coast' | 'frost' | 'storm';
 export type ModeId = 'rush' | 'trials' | 'arena' | 'ascent';
+/** Every mode id (the one list saves and menus validate against). */
+export const MODE_IDS: readonly ModeId[] = ['rush', 'trials', 'arena', 'ascent'];
 
 export interface Palette {
   body: string;

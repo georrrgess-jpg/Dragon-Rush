@@ -12,7 +12,7 @@ import type { RunSummary } from '../sim/flight';
 import type { ArenaReport } from './arenaScreen';
 import { bar, el, esc, fmtTime, icon, sizeCanvas } from './dom';
 import { rarityBadge } from './rarity';
-import { ASCENT_UNLOCK_FLIGHTS } from '../content/modes';
+import { ASCENT_UNLOCK_FLIGHTS, MODES } from '../content/modes';
 import type { UI } from './types';
 
 export interface ResultsData {
@@ -223,9 +223,10 @@ export class ResultsScreen {
     for (const id of ev.newSpecies) lines.push(`<b>${SPECIES[id].name} joined your roster!</b>`);
     for (const r of ev.regions) lines.push(`New region unlocked: <b>${REGIONS[r].name}</b>`);
     if (d.kind === 'rush' && !d.early) {
+      // the mode registry decides when Ascent opens; this only reports it
       const f = s.lifetime.flights;
-      if (f === ASCENT_UNLOCK_FLIGHTS) lines.push('<b>Aether Ascent unlocked!</b> Choose it above the Play button on Home.');
-      else if (f < ASCENT_UNLOCK_FLIGHTS) lines.push(`${f}/${ASCENT_UNLOCK_FLIGHTS} full flights toward Aether Ascent`);
+      if (!MODES.ascent.locked(s) && f === ASCENT_UNLOCK_FLIGHTS) lines.push('<b>Aether Ascent unlocked!</b> Choose it above the Play button on Home.');
+      else if (MODES.ascent.locked(s)) lines.push(`${f}/${ASCENT_UNLOCK_FLIGHTS} full flights toward Aether Ascent`);
     }
     // Evolution: one combined moment, even when a run crosses several stage milestones.
     const stageIdx = (x: Stage) => STAGES.findIndex((q) => q.id === x);

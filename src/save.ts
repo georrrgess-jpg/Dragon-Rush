@@ -3,7 +3,7 @@
 // saves from a newer version are never overwritten; unreadable saves are kept for recovery.
 import { MAX_LEVEL, migrateLegacyLevel, type TalentId } from './content/progression';
 import { SPECIES, SPECIES_IDS } from './content/species';
-import type { Rarity, RegionId, SpeciesId } from './content/types';
+import { MODE_IDS, type Rarity, type RegionId, type SpeciesId } from './content/types';
 import { HATCHERY, REGION_IDS, type MarkingId } from './content/world';
 
 export const SAVE_KEY = 'emberwild.dragonRush.save';
@@ -320,8 +320,11 @@ export function defaultSave(): SaveData {
 
 // --- field readers ------------------------------------------------------------------------------
 
+/** Largest whole number a save field may hold (guards against absurd imported values). */
+const INT_MAX = 1e12;
+
 function int(v: unknown, fallback = 0): number {
-  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : fallback;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(INT_MAX, Math.floor(v)) : fallback;
 }
 
 function num01(v: unknown, fallback: number): number {
@@ -480,7 +483,7 @@ export function sanitize(raw: unknown): SaveData {
     ? r.recent.filter((x: any) => x && typeof x.text === 'string').slice(0, 6).map((x: any) => ({ text: x.text.slice(0, 120), at: int(x.at) }))
     : [];
   const a = r.activeRun;
-  if (a && typeof a.id === 'string' && speciesId(a.dragon) && ['rush', 'trials', 'arena', 'ascent'].includes(a.mode)) {
+  if (a && typeof a.id === 'string' && speciesId(a.dragon) && MODE_IDS.includes(a.mode)) {
     d.activeRun = {
       id: a.id,
       mode: a.mode,
@@ -513,9 +516,9 @@ export function sanitize(raw: unknown): SaveData {
     collectionSort: sorts.includes(pf.collectionSort) ? pf.collectionSort : 'favorites',
     observatoryPose: poses.includes(pf.observatoryPose) ? pf.observatoryPose : 'idle',
     quickReveal: bool(pf.quickReveal, false),
-    lastMode: ['rush', 'trials', 'arena', 'ascent'].includes(pf.lastMode) ? pf.lastMode : 'rush',
+    lastMode: MODE_IDS.includes(pf.lastMode) ? pf.lastMode : 'rush',
     dismissedGoal: typeof pf.dismissedGoal === 'string' ? pf.dismissedGoal.slice(0, 80) : null,
-    tutorials: strList(pf.tutorials, 60).map((t) => t.slice(0, 40)),
+    tutorials: [...new Set(strList(pf.tutorials, 60).map((t) => t.slice(0, 40)))],
     keysSeen: int(pf.keysSeen),
   };
   const asc = r.ascent ?? {};
