@@ -6,7 +6,7 @@ import type { SpeciesId } from '../../content/types';
 import type { MarkingId } from '../../content/world';
 import { nextGoal, type NextGoal } from '../../economy';
 import { ART_REV, portrait } from '../../render/dragonArt';
-import { drawEgg } from '../../render/eggs';
+import { EGG_ART_REV, drawEgg } from '../../render/eggs';
 import { bar, esc } from '../dom';
 import type { Tab, UI } from '../types';
 
@@ -27,7 +27,7 @@ const eggUrls = new Map<string, string>();
 
 /** Data URL of a still egg (bounded cache: 24 species × the few sizes the UI uses). */
 export function eggUrl(id: SpeciesId, w = 64, h = 80): string {
-  const key = `${ART_REV}:${id}:${w}x${h}`;
+  const key = `${ART_REV}:${EGG_ART_REV}:${id}:${w}x${h}`;
   let u = eggUrls.get(key);
   if (!u) {
     const k = 2;
@@ -36,7 +36,8 @@ export function eggUrl(id: SpeciesId, w = 64, h = 80): string {
     c.height = h * k;
     const ctx = c.getContext('2d')!;
     ctx.scale(k, k);
-    drawEgg(ctx, id, w / 2, h * 0.52, h * 0.82);
+    // detail tier by size: icon (small lists), reel (cards), detail (codex)
+    drawEgg(ctx, id, w / 2, h * 0.52, h * 0.82, { tier: h <= 64 ? 0 : h < 120 ? 1 : 2 });
     u = c.toDataURL();
     eggUrls.set(key, u);
   }

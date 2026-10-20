@@ -170,10 +170,12 @@ export type ObservatoryPose = 'idle' | 'fly' | 'dash' | 'ability';
 export interface Prefs {
   collectionSort: CollectionSortPref;
   observatoryPose: ObservatoryPose;
+  /** Shorter hatch reveal (every stage kept). */
+  quickReveal: boolean;
 }
 
 export function defaultPrefs(): Prefs {
-  return { collectionSort: 'favorites', observatoryPose: 'idle' };
+  return { collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false };
 }
 
 // --- defaults -------------------------------------------------------------------------------------
@@ -473,6 +475,7 @@ export function sanitize(raw: unknown): SaveData {
   d.prefs = {
     collectionSort: sorts.includes(pf.collectionSort) ? pf.collectionSort : 'favorites',
     observatoryPose: poses.includes(pf.observatoryPose) ? pf.observatoryPose : 'idle',
+    quickReveal: bool(pf.quickReveal, false),
   };
   return d;
 }

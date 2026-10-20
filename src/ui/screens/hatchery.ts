@@ -61,16 +61,6 @@ interface Particle {
   color: string;
 }
 
-const QUICK_KEY = 'emberwild.quickHatch';
-
-function readQuick(): boolean {
-  try {
-    return localStorage.getItem(QUICK_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
 function smooth(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -128,7 +118,9 @@ export class HatcheryScreen implements Screen {
   private panel: 'odds' | 'history' | 'catalog' = 'odds';
   private busy = false;
   private pendingEvents: Parameters<UI['announce']>[0] | null = null;
-  private quick = readQuick();
+  private get quick(): boolean {
+    return this.ui.save.prefs.quickReveal;
+  }
   private timing = TIMING.normal;
   private anims: DragonAnimator[] = [];
   /** Batch result being inspected (index), or null for the overview. */
@@ -180,12 +172,8 @@ export class HatcheryScreen implements Screen {
         this.skip();
         return;
       case 'quick':
-        this.quick = (b as HTMLInputElement).checked;
-        try {
-          localStorage.setItem(QUICK_KEY, this.quick ? '1' : '0');
-        } catch {
-          /* per-viewer convenience only */
-        }
+        // a view preference kept in the save (no effect on what an egg awards)
+        this.ui.commit({ ...this.ui.save, prefs: { ...this.ui.save.prefs, quickReveal: (b as HTMLInputElement).checked } });
         return;
       case 'inspect':
         sfx.click();

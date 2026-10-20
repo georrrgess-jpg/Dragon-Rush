@@ -404,7 +404,7 @@ export class Observatory implements Overlay {
     ctx.fill();
     // a slow, gentle sway only (no flashing); still under reduced motion
     const sway = this.ui.save.settings.reducedMotion ? 0 : Math.sin(this.t * 0.9) * 0.025;
-    drawEgg(ctx, this.id, EGG_W / 2, EGG_H * 0.5, EGG_H * 0.72, { wobble: sway });
+    drawEgg(ctx, this.id, EGG_W / 2, EGG_H * 0.5, EGG_H * 0.72, { wobble: sway, tier: 2, time: this.t, reducedMotion: this.ui.save.settings.reducedMotion });
   }
 }
 

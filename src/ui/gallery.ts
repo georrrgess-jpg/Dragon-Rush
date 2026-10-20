@@ -10,7 +10,7 @@ import type { MarkingId } from '../content/world';
 import { FLIGHT } from '../config';
 import { DRAGON_HIT_OFFSET, drawDragon, mouthPoint, stageScale, type DragonPose } from '../render/dragonArt';
 import { wingCycle } from '../render/dragonAnim';
-import { drawEgg, type EggOptions } from '../render/eggs';
+import { drawEgg } from '../render/eggs';
 import { drawDragonTop } from '../render/topdown';
 
 const CELL_W = 230;
@@ -177,11 +177,11 @@ function drawRow(ctx: CanvasRenderingContext2D, id: SpeciesId, t: number, o: Opt
   // eggs: detail tier (codex/hero), reel tier and icon tier
   const wob = o.reduced || o.freeze ? 0 : Math.sin(t * 3) * 0.05;
   cellBg(ctx, 4, 0, o);
-  drawEgg(ctx, id, CELL_W * 4.5, CELL_H / 2 + 6, 130, { wobble: wob, tier: 2, time: t, reducedMotion: o.reduced } as EggOptions);
+  drawEgg(ctx, id, CELL_W * 4.5, CELL_H / 2 + 6, 130, { wobble: wob, tier: 2, time: t, reducedMotion: o.reduced });
   label(ctx, 'Egg · detail tier', CELL_W * 4 + 8, 14, o);
   cellBg(ctx, 4, 1, o);
-  drawEgg(ctx, id, CELL_W * 4.32, CELL_H * 1.52, 78, { tier: 1, time: t, reducedMotion: o.reduced } as EggOptions);
-  drawEgg(ctx, id, CELL_W * 4.78, CELL_H * 1.6, 34, { tier: 0, time: t, reducedMotion: o.reduced } as EggOptions);
+  drawEgg(ctx, id, CELL_W * 4.32, CELL_H * 1.52, 78, { tier: 1, time: t, reducedMotion: o.reduced });
+  drawEgg(ctx, id, CELL_W * 4.78, CELL_H * 1.6, 34, { tier: 0, time: t, reducedMotion: o.reduced });
   label(ctx, 'Egg · reel · icon', CELL_W * 4 + 8, CELL_H + 14, o);
 }
 
