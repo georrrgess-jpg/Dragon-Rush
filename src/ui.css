@@ -1454,3 +1454,7 @@ kbd {
 .play-card p { font-size: 14px; margin: 0; }
 .recent-card ul { font-size: 14px; }
 .recent-card { flex: 1; min-height: 0; overflow: hidden; }
+
+/* toasts sit at the right, below the top bar, so they never cover the main content */
+#toast-root { left: auto; right: 16px; top: 70px; transform: none; align-items: flex-end; }
+.toast { max-width: 420px; text-align: left; font-size: 15px; padding: 8px 14px; }

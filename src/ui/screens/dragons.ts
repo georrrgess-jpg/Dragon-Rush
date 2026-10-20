@@ -411,7 +411,7 @@ export class DragonsScreen implements Screen {
     if (!this.ctx) return;
     const s = this.ui.save;
     const d = s.dragons[this.focus];
-    const st = { species: this.focus, stage: d.owned ? stageOf(d.level) : ('adult' as const), marking: d.owned ? d.marking : ('default' as const), region: s.rush.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false, focusX: 0.62, zoom: d.owned && d.level < 15 ? 1.45 : 1.15 };
+    const st = { species: this.focus, stage: d.owned ? stageOf(d.level) : ('adult' as const), marking: d.owned ? d.marking : ('default' as const), region: s.rush.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false, focusX: 0.7, zoom: d.owned && d.level < 5 ? 1.35 : d.owned && d.level < 15 ? 1.1 : 0.9 };
     this.hero.update(dt, st);
     this.hero.draw(this.ctx, st);
   }
