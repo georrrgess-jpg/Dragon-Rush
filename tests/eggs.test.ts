@@ -82,3 +82,55 @@ describe('egg fracture geometry', () => {
     expect(Math.abs(polyArea(clipConvex(sq, half)))).toBeCloseTo(0.5);
   });
 });
+
+// --- shell cache (Node has no canvas: a no-op 2D context stands in) ------------------------------
+
+const noop = () => {};
+function fakeCtx(): unknown {
+  const store: Record<string | symbol, unknown> = {};
+  return new Proxy(store, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
+      if (k === 'getTransform') return () => ({ a: 1, b: 0 });
+      return noop;
+    },
+    set(t, k, v) {
+      t[k] = v;
+      return true;
+    },
+  });
+}
+
+describe('egg shell cache', () => {
+  it('renders every species at every tier, keeps the cache bounded and reuses entries', async () => {
+    let created = 0;
+    const g = globalThis as Record<string, unknown>;
+    g.Path2D = class {
+      constructor() {
+        return new Proxy(this, { get: (t, k) => (k in t ? (t as Record<string | symbol, unknown>)[k] : noop) });
+      }
+    };
+    g.document = {
+      createElement: () => {
+        created++;
+        return { width: 0, height: 0, style: {}, getContext: () => fakeCtx(), toDataURL: () => '' };
+      },
+    };
+    const eggs = await import('../src/render/eggs');
+    eggs.clearEggCache();
+    const ctx = fakeCtx() as CanvasRenderingContext2D;
+    for (const id of SPECIES_IDS) for (const tier of [0, 1, 2] as const) eggs.drawEgg(ctx, id, 50, 50, 120, { tier, crack: 0.5, glow: 0.5, time: 1 });
+    const afterFirst = created;
+    // same species/tier/size again: served from the cache, no new canvases
+    for (const id of SPECIES_IDS) for (const tier of [0, 1, 2] as const) eggs.drawEgg(ctx, id, 80, 60, 121, { tier, wobble: 0.1, time: 2 });
+    expect(created).toBe(afterFirst);
+    // many sizes: the LRU stays within its limit
+    for (let h = 40; h < 900; h += 6) eggs.eggShellImage('ember', 1, h);
+    expect(eggs.eggCacheStats().entries).toBeLessThanOrEqual(eggs.EGG_CACHE_LIMIT);
+    expect(eggs.EGG_ART_REV).toBeGreaterThanOrEqual(1);
+    // icons are cached too
+    const a = eggs.eggIcon('tide', 48);
+    expect(eggs.eggIcon('tide', 48)).toBe(a);
+  });
+});

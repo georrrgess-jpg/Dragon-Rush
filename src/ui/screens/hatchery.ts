@@ -35,7 +35,7 @@ const TIMING = {
   quick: { reel: 1.2, settle: 0.2, wobble: 0.25, crack: 0.3, split: 0.45, hold: 0.2, startCards: 27 },
 };
 const REDUCED_FADE = 0.6;
-const BATCH = { start: 0.2, gap: 0.36, wobble: 0.16, crack: 0.22, split: 0.34, hold: 0.25 };
+const BATCH = { start: 0.2, gap: 0.34, wobble: 0.16, crack: 0.22, split: 0.34, hold: 0.2 };
 
 /** Pedestal top center and egg placement in the single reveal. */
 const PED_Y = 196;
