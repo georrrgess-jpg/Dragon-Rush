@@ -852,6 +852,8 @@ export class AscentSim {
 
   upgrades: Record<UpgradeId, number> = { mend: 0, spare: 0, shell: 0, reach: 0, quick: 0, grace: 0, battery: 0, blessing: 0, refresh: 0, breath: 0 };
   offers: UpgradeId[] = [];
+  /** Total upgrades chosen this run (cheap change detection for the HUD). */
+  upgradesTaken = 0;
   private upRng: Rng;
   private shrines = new Set<number>();
   private bannersShown = new Set<number>();
@@ -1407,6 +1409,7 @@ export class AscentSim {
 
   private applyUpgrade(id: UpgradeId) {
     this.upgrades[id] += 1;
+    this.upgradesTaken += 1;
     switch (id) {
       case 'mend':
         this.wards = Math.min(this.maxWards, this.wards + 1);

@@ -2,8 +2,8 @@
 // telegraphs → pickups → enemies → shots → player → particles → screen-space markers.
 //
 // Visual language (consistent colour + shape):
-// - Enemy attacks: warm red/orange with hard edges — dashed telegraph outlines that fill toward
-//   the strike, a red "!" badge over any enemy winding up, diamond-shaped hostile shots.
+// - Enemy attacks: warm red/orange with hard edges — dark + bright double outlines that fill
+//   toward the strike, a red "!" badge over any enemy winding up, diamond-shaped hostile shots.
 // - Recovery windows: grey "dazed" stars over an enemy that just attacked (safe to punish).
 // - Player effects: the dragon's element colour, soft and round (no hard dark outlines).
 // - Pickups: bob gently, sit on a white outline halo, blink before they vanish.
@@ -568,10 +568,8 @@ export class ArenaRenderer {
         ctx.arc(h.x, h.y, h.r, 0, TAU);
         ctx.stroke();
         ctx.strokeStyle = DANGER;
-        ctx.lineWidth = 3.5;
-        ctx.setLineDash([12, 8]);
+        ctx.lineWidth = 3;
         ctx.stroke();
-        ctx.setLineDash([]);
         // hard tick marks pointing in
         ctx.strokeStyle = DANGER_DARK;
         ctx.lineWidth = 3;
@@ -637,20 +635,18 @@ export class ArenaRenderer {
         ctx.lineWidth = 5;
         ctx.strokeRect(0, -w / 2, len, w);
         ctx.strokeStyle = DANGER;
-        ctx.lineWidth = 3;
-        ctx.setLineDash([14, 8]);
+        ctx.lineWidth = 2.5;
         ctx.strokeRect(0, -w / 2, len, w);
-        ctx.setLineDash([]);
         // chevrons show the direction
         ctx.strokeStyle = 'rgba(122,22,6,0.8)';
         ctx.lineWidth = 4;
+        ctx.beginPath();
         for (let d = 50; d < len - 10; d += 70) {
-          ctx.beginPath();
           ctx.moveTo(d, -w * 0.28);
           ctx.lineTo(d + 16, 0);
           ctx.lineTo(d, w * 0.28);
-          ctx.stroke();
         }
+        ctx.stroke();
         ctx.restore();
       } else if (e.kind === 'shooter' || e.kind === 'sower') {
         // aim line from the enemy to where it is aiming (sowers: where the circle will land)

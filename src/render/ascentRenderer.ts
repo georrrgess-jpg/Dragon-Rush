@@ -113,6 +113,11 @@ export class AscentRenderer {
     return b;
   }
 
+  /** Builds a region backdrop ahead of time (called while the game is paused at a shrine). */
+  prewarm(region: RegionId): void {
+    this.bg(region);
+  }
+
   private get color(): string {
     return abilityColor(this.look.species, this.look.abilityVariant);
   }

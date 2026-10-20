@@ -322,6 +322,8 @@ export class AscentScreen {
     this.keys.up = this.keys.down = false;
     // bank progress at every shrine (a reload later keeps it)
     this.host.onCheckpoint(this.sim.report());
+    // build the next region's backdrop now, while nothing moves (no hitch at the border)
+    this.renderer.prewarm(regionAt(this.sim.metres + ASCENT.regionMetres));
     const s = this.sim;
     const cards = s.offers
       .map((id, i) => {
@@ -620,11 +622,14 @@ export class AscentScreen {
       this.els.ability.classList.toggle('over', ch > 1);
       this.els.abTxt.textContent = ch >= 1 ? (over ? `${Math.round(ch * 100)}%` : 'READY') : `${Math.floor(ch * 100)}%`;
     }
-    const ups = Object.entries(s.upgrades)
-      .filter(([, n]) => n > 0)
-      .map(([id, n]) => `<span title="${esc(UPGRADES[id as keyof typeof UPGRADES].text)}">${esc(UPGRADES[id as keyof typeof UPGRADES].name)}${n > 1 ? ` ×${n}` : ''}</span>`)
-      .join('');
-    if (this.set('ups', ups)) this.els.ups.innerHTML = ups;
+    const upCount = s.upgradesTaken;
+    if (this.set('upCount', upCount)) {
+      const ups = Object.entries(s.upgrades)
+        .filter(([, n]) => n > 0)
+        .map(([id, n]) => `<span title="${esc(UPGRADES[id as keyof typeof UPGRADES].text)}">${esc(UPGRADES[id as keyof typeof UPGRADES].name)}${n > 1 ? ` ×${n}` : ''}</span>`)
+        .join('');
+      this.els.ups.innerHTML = ups;
+    }
     if (s.time > 9) this.els.tutorial.classList.add('hide');
   }
 
