@@ -21,6 +21,7 @@ npm run balance    # balance tests only, with a table of simulated run hauls
 npm run typecheck  # TypeScript, no emit
 npm run build      # typecheck + production build into dist/
 npm run preview    # serve the production build
+npm run build:single  # build emberwild-dragon-rush.html, one self-contained file you can double-click
 ```
 
 ## How to play
