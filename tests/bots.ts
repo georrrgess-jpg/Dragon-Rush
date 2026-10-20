@@ -47,6 +47,11 @@ function chooseLane(sim: FlightSim, willDash: Set<number>): number {
       if (r.passed || dx < 0 || dx > 600) continue;
       v += 1.5 * Math.exp(-Math.abs(lane - r.y) / 30) * Math.exp(-(dx / FLIGHT.scrollSpeed) * 0.8);
     }
+    for (const b of sim.bolts) {
+      const dx = b.x - wx;
+      if (dx < -40 || dx > 650) continue;
+      if (Math.abs(lane - b.gapY) > b.gapH / 2 - FLIGHT.bodyRadius - 25) v -= 100;
+    }
     for (const r of sim.rocks) {
       const dx = r.x - wx;
       if (dx < -r.r - 40 || dx > 600) continue;

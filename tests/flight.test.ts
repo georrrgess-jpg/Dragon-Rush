@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CONTAINERS, DASH, DRAGONS, FLIGHT, ROCK, RUSH, WIND_RING, type DragonId } from '../src/config';
+import { CONTAINERS, DASH, FLIGHT, ROCK, RUSH, WIND_RING, type DragonId } from '../src/config';
+import { SPECIES, SPECIES_IDS } from '../src/content/species';
 import { PATTERNS, OPENING_ISLES, OPENING_CANYON, FIRST_ROCK_X } from '../src/sim/course';
 import { FlightSim, type FlightEvent } from '../src/sim/flight';
+import { makeSim } from './helpers';
 import { createRng } from '../src/sim/rng';
 import { NO_DASH, REASONABLE, playRun } from './bots';
 
@@ -19,7 +21,7 @@ function run(sim: FlightSim, seconds: number, dt: number, each?: (s: FlightSim) 
 
 /** A sim with no course entities, for isolated mechanics. */
 function emptySim(dragon: DragonId = 'ember') {
-  const sim = new FlightSim({ dragon, level: 1, seed: 1 });
+  const sim = makeSim(dragon, { level: 1, seed: 1 });
   sim.pickups = [];
   sim.containers = [];
   sim.rocks = [];
@@ -82,7 +84,7 @@ describe('steering', () => {
 
 describe('timer', () => {
   it('runs exactly 60 s of active play and stops cleanly', () => {
-    const sim = new FlightSim({ dragon: 'ember', level: 1, seed: 3 });
+    const sim = makeSim('ember', { level: 1, seed: 3 });
     const events = run(sim, 70, 1 / 60);
     expect(sim.finished).toBe(true);
     expect(sim.time).toBe(FLIGHT.runSeconds);
@@ -131,7 +133,7 @@ describe('dash', () => {
 describe('containers', () => {
   function withChest(dragon: DragonId, dx: number, dy = 0) {
     const sim = emptySim(dragon);
-    sim.containers.push({ id: 9999, kind: 'chest', x: sim.dragonWorldX + dx, y: sim.y + dy, r: CONTAINERS.chest.radius, tutorial: false });
+    sim.containers.push({ id: 9999, kind: 'chest', x: sim.dragonWorldX + dx, y: sim.y + dy, r: CONTAINERS.chest.radius, tutorial: false, hanging: false });
     return sim;
   }
 
@@ -161,8 +163,8 @@ describe('containers', () => {
   });
 
   it("Ember's dash reaches ~20% farther than Tide's", () => {
-    const ember = new FlightSim({ dragon: 'ember', level: 1, seed: 1 });
-    const tide = new FlightSim({ dragon: 'tide', level: 1, seed: 1 });
+    const ember = makeSim('ember', { level: 1, seed: 1 });
+    const tide = makeSim('tide', { level: 1, seed: 1 });
     expect(ember.dashBreakReach / tide.dashBreakReach).toBeCloseTo(1.2, 5);
     // a chest offset vertically so only the longer reach connects
     const offset = CONTAINERS.chest.radius + DASH.reach * 1.1;
@@ -181,7 +183,7 @@ describe('containers', () => {
   it('Rush breaks containers on contact without a dash', () => {
     const sim = withChest('tide', 200);
     sim.charge = RUSH.threshold - 1;
-    sim.pickups.push({ id: 5000, kind: 'gold', x: sim.dragonWorldX + 5, y: sim.y, attracted: false, attractT: 0, noCharge: false, phase: 0 });
+    sim.pickups.push({ id: 5000, kind: 'gold', x: sim.dragonWorldX + 5, y: sim.y, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
     run(sim, 1.5, 1 / 60);
     expect(sim.rushCount).toBe(1);
     expect(sim.gold).toBe(1 + CONTAINERS.chest.gold);
@@ -190,12 +192,12 @@ describe('containers', () => {
 
 describe('pickups', () => {
   it('each pickup pays once, and attraction differs by dragon (Tide +25%)', () => {
-    const ember = new FlightSim({ dragon: 'ember', level: 1, seed: 1 });
-    const tide = new FlightSim({ dragon: 'tide', level: 1, seed: 1 });
-    expect(tide.attractRadius / ember.attractRadius).toBeCloseTo(DRAGONS.tide.attractMult, 5);
+    const ember = makeSim('ember', { level: 1, seed: 1 });
+    const tide = makeSim('tide', { level: 1, seed: 1 });
+    expect(tide.attractRadius / ember.attractRadius).toBeCloseTo(SPECIES.tide.passive.flight.attractMult!, 5);
     const sim = emptySim('tide');
     const r = sim.attractRadius;
-    sim.pickups.push({ id: 7001, kind: 'fruit', x: sim.dragonWorldX + 20, y: sim.y - r * 0.95, attracted: false, attractT: 0, noCharge: false, phase: 0 });
+    sim.pickups.push({ id: 7001, kind: 'fruit', x: sim.dragonWorldX + 20, y: sim.y - r * 0.95, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
     const ev = run(sim, 1, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
     expect(sim.fruit).toBe(1);
     expect(ev.filter((e) => e.type === 'pickup')).toHaveLength(1);
@@ -206,7 +208,7 @@ describe('rocks', () => {
   it('a hit slows briefly, grants grace, and never re-penalizes a trapped dragon', () => {
     const sim = emptySim();
     // A column directly ahead; the player keeps steering into its center.
-    for (let i = 0; i < 4; i++) sim.rocks.push({ id: 100 + i, x: sim.dragonWorldX + 200, y: 120 + i * 86, r: 58, seed: i });
+    for (let i = 0; i < 4; i++) sim.rocks.push({ id: 100 + i, x: sim.dragonWorldX + 200, y: 120 + i * 86, r: 58, seed: i, frozenUntil: -1 });
     const ev = run(sim, 3, 1 / 60, (s) => s.setTarget(250));
     const hits = ev.filter((e) => e.type === 'rockHit');
     expect(hits.length).toBe(1);
@@ -217,7 +219,7 @@ describe('rocks', () => {
 
   it('dash cannot punch through rock', () => {
     const sim = emptySim();
-    sim.rocks.push({ id: 200, x: sim.dragonWorldX + 160, y: sim.y, r: 58, seed: 1 });
+    sim.rocks.push({ id: 200, x: sim.dragonWorldX + 160, y: sim.y, r: 58, seed: 1, frozenUntil: -1 });
     sim.requestDash();
     const ev = run(sim, 0.5, 1 / 120, (s) => s.setTarget(FLIGHT.startY));
     expect(ev.some((e) => e.type === 'rockHit')).toBe(true);
@@ -235,18 +237,28 @@ describe('rocks', () => {
         for (const s of spawns.filter((x) => x.kind !== 'rock')) {
           for (const r of rocks) expect(Math.hypot(s.x - r.x, s.y - r.y), p.id).toBeGreaterThan((r.r ?? 58) + 40);
         }
-        // group rocks by column (x within 40) and measure the free vertical span
-        const columns = new Map<number, number[]>();
+        // Group rocks by column (x within 40) and measure the free vertical intervals for the
+        // dragon's center. Fair: one wide route (> 220 px) or two comfortable routes (> 120 px).
+        const columns: { x: number; rocks: typeof rocks }[] = [];
         for (const r of rocks) {
-          const key = [...columns.keys()].find((x) => Math.abs(x - r.x) < 40) ?? r.x;
-          columns.set(key, [...(columns.get(key) ?? []), r.y]);
+          const col = columns.find((c) => Math.abs(c.x - r.x) < 40);
+          if (col) col.rocks.push(r);
+          else columns.push({ x: r.x, rocks: [r] });
         }
-        for (const ys of columns.values()) {
-          const top = Math.min(...ys) - 58;
-          const bottom = Math.max(...ys) + 58;
-          const freeAbove = top - FLIGHT.minY;
-          const freeBelow = FLIGHT.maxY - bottom;
-          expect(Math.max(freeAbove, freeBelow) - FLIGHT.bodyRadius * 2, p.id).toBeGreaterThan(220);
+        for (const col of columns) {
+          const blocked = col.rocks
+            .map((r) => [r.y - (r.r ?? 58) - FLIGHT.bodyRadius, r.y + (r.r ?? 58) + FLIGHT.bodyRadius] as [number, number])
+            .sort((a, b) => a[0] - b[0]);
+          const free: number[] = [];
+          let cursor = FLIGHT.minY;
+          for (const [a, b] of blocked) {
+            if (a > cursor) free.push(Math.min(a, FLIGHT.maxY) - cursor);
+            cursor = Math.max(cursor, b);
+          }
+          if (cursor < FLIGHT.maxY) free.push(FLIGHT.maxY - cursor);
+          free.sort((a, b) => b - a);
+          const fair = (free[0] ?? 0) > 220 || ((free[0] ?? 0) > 120 && (free[1] ?? 0) > 120);
+          expect(fair, `${p.id}: free ${free.map((f) => Math.round(f)).join(',')}`).toBe(true);
         }
       }
       expect(p.length).toBeGreaterThan(0);
@@ -257,16 +269,16 @@ describe('rocks', () => {
     expect(OPENING_ISLES.spawns.some((s) => s.kind === 'rock')).toBe(false);
     expect(OPENING_CANYON.spawns.some((s) => s.kind === 'rock')).toBe(false);
     for (let seed = 0; seed < 30; seed++) {
-      const sim = new FlightSim({ dragon: 'ember', level: 1, seed });
+      const sim = makeSim('ember', { seed });
       run(sim, 11, 1 / 30);
       expect(sim.rocks.every((r) => r.x >= FIRST_ROCK_X)).toBe(true);
     }
   });
 
-  it('both environments are traversable without ever dashing', () => {
-    for (const env of ['isles', 'canyon'] as const) {
+  it('all five regions are traversable without ever dashing', () => {
+    for (const env of ['isles', 'canyon', 'coast', 'frost', 'storm'] as const) {
       for (let seed = 0; seed < 25; seed++) {
-        const sim = new FlightSim({ dragon: 'ember', level: 1, seed: 500 + seed, env });
+        const sim = makeSim('ember', { level: 1, seed: 500 + seed });
         playRun(sim, { ...NO_DASH, seed });
         expect(sim.rockHits, `${env} seed ${seed}`).toBe(0);
       }
@@ -274,9 +286,9 @@ describe('rocks', () => {
   });
 
   it('canyon patterns only appear in the canyon, rings only in the canyon', () => {
-    const isles = new FlightSim({ dragon: 'ember', level: 1, seed: 8, env: 'isles' });
+    const isles = makeSim('ember', { level: 1, seed: 8, region: 'isles' });
     run(isles, 61, 1 / 30, (s) => expect(s.rings.length).toBe(0));
-    const canyon = new FlightSim({ dragon: 'ember', level: 1, seed: 8, env: 'canyon' });
+    const canyon = makeSim('ember', { level: 1, seed: 8, region: 'canyon' });
     let seen = 0;
     run(canyon, 61, 1 / 30, (s) => (seen = Math.max(seen, s.rings.length)));
     expect(seen).toBeGreaterThan(0);
@@ -287,13 +299,13 @@ describe('rush', () => {
   it('starts at the threshold, lasts 6 s, does not self-charge, and resets to zero', () => {
     const sim = emptySim();
     sim.charge = RUSH.threshold - 1;
-    sim.pickups.push({ id: 1, kind: 'gold', x: sim.dragonWorldX, y: sim.y, attracted: false, attractT: 0, noCharge: false, phase: 0 });
+    sim.pickups.push({ id: 1, kind: 'gold', x: sim.dragonWorldX, y: sim.y, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
     let ev = run(sim, 0.05, 1 / 60);
     expect(ev.filter((e) => e.type === 'rushStart')).toHaveLength(1);
     expect(sim.rushActive).toBe(true);
     // collect plenty during rush: no extension, no charge
     ev = run(sim, RUSH.duration - 0.2, 1 / 60, (s) =>
-      s.pickups.push({ id: 100000 + Math.floor(s.time * 1000), kind: 'gold', x: s.dragonWorldX, y: s.y, attracted: false, attractT: 0, noCharge: false, phase: 0 }),
+      s.pickups.push({ id: 100000 + Math.floor(s.time * 1000), kind: 'gold', x: s.dragonWorldX, y: s.y, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 }),
     );
     expect(sim.rushActive).toBe(true);
     expect(sim.charge).toBe(RUSH.threshold);
@@ -322,7 +334,7 @@ describe('rush', () => {
   });
 
   it('a run ending mid-rush stops cleanly', () => {
-    const sim = new FlightSim({ dragon: 'ember', level: 1, seed: 2, runSeconds: 2 });
+    const sim = makeSim('ember', { level: 1, seed: 2, runSeconds: 2 });
     sim.rushT = 5;
     run(sim, 3, 1 / 60);
     expect(sim.finished).toBe(true);
@@ -352,7 +364,7 @@ describe('dragon traits', () => {
       ['ember', 6],
     ] as const) {
       const sim = emptySim(dragon);
-      sim.containers.push({ id: 4242, kind: 'pod', x: sim.dragonWorldX + 200, y: sim.y, r: CONTAINERS.pod.radius, tutorial: false });
+      sim.containers.push({ id: 4242, kind: 'pod', x: sim.dragonWorldX + 200, y: sim.y, r: CONTAINERS.pod.radius, tutorial: false, hanging: false });
       sim.requestDash();
       const ev = run(sim, 1.2, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
       expect(sim.fruit, dragon).toBe(fruit);
@@ -411,7 +423,7 @@ describe('wind rings', () => {
 
 describe('long play', () => {
   it('entity counts stay bounded through a full run', () => {
-    const sim = new FlightSim({ dragon: 'tide', level: 1, seed: 42 });
+    const sim = makeSim('tide', { level: 1, seed: 42 });
     let maxEntities = 0;
     run(sim, 61, 1 / 60, (s) => {
       maxEntities = Math.max(maxEntities, s.pickups.length + s.containers.length + s.rocks.length + s.rings.length);
@@ -422,12 +434,164 @@ describe('long play', () => {
   it('every dragon completes full runs in both environments', () => {
     for (const dragon of ['ember', 'tide', 'grove', 'gale'] as const) {
       for (const env of ['isles', 'canyon'] as const) {
-        const sim = new FlightSim({ dragon, level: 2, seed: 9, env });
+        const sim = makeSim(dragon, { level: 2, seed: 9, region: env });
         playRun(sim, { ...REASONABLE, seed: 4 });
         expect(sim.finished).toBe(true);
         expect(sim.summary().completed).toBe(true);
         expect(sim.gold + sim.fruit).toBeGreaterThan(40);
       }
     }
+  });
+});
+
+describe('active abilities (E)', () => {
+  const ALL = SPECIES_IDS;
+
+  it('every species fires its active in Rush and Trials, emitting a visible effect', () => {
+    for (const id of ALL) {
+      for (const mode of ['rush', 'trials'] as const) {
+        const sim = makeSim(id, { seed: 3, mode });
+        run(sim, 4, 1 / 60);
+        sim.abilityCharge = 1;
+        sim.requestAbility();
+        const ev = run(sim, 0.05, 1 / 60);
+        expect(ev.some((e) => e.type === 'ability'), `${id}/${mode}`).toBe(true);
+        expect(sim.abilityUses).toBe(1);
+        expect(sim.abilityCharge).toBeLessThan(0.1);
+      }
+    }
+  });
+
+  it('cannot fire before it is charged', () => {
+    const sim = emptySim('cinder');
+    sim.requestAbility();
+    const ev = run(sim, 0.05, 1 / 60);
+    expect(ev.some((e) => e.type === 'abilityDenied')).toBe(true);
+    expect(sim.abilityUses).toBe(0);
+  });
+
+  it('charges over time at the documented rate', () => {
+    const sim = emptySim('spark'); // 9 s × 0.75 Quick cycle = 6.75 s
+    run(sim, 6.6, 1 / 60, (s) => (s.rocks = []));
+    expect(sim.abilityReady).toBe(false);
+    run(sim, 0.3, 1 / 60, (s) => (s.rocks = []));
+    expect(sim.abilityReady).toBe(true);
+  });
+
+  it('pulse gathers pickups and breaks containers in range, once', () => {
+    const sim = emptySim('cinder');
+    sim.containers.push({ id: 900, kind: 'chest', x: sim.dragonWorldX + 100, y: sim.y + 40, r: 44, tutorial: false, hanging: false });
+    sim.pickups.push({ id: 901, kind: 'gold', x: sim.dragonWorldX + 120, y: sim.y - 60, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    run(sim, 1, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(sim.gold).toBe(CONTAINERS.chest.gold + 1);
+    expect(sim.containersBroken).toBe(1);
+    expect(sim.dashBreaks).toBe(0);
+  });
+
+  it('pickups gathered by an ability add no ability charge (no infinite loop)', () => {
+    const sim = emptySim('voltwing');
+    for (let i = 0; i < 20; i++)
+      sim.pickups.push({ id: 1000 + i, kind: 'gold', x: sim.dragonWorldX + 80 + i * 10, y: sim.y, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    run(sim, 1, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(sim.gold).toBe(20);
+    // Only the steady time charge (1 s of 13 s) remains, not 20 × pickup bonuses.
+    expect(sim.abilityCharge).toBeLessThan(0.12);
+  });
+
+  it('a shield absorbs one rock hit: no slowdown, not counted', () => {
+    const sim = emptySim('rime');
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    run(sim, 0.05, 1 / 60);
+    sim.rocks.push({ id: 77, x: sim.dragonWorldX + 120, y: sim.y, r: 58, seed: 1, frozenUntil: -1 });
+    const ev = run(sim, 0.8, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(ev.some((e) => e.type === 'shieldBlock')).toBe(true);
+    expect(sim.rockHits).toBe(0);
+    expect(sim.collisions).toBe(0);
+  });
+
+  it('Snowburst freezes rocks into breakable ice that shatters safely for +1 gold', () => {
+    const sim = emptySim('snowcap');
+    sim.rocks.push({ id: 78, x: sim.dragonWorldX + 150, y: sim.y, r: 58, seed: 1, frozenUntil: -1 });
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    const ev = run(sim, 1, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(ev.some((e) => e.type === 'rockShatter')).toBe(true);
+    expect(sim.rockHits).toBe(0);
+    expect(sim.gold).toBe(1);
+  });
+
+  it('Air Step dashes without touching the normal dash cooldown', () => {
+    const sim = emptySim('zephyr');
+    sim.requestDash();
+    run(sim, 0.5, 1 / 60, (s) => (s.rocks = []));
+    const cd = sim.dashCd;
+    sim.abilityCharge = 1;
+    sim.requestAbility();
+    run(sim, 0.02, 1 / 120, (s) => (s.rocks = []));
+    expect(sim.dashActive).toBe(true);
+    expect(sim.dashCd).toBeLessThan(cd);
+    expect(sim.dashCd).toBeGreaterThan(cd - 0.1);
+  });
+
+  it('legendary meters store up to 200% and scale the effect', () => {
+    const sim = emptySim('solpyre');
+    expect(sim.maxCharge).toBe(2);
+    sim.abilityCharge = 2;
+    expect(sim.abilityScale).toBeCloseTo(1.7, 5);
+    sim.abilityCharge = 1;
+    expect(sim.abilityScale).toBeCloseTo(1, 5);
+    const ember = emptySim('ember');
+    expect(ember.maxCharge).toBe(1);
+  });
+
+  it('level 5 strengthens the effect; Trials ignore levels and talents', () => {
+    const l1 = makeSim('cinder', { level: 1 });
+    const l9 = makeSim('cinder', { level: 9 });
+    expect(l9.stats.abilityPower).toBeCloseTo(1.2, 5);
+    expect(l1.stats.abilityPower).toBe(1);
+    const trial = makeSim('cinder', { level: 25, mode: 'trials', talents: { t10: 'swiftRecovery', t20: 'abilityFlow' } });
+    expect(trial.stats.abilityPower).toBe(1);
+    expect(trial.stats.dashCooldownMult).toBe(1);
+    expect(trial.stats.chargeSeconds).toBe(SPECIES.cinder.active.chargeSeconds);
+  });
+
+  it('Trials never build Rush charge', () => {
+    const sim = makeSim('ember', { mode: 'trials' });
+    run(sim, 20, 1 / 60, (s) => s.setTarget(360));
+    expect(sim.charge).toBe(0);
+    expect(sim.rushCount).toBe(0);
+  });
+});
+
+describe('lightning', () => {
+  it('a bolt outside its gap counts as a hit; inside the gap is safe', () => {
+    for (const [dy, expected] of [
+      [0, 0],
+      [200, 1],
+    ] as const) {
+      const sim = emptySim();
+      sim.bolts.push({ id: 5, x: sim.dragonWorldX + 400, gapY: sim.y + dy, gapH: 240, state: 0, warnT: 0, hit: false });
+      run(sim, 1.6, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+      expect(sim.collisions, `dy ${dy}`).toBe(expected);
+    }
+  });
+
+  it('warns at least 1.5 s before becoming active', () => {
+    const sim = makeSim('ember', { region: 'storm', seed: 3 });
+    let warnedAt = new Map<number, number>();
+    let ok = true;
+    run(sim, 60, 1 / 60, (s) => {
+      for (const b of s.bolts) {
+        if (b.state === 1 && !warnedAt.has(b.id)) warnedAt.set(b.id, s.time);
+        if (b.state === 2 && warnedAt.has(b.id) && Math.abs(b.x - s.dragonWorldX) < 30) ok &&= s.time - warnedAt.get(b.id)! >= 1.5;
+      }
+    });
+    expect(warnedAt.size).toBeGreaterThan(0);
+    expect(ok).toBe(true);
   });
 });

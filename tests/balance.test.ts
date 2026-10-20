@@ -1,14 +1,15 @@
 // Plays many headless runs with scripted pilots and reports haul statistics.
 // Run with `npm run balance` to see the table.
 import { describe, expect, it } from 'vitest';
-import { FlightSim, type RunSummary } from '../src/sim/flight';
+import type { RunSummary } from '../src/sim/flight';
+import { makeSim } from './helpers';
 import { CARELESS, NO_DASH, REASONABLE, SKILLED, playRun, type BotOptions } from './bots';
 import type { DragonId, EnvId } from '../src/config';
 
 function stats(bot: Omit<BotOptions, 'seed'>, dragon: DragonId, runs = 40, env: EnvId = 'isles') {
   const rows: RunSummary[] = [];
   for (let i = 0; i < runs; i++) {
-    const sim = new FlightSim({ dragon, level: 1, seed: 1000 + i, env });
+    const sim = makeSim(dragon, { seed: 1000 + i, region: env });
     playRun(sim, { ...bot, seed: 77 + i });
     rows.push(sim.summary());
   }
