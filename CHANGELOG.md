@@ -1,5 +1,34 @@
 # Changelog
 
+## Update 4 — The Living Collection
+
+### Dragons
+- **Every species redrawn in detail**: its own head proportions, eye shape and pupil (round, almond, hooded, narrow, gentle, bright; slit, star, glowing), face features (crests, brows, cheek fins or fluff, jaw plates, barbel lure, snout horn), surface material that follows the body (overlapping scales, plates, basalt, bark, leaf scales, crystal facets, fur, pearl, soot), belly plates or scutes, species feet (claws, talons, paws, webbed, roots, broad pads) and a membrane pattern on the wings. Consistent upper-left light, outline hierarchy and a pale rim for very dark dragons.
+- **Evolution stages read clearly**: hatchlings have big eyes, short snouts, round feet and soft skin (serpent hatchlings too); elders have one refined ornament per species or family and no constant glow.
+- **Detail tiers**: gameplay keeps the silhouette clean; cards, the hero and the Observatory show more. Low effects draws gameplay dragons at the simplest tier.
+- **Animation pass**: hit > dash > ability > flight blending, family wing rhythms (wyvern slow, cloud flutter, serpent undulation…), a steadier head, tail and frill follow-through, idle breathing, blinks, glances and weight shifts, a dash coil, ability wind-up and release, feeding that reaches the fruit, bites, chews and swallows, and a gentle hit recoil. Pausing freezes everything; reduced motion holds calm poses.
+- **Arena view** matches each species (head, frills, horns, wing pattern, markings, stage proportions), turns smoothly and trails its tail.
+- **Evolution moments**: one combined moment on the results screen (even when several stages are crossed) and a soft in-place transformation when feeding causes an evolution.
+
+### Eggs and hatching
+- **24 designed eggs** with their own shape, material, crown or base, at icon, card and codex detail; cracks follow each egg's designed seams.
+- **New reveal**: the reel decelerates smoothly and stops exactly under the marker, then the egg settles on an element pedestal, wobbles, fractures into shell-shaped pieces and the hatchling emerges — about 5.5 s, or about 2.4 s with **Quick reveal**, or a short fade with reduced motion. Open 5 cracks five eggs and lets you inspect each. Duplicates show your dragon and its level. The award is still decided and saved before any animation, and nothing on screen gives it away early.
+
+### Collection
+- **Dragon Observatory**: a large viewer with side and Arena views, idle/fly/dash/ability, evolution-stage and marking previews (clearly marked, nothing is unlocked), zoom, pan (mouse or keyboard), recenter and screenshot export.
+- **Egg Codex**: an Eggs tab and an egg page in the Observatory with how to obtain, discovery status from your saved records (no invented dates for older saves), the exact chance for your next egg and the related elemental eggs.
+- **Search** by name or nickname, rarity filter, sorts (favorites, name, level, rarity, recently obtained), Clear all filters and an empty state.
+- **Compare** two owned dragons for Rush, Sky Trials or Arena, using only game data.
+- **Growth panel**: choose portions, see the exact Emberfruit cost, the levels it would give and the next evolution; disabled reasons are explained and a double click can't repeat a large spend.
+
+### World and interface
+- Five regions refinished with a shared upper-left light, one landmark each, and a region-themed home perch where the dragon stands on the ledge with a steady contact shadow. The home scene is cached (no more per-frame canvas creation).
+- Settings grouped into Audio, Accessibility and Performance with measured frame time and memory. Focus never falls off the page when a button disappears; dialogs trap focus and restore it; confirmations before losing contract progress or spending Essence.
+- Development gallery (`?gallery`): every stage from the side and above, eggs at three tiers, pose/detail/background switches, frozen time, collision and attachment-point overlays.
+
+### Saves
+- Still save v3. New optional view preferences (collection sort, Observatory pose, Quick reveal) default when absent; new saves record when the starter joined. Odds, pity, costs, bonuses, damage, collision and Trials rules are unchanged.
+
 ## Update 3 — Age of Wings
 
 ### New modes

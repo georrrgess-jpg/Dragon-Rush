@@ -1794,3 +1794,8 @@ table.compare thead img {
   top: 72px;
   width: 370px;
 }
+/* tags never wrap (the offline fallback font is wider than the web font) */
+.rarity,
+.element {
+  white-space: nowrap;
+}

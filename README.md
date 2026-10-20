@@ -6,7 +6,7 @@ Built with Vite, TypeScript, Canvas 2D and plain HTML/CSS. There is no backend, 
 
 ## Run it
 
-**Quickest:** open `emberwild-dragon-rush.html` in a desktop browser (Chrome, Edge, Firefox or Safari). It is one self-contained file; progress saves in that browser.
+**Quickest:** open `emberwild-dragon-rush4.html` (Update 4) in a desktop browser (Chrome, Edge, Firefox or Safari). It is one self-contained file; progress saves in that browser.
 
 **From source** (Node 18+, tested with Node 22):
 
@@ -22,10 +22,10 @@ npm test              # all tests (Vitest): sims, economy, saves, hatchery, Tria
 npm run balance       # Rush balance table from scripted pilots
 npm run typecheck     # TypeScript, no emit
 npm run build         # typecheck + production build into dist/
-npm run build:single  # rebuild emberwild-dragon-rush.html
+npm run build:single  # rebuild emberwild-dragon-rush4.html
 ```
 
-Development pages: `?gallery` (every species × evolution stage, side view, top-down and egg; marking, pose and collision-outline toggles) and `?backgrounds` (the five regions and Arena floors).
+Development pages: `?gallery` (every species × evolution stage from the side and above, eggs at three detail tiers; markings, pose, detail tier, light/dark background, frozen time, reduced-motion and low-effects previews, collision and attachment-point overlays; URL params `&species=ember,tide&pose=dash&t=1.2&bg=dark`) and `?backgrounds` (the five regions and Arena floors).
 
 ## Controls
 

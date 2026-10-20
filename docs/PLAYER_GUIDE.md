@@ -54,6 +54,14 @@ A top-down survival session of about four minutes: four waves, an elite in wave 
 - **Mastery**: three challenges per species (use its ability, a role challenge, then a Trial medal or Arena elite). Rewards are cosmetic: an alternate ability color, Radiant markings and a title — plus 1 Aether Key for all three.
 - In **Dragons → Style** you can rename a dragon, mark favorites, choose markings and titles.
 
+## The collection (Update 4)
+
+- **Search and sort** on the Dragons screen: type a name or nickname, filter by rarity, element or ownership, and sort by favorites, name, level, rarity or recently obtained. "Clear all filters" brings everything back.
+- **Observatory** (button on a dragon's panel): a big view of the dragon from the side or from above, with idle, fly, dash and ability animations. You can preview later evolution stages and markings — previews are labelled and never unlock anything. Drag or use the arrow keys to pan, the wheel or +/− to zoom, 0 to recenter, and save a screenshot.
+- **Eggs tab and egg pages**: every species' egg, how to get it, whether you've discovered it and the exact chance for your next egg.
+- **Compare**: put two of your dragons side by side for Rush, Sky Trials or Arena.
+- **Feeding**: choose how many portions, see the exact cost and how many levels you'll gain before you feed.
+
 ## Getting new dragons
 
 - **Guaranteed routes**: Tide, Grove and Gale can be hatched with gold/Emberfruit (Grove and Gale need a lifetime achievement first). Bramble, Zephyr, Rime, Snowcap and Spark are guaranteed milestone rewards from contracts, wind rings, Sky Trials, levels and the Arena.
@@ -67,6 +75,7 @@ A top-down survival session of about four minutes: four waves, an elite in wave 
 - **Bad-luck protection**: the 10th egg in a row without an Epic or better is guaranteed Epic or Legendary (14 : 3); the 40th egg in a row without a Legendary is guaranteed Legendary.
 - A dragon you already own becomes Essence: Common 10, Rare 25, Epic 60, Legendary 150.
 - The result is decided and saved before the reel starts; the animation only shows it. **Skip** reveals it at once; if the page closes mid-reel, the Hatchery shows the same result next time without charging again.
+- **Quick reveal** (checkbox in the Hatchery) shortens the hatching animation; with reduced motion it is a short fade.
 
 ## Contracts and the Journal
 
