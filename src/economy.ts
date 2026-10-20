@@ -356,6 +356,15 @@ export function milestoneValue(s: SaveData, metric: MilestoneMetric): number {
       return SPECIES_IDS.filter((id) => s.dragons[id].owned).length;
     case 'eggs':
       return lt.eggs;
+    case 'ascentRuns':
+      return s.ascent.runs;
+    case 'ascentBest':
+      // standard-rules record only (assist runs keep a separate record)
+      return s.ascent.best;
+    case 'legendaries':
+      return SPECIES_IDS.filter((id) => s.dragons[id].owned && SPECIES[id].rarity === 'legendary').length;
+    case 'rarityTiers':
+      return new Set(SPECIES_IDS.filter((id) => s.dragons[id].owned).map((id) => SPECIES[id].rarity)).size;
   }
 }
 

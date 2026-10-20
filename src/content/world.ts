@@ -39,7 +39,11 @@ export type MilestoneMetric =
   | 'endlessSeconds'
   | 'maxLevel'
   | 'owned'
-  | 'eggs';
+  | 'eggs'
+  | 'ascentRuns'
+  | 'ascentBest'
+  | 'legendaries'
+  | 'rarityTiers';
 
 export interface Reward {
   gold?: number;
@@ -81,6 +85,12 @@ export const MILESTONES: MilestoneDef[] = [
   { id: 'collect-16', title: 'Own 16 dragon species', metric: 'owned', target: 16, reward: { essence: 100 } },
   { id: 'collect-24', title: 'Own all 24 species: the Age of Wings trophy', metric: 'owned', target: 24, reward: { cosmetic: 'banner.ageofwings' } },
   { id: 'eggs-10', title: 'Hatch 10 Aether eggs', metric: 'eggs', target: 10, reward: { cosmetic: 'trail.stardust' } },
+  // Update 5: play and collection milestones (existing currencies only)
+  { id: 'ascent-first', title: 'Fly your first Aether Ascent', metric: 'ascentRuns', target: 1, reward: { keys: 1 } },
+  { id: 'ascent-1000', title: 'Reach 1,000 m in Aether Ascent', metric: 'ascentBest', target: 1000, reward: { essence: 40 } },
+  { id: 'ascent-3000', title: 'Reach 3,000 m in Aether Ascent', metric: 'ascentBest', target: 3000, reward: { keys: 1 } },
+  { id: 'rarity-all', title: 'Own a Common, a Rare, an Epic and a Legendary dragon', metric: 'rarityTiers', target: 4, reward: { keys: 1 } },
+  { id: 'legend-2', title: 'Own 2 Legendary dragons', metric: 'legendaries', target: 2, reward: { essence: 60 } },
 ];
 
 // --- cosmetics ---------------------------------------------------------------------------------
