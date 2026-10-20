@@ -184,3 +184,52 @@ Four critic agents reviewed the integrated build (each with its own scripts and 
 | minor | Toasts over the Open 5 summary; Ascent banner half-hidden behind the pause panel; Arena wave hint above the upgrade dialog | Toasts move to the stage's top-right while a hatch result card is shown; Ascent hint/banner and Arena hint/coach are hidden while paused or choosing and resume afterwards | Browser captures of pause, single and Open 5 results |
 | minor | Grove/Orchid casual Arena win rate ≈ 82–84 % | **Not changed** (see limitations) | — |
 
+## 6. Performance (final build, measured)
+
+**Environment.** Headless Chromium 141 (Playwright) with **software rendering (no GPU)** on a 4-vCPU Intel Xeon @ 2.10 GHz cloud container with 15 GB RAM, production build (`vite preview`). Each frame also forced a canvas read-back so the raster cost is included in "frame cost". FPS is the real `requestAnimationFrame` rate over 2.5 s. Scenes use a rich save (24 dragons owned, all regions): Home across all 5 regions; Dragons with 24 cards; the Observatory; an intense Storm Expedition Rush with Rush and ability active; Arena held at 40 enemies; Ascent fast-forwarded past 5.2 km; the Hatchery idle and a Legendary hatch. No real GPU, monitor or second browser was available, so these are worst-case software-rendering numbers, not what a typical desktop GPU would give.
+
+FPS (lowest across the scene's samples) — normal / low effects / reduced motion:
+
+| Scene | 1100×650 (small window) | 1280×720 | 1440×900 | 1920×1080 |
+| --- | --- | --- | --- | --- |
+| Home (5 regions) | 60 / 59 / 60 | 56 / 60 / 60 | 58 / 56 / 60 | 58 / 59 / 60 |
+| Dragons (24 cards) | 60 / 60 / 60 | 60 / 60 / 60 | 60 / 60 / 60 | 60 / 60 / 60 |
+| Observatory | 60 / 59 / 60 | 60 / 60 / 60 | 60 / 60 / 60 | 59 / 60 / 60 |
+| Rush, intense | 60 / 60 / 60 | 60 / 60 / 59 | **31** / 60 / **30** | **19** / 60 / **19** |
+| Arena, 40 enemies | 60 / 59 / 60 | 60 / 60 / 60 | 60 / 60 / 60 | 56 / 59 / 58 |
+| Ascent, 5.2 km+ | 60 / 60 / 60 | 60 / 60 / 60 | **36** / 60 / **41** | **25** / 57 / **27** |
+| Hatchery idle | 56 / 60 / 60 | 60 / 60 / 60 | 60 / 60 / 60 | 56 / 59 / 60 |
+| Legendary hatch | 57 / 60 / 60 | 60 / 60 / 60 | 59 / 60 / 60 | 47 / 54 / 48 |
+
+- Median frame cost at 1280×720: Home 7–9 ms (0.2 ms with reduced motion, a still scene), Rush 11.5 ms, Arena 6 ms, Ascent 6 ms, Legendary hatch 9 ms.
+- **Rush and Ascent above 1280×720 in normal quality are raster-bound in software rendering**: the gameplay canvas matches the window's pixels, and without a GPU filling 1440×900 or 1920×1080 every frame costs 24–50 ms. **Low effects** renders gameplay at 1× and restores 57–60 fps at every size. The Update 4 baseline measured the same Rush scene at 16–17 fps at 1920×1080 in this environment, so this is not a regression, but **60 fps at 1920×1080 in normal quality could not be shown here**; it needs a check on real hardware.
+- No canvases are created per frame on menus (0 per second); gameplay creates ≤ 3 per second (cached text/sprite layers). JS heap after all scenes and variants: 12.8–14.2 MB. Caches are capped (Home after visiting 5 regions ≈ 65 MB of canvas memory; Arena floors released after leaving; egg cache ≤ 24 MB at DPR 2.5).
+- Earlier critic measurements in this environment (load from other agents running at the same time): Home at 1920×1080 56–59 fps normal and 56–58 low (was 38–57 / 30–38 before ENG5 fixes); Legendary reveal update+draw median 0.8–1.2 ms excluding raster.
+
+## 7. Verification report
+
+**Tests actually run** (final build):
+- `npx tsc --noEmit` — clean.
+- `npx vitest run` — **13 files, 259 tests, all passing**: flight/Rush sims, course, economy/saves (including the new optional fields and idempotent sanitize), hatchery (odds over 100k seeded draws, pity at 9/10 and 39/40, reel lands on the committed award over 400 openings, double-open idempotence, reload recovery), eggs, collection, Trials, Arena sim and species balance, Ascent (chunk reachability, no dash required, wards, shrines, assist, rewards caps, 100 m rule, bot-calibrated difficulty), animation (priorities, react/arrive/level-up for every species, reduced motion), milestones.
+- `npm run build` and `npm run build:single` — succeed.
+- Browser checks (headless Chromium, by agents and the coordinator): full play-throughs of Rush, Arena and Ascent at 1280×720 from a fresh save; mode unlock; Dragons search/filters/Observatory/Compare; single and Open 5 hatches including reload mid-reel and double-clicks (11/11 integrity checks); Settings toggles; keyboard-only navigation; Space/Enter guards; Observatory edge-pixel check of 288 views; results/end screen focus and scrolling; the packaged single file opened offline over `file://` (§8). No page or console errors in any of these sessions.
+
+**Not verified** (and not claimed):
+- **Sound**: every new cue was generated and kept within the voice limit, but the headless browser has no audio output, so none was listened to.
+- **Real GPU / real monitors / high-refresh displays**: frame rates above are software-rendered; 120–240 Hz behaviour was checked in simulation and with an uncapped headless rAF (≈ 153 Hz), not on a real high-refresh monitor.
+- **Human playtests**: difficulty, the "understandable in 5 seconds" menu goal and balance were judged by critic agents and scripted pilots/bots only.
+- **Browsers other than Chromium** (Firefox, Safari) were not available.
+
+## 8. Known limitations
+- Rush and Ascent at 1440×900 and above in normal quality ran at 19–41 fps in software rendering (see §6); Low effects keeps 57–60 fps.
+- Grove and Orchid win casual Arena sessions slightly more often than the target band (≈ 82–84 % vs ≈ 45–80 %); left unchanged to avoid re-balancing at the end without another calibration pass.
+- About 6 % of reels show a Legendary decoration next to the winning card purely by chance (3 % per slot at base odds); it is never placed there on purpose.
+- Tiny Common charms (freckles, tufts, sprouts) aren't drawn in the top-down view. Dusk-marked Abyssfin and Astralux share a navy-violet palette (told apart by shape).
+- The "AUTO" tag in the Rush HUD doesn't update if auto-ability is toggled mid-flight from the pause menu (the setting itself applies).
+- Rush score and Ascent score are shown on results but not stored as records (records are best haul and best distance); neither score affects currency.
+- A few labels are smaller than 13 px and the teal buttons sit just under 4.5:1 contrast on hover.
+
+## 9. Package
+- `emberwild-dragon-rush5.html` (≈ 920 KB, minified) and `emberwild-dragon-rush5-full.html` (readable, unminified) are generated from `src/` by `npm run build:single` / `npm run build:single-full`.
+- Checked by opening the file over `file://` with the network switched off: the menu, Dragons (24 cards) and Observatory, an egg (one key charged, result shown), Rush, Arena and Ascent all start with no page errors. The only network request is the optional Google Fonts stylesheet; offline the game falls back to a system font.
+- Progress saves in the browser that opened the file (localStorage), so an Update 4 save carries over when the file is opened from the same location in the same browser.
