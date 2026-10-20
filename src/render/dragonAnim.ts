@@ -42,7 +42,7 @@ export function wingCycle(phase: number): { wing: number; fold: number; bob: num
 
 export class DragonAnimator {
   private t = 0;
-  private phase = Math.random();
+  private phase: number;
   private freq = 2.2;
   private bank = 0;
   private vy1 = 0;
@@ -60,8 +60,9 @@ export class DragonAnimator {
   private blinkT = 2 + Math.random() * 2;
   private breath = 0;
 
-  constructor(perch = false) {
+  constructor(perch = false, phase = Math.random()) {
     this.perchW = perch ? 1 : 0;
+    this.phase = phase;
   }
 
   /** Short readable recoil after hitting a rock. */

@@ -27,8 +27,8 @@ describe('wingbeat', () => {
 describe('animator transitions', () => {
   const keys: (keyof DragonPose)[] = ['wing', 'fold', 'bank', 'headTurn', 'dash', 'recoil', 'tailBend1', 'tailBend2'];
 
-  function maxFrameDelta(fps: number, script: (t: number, a: DragonAnimator) => { dashing: boolean; vy: number }) {
-    const a = new DragonAnimator();
+  function maxFrameDelta(fps: number, script: (t: number, a: DragonAnimator) => { dashing: boolean; vy: number }, phase = 0.3) {
+    const a = new DragonAnimator(false, phase);
     const dt = 1 / fps;
     let prev = a.pose();
     const worst: Record<string, number> = {};
@@ -42,21 +42,25 @@ describe('animator transitions', () => {
     return worst;
   }
 
-  // A snap shows up as a rate that grows with frame rate (one big jump in a shorter frame).
-  // Smooth motion has the same per-second rate at 30 and 144 fps.
-  it('starting a dash blends in smoothly at any frame rate (no snapping)', () => {
+  // A snap is a big jump within one frame: it stays big even at 144 fps, while smooth
+  // motion shrinks to a small per-frame step. (Per-second rate = worst step * fps.)
+  it('starting a dash blends in smoothly at any wingbeat phase (no snapping)', () => {
     const script = (t: number) => ({ dashing: t > 1 && t < 1.35, vy: 0 });
-    const lo = maxFrameDelta(30, script);
-    const hi = maxFrameDelta(144, script);
-    for (const k of ['dash', 'wing', 'fold', 'bank'] as const) expect(hi[k] / Math.max(1e-6, lo[k]), k).toBeLessThan(1.6);
-    expect(hi.wing).toBeLessThan(30);
+    for (const phase of [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9]) {
+      const hi = maxFrameDelta(144, script, phase);
+      expect(hi.wing / 144, `wing @ ${phase}`).toBeLessThan(0.3);
+      expect(hi.fold / 144, `fold @ ${phase}`).toBeLessThan(0.15);
+      expect(hi.dash / 144, `dash @ ${phase}`).toBeLessThan(0.15);
+      expect(hi.bank / 144, `bank @ ${phase}`).toBeLessThan(0.05);
+    }
   });
 
-  it('banking and the tail follow a sudden steering reversal smoothly', () => {
-    const script = (t: number) => ({ dashing: false, vy: t > 1 ? -1000 : 1000 });
-    const lo = maxFrameDelta(30, script);
-    const hi = maxFrameDelta(144, script);
-    for (const k of ['bank', 'tailBend1', 'tailBend2', 'headTurn'] as const) expect(hi[k] / Math.max(1e-6, lo[k]), k).toBeLessThan(1.6);
+  it('banking and the tail follow even an instant steering reversal smoothly', () => {
+    const hi = maxFrameDelta(144, (t) => ({ dashing: false, vy: t > 1 ? -1000 : 1000 }));
+    expect(hi.bank / 144).toBeLessThan(0.05);
+    expect(hi.headTurn / 144).toBeLessThan(0.03);
+    expect(hi.tailBend1 / 144).toBeLessThan(2.5); // px per frame
+    expect(hi.tailBend2 / 144).toBeLessThan(2.5);
   });
 
   it('a collision produces a short recoil that settles', () => {
