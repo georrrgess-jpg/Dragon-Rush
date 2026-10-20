@@ -111,6 +111,7 @@ export function detailFor(onScreenScale: number): 0 | 1 | 2 {
 let ART: SpeciesArt = SPECIES_ART.ember;
 let DETAIL: 0 | 1 | 2 = 1;
 let HEAD_K: [number, number] = [1, 1];
+let SPECIES_ID: SpeciesId = 'ember';
 
 // --- colors -----------------------------------------------------------------------------------
 
@@ -199,8 +200,10 @@ const FAMILY: Record<Family, FamilyRig> = {
 /** Species head proportions; hatchlings and juveniles have a shorter snout. */
 export function headScale(id: SpeciesId, stage: Stage): [number, number] {
   const [lx, ly] = SPECIES_ART[id].head;
-  const snout = stage === 'hatchling' ? 0.86 : stage === 'juvenile' ? 0.94 : 1;
-  return [lx * snout, ly];
+  const serpent = SPECIES[id].family === 'serpent';
+  // serpent hatchlings need an extra-short snout to read as babies on their long bodies
+  const snout = stage === 'hatchling' ? (serpent ? 0.76 : 0.86) : stage === 'juvenile' ? 0.94 : 1;
+  return [lx * snout, ly * (stage === 'hatchling' && serpent ? 1.08 : 1)];
 }
 
 /**
@@ -536,7 +539,7 @@ const bodyCache = new Map<string, Body>();
 function buildBody(family: Family, look: Look, st: StageRig, pose: DragonPose): Body {
   const L = look.bodyLen * st.body;
   const T = look.bodyThick * (st === STAGE_RIG.hatchling ? 1.08 : 1);
-  if (family === 'serpent') return serpentBody(L, T, look.tailLen * st.tail, pose);
+  if (family === 'serpent') return serpentBody(L * (st === STAGE_RIG.hatchling ? 0.82 : 1), T, look.tailLen * st.tail * (st === STAGE_RIG.hatchling ? 0.72 : 1), pose);
   // static bodies depend only on family and proportions: build once (bounded by species × stage)
   const key = `${family}:${L}:${T}`;
   let b = bodyCache.get(key);
@@ -558,6 +561,7 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   const look = sp.look;
   ART = SPECIES_ART[id];
   HEAD_K = headScale(id, opts.stage ?? 'adult');
+  SPECIES_ID = id;
   DETAIL = opts.detail ?? detailFor(scale * st.scale);
   ctx.save();
   ctx.translate(x, y);
@@ -582,14 +586,14 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
     ctx.fill();
   }
 
-  RIM = luminance(c.body) < 0.16 ? 'rgba(205,220,255,0.55)' : null;
+  RIM = luminance(c.body) < 0.16 ? 'rgba(205,220,255,0.78)' : null;
   const body = buildBody(sp.family, look, st, pose);
   drawWing(ctx, sp.family, look, c, st, pose, true);
   drawLegs(ctx, fam.legs, c, pose, body, true, st);
   if (sp.family !== 'serpent') drawTailTube(ctx, look, c, st, pose, body);
   drawTorso(ctx, sp.family, look, c, st, pose, body);
   drawLegs(ctx, fam.legs, c, pose, body, false, st);
-  drawNeckHead(ctx, sp.family, look, c, st, pose);
+  drawNeckHead(ctx, sp.family, look, c, st, pose, body);
   drawWing(ctx, sp.family, look, c, st, pose, false);
   RIM = null;
   ctx.restore();
@@ -607,7 +611,7 @@ function luminance(hex: string): number {
 
 function outlineFill(ctx: Ctx, path: Path2D, fill: string | CanvasGradient, outline: string, width = 6) {
   if (RIM) {
-    ctx.lineWidth = width + 5;
+    ctx.lineWidth = width + 6;
     ctx.strokeStyle = RIM;
     ctx.stroke(path);
   }
@@ -1466,7 +1470,8 @@ function drawLegs(ctx: Ctx, kind: FamilyRig['legs'], c: Palette, pose: DragonPos
   const down = Math.min(1, pose.perch + 0.35 * pose.recoil);
   const hatch = st === STAGE_RIG.hatchling;
   if (kind === 'tiny' || kind === 'stubby') {
-    const r = kind === 'tiny' ? 5 : 8;
+    // hatchlings get round, chunky foot nubs
+    const r = (kind === 'tiny' ? 5 : 8) * (hatch ? 1.3 : 1);
     for (const [hx, hy] of body.hips) {
       const fx = hx + (kind === 'tiny' ? -6 : 0) * (1 - down);
       const fy = hy + (kind === 'tiny' ? 9 : 10) + 6 * down;
@@ -1614,7 +1619,36 @@ function headShape(kind: Look['head'], [lx, ly]: [number, number]): HeadShape {
   return h;
 }
 
-function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig, pose: DragonPose) {
+/** Outline the open neck path only where it lies outside the torso, then fill it closed. */
+function neckOutline(ctx: Ctx, open: Path2D, fill: CanvasGradient, c: Palette, body: Body) {
+  const closed = new Path2D(open);
+  closed.closePath();
+  ctx.save();
+  const outside = new Path2D();
+  outside.rect(-600, -600, 1200, 1200);
+  outside.addPath(body.path);
+  ctx.clip(outside, 'evenodd');
+  if (RIM) {
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = RIM;
+    ctx.stroke(open);
+  }
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = c.outline;
+  ctx.stroke(open);
+  ctx.restore();
+  ctx.fillStyle = fill;
+  ctx.fill(closed);
+  // soft occlusion where the neck leaves the chest
+  ctx.save();
+  ctx.clip(closed);
+  ctx.clip(body.path);
+  ctx.fillStyle = 'rgba(20,10,40,0.08)';
+  ctx.fill(closed);
+  ctx.restore();
+}
+
+function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig, pose: DragonPose, body: Body) {
   const fam = FAMILY[family];
   const [px, py] = fam.headPivot(look, st);
   const hx = px + pose.headX;
@@ -1623,6 +1657,11 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   const lag = pose.frillLag;
   const neckW = family === 'drake' ? 1.25 : family === 'serpent' ? 0.85 : 1;
   const neck = new Path2D();
+  // the neck shares the torso's gradient and is outlined only outside the torso, so it grows
+  // out of the chest instead of sitting on it with a seam
+  const neckFill = ctx.createLinearGradient(0, -32 * look.bodyThick, 0, 26 * look.bodyThick);
+  neckFill.addColorStop(0, c.body);
+  neckFill.addColorStop(1, c.shade);
   if (family === 'crystal') {
     // angular, segmented neck
     const m1: Pt = [cx + (hx - cx) * 0.4, cy + (hy - cy) * 0.45];
@@ -1635,8 +1674,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
     neck.lineTo(m2[0] + 12, m2[1] + 12);
     neck.lineTo(m1[0] + 14, m1[1] + 14);
     neck.lineTo(cx + 18, cy + 28);
-    neck.closePath();
-    outlineFill(ctx, neck, c.body, c.outline);
+    neckOutline(ctx, neck, neckFill, c, body);
     ctx.strokeStyle = c.outline;
     ctx.lineWidth = 2;
     for (const [p, q] of [
@@ -1653,8 +1691,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
     neck.bezierCurveTo(cx + 10, cy - 12, hx - 12, hy - 2, hx + 2, hy - 4);
     neck.lineTo(hx + 14 * neckW, hy + 10 * neckW);
     neck.bezierCurveTo(hx + 2, hy + 16 * neckW, cx + 26, cy + 8, cx + 18, cy + 28);
-    neck.closePath();
-    outlineFill(ctx, neck, c.body, c.outline);
+    neckOutline(ctx, neck, neckFill, c, body);
   }
   ctx.beginPath();
   ctx.moveTo(cx + 20, cy + 22);
@@ -1666,7 +1703,7 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   if (pose.swallow > 0 && pose.swallow < 1) swallowBulge(ctx, c, [hx + 10, hy + 13], [cx + 18, cy + 24], pose.swallow);
   if (lag) lagAbout(ctx, hx - 10, hy + 4, lag);
   if (look.frill === 'mane') mane(ctx, c, hx, hy, st, true);
-  if (look.frill === 'aurora') aurora(ctx, c, hx, hy, st, pose);
+  if (look.frill === 'aurora') aurora(ctx, c, hx, hy, cx, cy, st, pose);
   if (lag) ctx.restore();
 
   ctx.save();
@@ -2090,19 +2127,22 @@ function drawFace(ctx: Ctx, family: Family, c: Palette, h: HeadShape, st: StageR
         horn(ctx, t - 12, -6, t - 6 + 2 * young, -6 - 10 * young, c.accent, c.outline);
         break;
       case 'cheekFluff':
-        ctx.fillStyle = c.belly;
-        ctx.strokeStyle = c.outline;
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(2, 2);
-        for (let i = 0; i < 3; i++) {
-          const y = 2 + i * 5;
-          ctx.quadraticCurveTo(-8 * young, y + 1, -4, y + 4);
+        // three scalloped tufts that follow the back of the jaw
+        for (const [x, y, r] of [
+          [2, 12, 4.2],
+          [-3, 8, 4],
+          [-6, 3, 3.6],
+        ] as const) {
+          ctx.beginPath();
+          ctx.arc(x * young + 2, y, r * young + 0.8, Math.PI * 0.35, Math.PI * 1.45);
+          ctx.quadraticCurveTo(x * young - 1, y - r * 0.2, x * young + 4, y + r * 0.6);
+          ctx.closePath();
+          ctx.fillStyle = c.belly;
+          ctx.fill();
+          ctx.strokeStyle = c.outline;
+          ctx.lineWidth = 1.1;
+          ctx.stroke();
         }
-        ctx.lineTo(4, 14);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
         break;
     }
   }
@@ -2282,16 +2322,23 @@ function petals(ctx: Ctx, c: Palette, st: StageRig, far: boolean) {
 }
 
 function whiskers(ctx: Ctx, c: Palette, h: HeadShape, st: StageRig, pose: DragonPose) {
-  const len = 22 + 18 * st.horn;
-  ctx.strokeStyle = c.mark;
-  ctx.lineWidth = 2;
+  // length follows the head so short-faced species don't get whiskers across the neck
+  const len = Math.min(22 + 18 * st.horn, h.tipX * 0.85);
+  ctx.save();
+  ctx.lineCap = 'round';
   for (const k of [0, 1]) {
-    const w = Math.sin(pose.time * 2 + k) * 4 + pose.frillLag * 22;
+    const w = Math.sin(pose.time * 2 + k) * 3 + pose.frillLag * 18;
     ctx.beginPath();
     ctx.moveTo(h.tipX - 6, 4 + k * 4);
-    ctx.bezierCurveTo(h.tipX + 4, 14 + k * 6 + w, h.tipX - len * 0.4, 20 + w, h.tipX - len, 26 + k * 8 + w);
+    ctx.bezierCurveTo(h.tipX + 2, 12 + k * 5 + w, h.tipX - len * 0.4, 17 + w, h.tipX - len, 22 + k * 6 + w);
+    ctx.strokeStyle = c.outline;
+    ctx.lineWidth = 3.6;
+    ctx.stroke();
+    ctx.strokeStyle = c.mark;
+    ctx.lineWidth = 2;
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 function mane(ctx: Ctx, c: Palette, x: number, y: number, st: StageRig, onNeck: boolean) {
@@ -2318,8 +2365,21 @@ function sunburst(ctx: Ctx, c: Palette, st: StageRig, pose: DragonPose) {
   ctx.save();
   ctx.translate(-14, -12);
   ctx.rotate(pose.time * 0.15);
-  ctx.shadowColor = `rgba(${c.glow},0.8)`;
-  ctx.shadowBlur = 10;
+  // glow only while Rush or the ability is active (no constant glow)
+  const glow = Math.max(pose.rush, pose.ability);
+  if (glow > 0.05) {
+    ctx.shadowColor = `rgba(${c.glow},0.8)`;
+    ctx.shadowBlur = 10 * glow;
+  }
+  // solid disc behind the rays so the centre is never an empty hole
+  ctx.beginPath();
+  ctx.arc(0, 0, r0 + 3, 0, Math.PI * 2);
+  ctx.fillStyle = c.accent;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, 0, r0 - 3, 0, Math.PI * 2);
+  ctx.fillStyle = c.mark;
+  ctx.fill();
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     const len = i % 2 ? r1 * 0.75 : r1;
@@ -2334,28 +2394,35 @@ function sunburst(ctx: Ctx, c: Palette, st: StageRig, pose: DragonPose) {
   ctx.restore();
 }
 
-/** Glacielle's aurora: two translucent ribbons flowing back from the mane. */
-function aurora(ctx: Ctx, c: Palette, hx: number, hy: number, st: StageRig, pose: DragonPose) {
-  const len = 90 + 40 * st.horn;
-  for (const [k, col] of [
-    [0, '#5fe8c0'],
-    [1, '#a77bff'],
+/** Glacielle's aurora: two opaque ribbons that run down the back of the neck past the shoulders. */
+function aurora(ctx: Ctx, c: Palette, hx: number, hy: number, cx: number, cy: number, st: StageRig, pose: DragonPose) {
+  const reach = 18 + 10 * st.horn;
+  for (const [k, col, edge] of [
+    [0, '#5fe8c0', '#2f9a86'],
+    [1, '#a77bff', '#6a48c4'],
   ] as const) {
-    const w = Math.sin(pose.time * 2 + k) * 8;
-    const g = ctx.createLinearGradient(hx, hy, hx - len, hy + 40);
-    g.addColorStop(0, col);
-    g.addColorStop(1, 'rgba(255,255,255,0)');
+    const w = Math.sin(pose.time * 1.6 + k) * 2.5;
+    const o = k * 5;
+    // along the top of the neck (head → chest), then a short trailing tip beyond the shoulder
+    const ax = hx - 6;
+    const ay = hy - 6 + o;
+    const ex = cx - reach;
+    const ey = cy - 4 + o + w;
     ctx.beginPath();
-    ctx.moveTo(hx - 6, hy - 6 + k * 6);
-    ctx.bezierCurveTo(hx - len * 0.35, hy - 30 + w, hx - len * 0.65, hy + 4 - w, hx - len, hy + 12 + k * 14 + w);
-    ctx.bezierCurveTo(hx - len * 0.6, hy + 26 - w, hx - len * 0.35, hy + 12 + w, hx - 4, hy + 10 + k * 6);
+    ctx.moveTo(ax, ay);
+    ctx.bezierCurveTo(ax - (ax - cx) * 0.4, ay - 6 + w, cx + 8, cy - 14 + o, ex, ey);
+    ctx.lineTo(ex + 4, ey + 6);
+    ctx.bezierCurveTo(cx + 12, cy - 6 + o, ax - (ax - cx) * 0.35, ay + 4, ax + 2, ay + 6);
     ctx.closePath();
-    ctx.globalAlpha = 0.9;
+    const g = ctx.createLinearGradient(ax, ay, ex, ey);
+    g.addColorStop(0, col);
+    g.addColorStop(1, mixHex(col, c.membraneLight, 0.45));
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
   }
-  void c;
 }
 
 function fangs(ctx: Ctx, h: HeadShape) {
@@ -2405,49 +2472,158 @@ function elderTrait(ctx: Ctx, family: Family, c: Palette, h: HeadShape, pose: Dr
       shard(ctx, 2, 8, 2.4, 18, 4, c);
       shard(ctx, -4, 2, 2.8, 14, 3.5, c);
       break;
-    case 'cloud':
+    case 'cloud': {
+      // a cloud collar tucked behind the jaw (anchored to the head, shaded, species-tinted)
+      const tint = SPECIES_ID === 'spark' ? mixHex(c.mark, '#ffffff', 0.35) : SPECIES_ID === 'ripple' ? c.membraneLight : c.belly;
       for (const [x, y, r] of [
-        [-10, 4, 9],
-        [-14, -8, 8],
-        [-4, 14, 7],
-      ]) {
+        [-8, 6, 7.5],
+        [-2, 13, 6.5],
+        [-13, 13, 6],
+      ] as const) {
         ctx.beginPath();
-        ctx.arc(x, y, r + 2, 0, Math.PI * 2);
+        ctx.arc(x, y, r + 1.8, 0, Math.PI * 2);
         ctx.fillStyle = c.outline;
         ctx.fill();
+        const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, 1, x, y, r);
+        g.addColorStop(0, mixHex(tint, '#ffffff', 0.4));
+        g.addColorStop(1, tint);
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = g;
         ctx.fill();
       }
+      void h;
       break;
+    }
     case 'wyvern':
       // cheek spurs
       for (let i = 0; i < 2; i++) horn(ctx, 2 - i * 6, 6 + i * 4, -14 - i * 6, 14 + i * 6, mixHex(c.accent, '#ffffff', 0.2), c.outline);
       break;
     default:
-      beard(ctx, c, h);
+      classicElder(ctx, c, h, pose);
   }
 }
 
-/** Elders grow soft flowing chin strands in their marking color. */
-function beard(ctx: Ctx, c: Palette, h: HeadShape) {
+/** Classic-family elders: one refined ornament per species (no constant glow). */
+function classicElder(ctx: Ctx, c: Palette, h: HeadShape, pose: DragonPose) {
+  const [ex, ey] = h.eye;
   ctx.save();
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 3; i++) {
-    const x0 = h.tipX - 14 - i * 6;
-    ctx.beginPath();
-    ctx.moveTo(x0, 13);
-    ctx.quadraticCurveTo(x0 - 2, 22 + i * 2, x0 - 10 - i * 2, 26 + i * 3);
-    ctx.strokeStyle = c.outline;
-    ctx.lineWidth = 4.2;
-    ctx.stroke();
-    ctx.strokeStyle = mixHex(c.mark, '#ffffff', 0.25);
-    ctx.lineWidth = 2.4;
-    ctx.stroke();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = 1.4;
+  switch (SPECIES_ID) {
+    case 'ember':
+      // flame-shaped brow plates
+      for (let i = 0; i < 3; i++) {
+        const x = ex + 6 - i * 8;
+        const y = ey - 11 - i * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x - 3.5, y + 3);
+        ctx.quadraticCurveTo(x - 2, y - 4, x + 1, y - 8);
+        ctx.quadraticCurveTo(x + 2, y - 2, x + 3.5, y + 3);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 ? c.mark : mixHex(c.mark, '#ff7a1a', 0.5);
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    case 'solpyre':
+    case 'tide': {
+      // circlet across the back of the head: gold band (Solpyre) or pearls (Tide)
+      const pts: Pt[] = [[ex - 4, ey - 12], [ex - 10, ey - 8], [ex - 15, ey - 2], [ex - 17, ey + 5]];
+      if (SPECIES_ID === 'solpyre') {
+        ctx.beginPath();
+        pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.lineWidth = 4.4;
+        ctx.stroke();
+        ctx.strokeStyle = '#f6c445';
+        ctx.lineWidth = 2.6;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(pts[1][0], pts[1][1], 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff7a3a';
+        ctx.fill();
+        ctx.strokeStyle = c.outline;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      } else
+        for (const [x, y] of pts) {
+          ctx.beginPath();
+          ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+          ctx.fillStyle = '#fff8ee';
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(x - 0.9, y - 0.9, 0.9, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+        }
+      break;
+    }
+    case 'grove':
+      // the antlers blossom
+      for (const [x, y] of [
+        [-20, -44],
+        [-3, -44],
+        [-30, -36],
+      ] as Pt[]) {
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(x + Math.cos(a) * 2.6, y + Math.sin(a) * 2.6, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffc2dc';
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffe36a';
+        ctx.fill();
+      }
+      break;
+    case 'orchid': {
+      // a long trailing petal ribbon from the back of the head
+      const w = Math.sin(pose.time * 1.4) * 3;
+      ctx.beginPath();
+      ctx.moveTo(-4, -8);
+      ctx.bezierCurveTo(-22, -10 + w, -34, 4 - w, -44, 16 + w);
+      ctx.bezierCurveTo(-32, 8 - w, -20, 0 + w, -4, -1);
+      ctx.closePath();
+      ctx.fillStyle = mixHex(c.mark, c.membraneLight, 0.4);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+    case 'gale':
+      // swept feather crest
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-2, -10 + i * 4);
+        ctx.quadraticCurveTo(-16 - i * 4, -20 + i * 5, -30 - i * 3, -16 + i * 7);
+        ctx.quadraticCurveTo(-16, -10 + i * 5, -2, -5 + i * 4);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 ? c.membraneLight : '#ffffff';
+        ctx.fill();
+        ctx.stroke();
+      }
+      break;
+    default: {
+      // voltwing (and any other classic): lightning cheek marks
+      ctx.beginPath();
+      ctx.moveTo(ex - 2, ey + 8);
+      ctx.lineTo(ex - 7, ey + 13);
+      ctx.lineTo(ex - 3, ey + 13);
+      ctx.lineTo(ex - 9, ey + 20);
+      ctx.strokeStyle = c.outline;
+      ctx.lineWidth = 3.8;
+      ctx.stroke();
+      ctx.strokeStyle = c.mark;
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
+
 
 // --- wings ---------------------------------------------------------------------------------------
 

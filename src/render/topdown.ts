@@ -180,7 +180,15 @@ export class TopDragonMotion {
   }
 }
 
+/** Pale rim for very dark palettes (set per draw) so they read on dark Arena floors. */
+let TOP_RIM: string | null = null;
+
 function outlined(ctx: Ctx, path: Path2D, fill: string | CanvasGradient, outline: string, w = 5) {
+  if (TOP_RIM) {
+    ctx.lineWidth = w + 5;
+    ctx.strokeStyle = TOP_RIM;
+    ctx.stroke(path);
+  }
   ctx.lineWidth = w;
   ctx.strokeStyle = outline;
   ctx.stroke(path);
@@ -568,6 +576,8 @@ export function drawDragonTop(ctx: Ctx, id: SpeciesId, x: number, y: number, hea
   const fam = sp.family;
   const art = SPECIES_ART[id];
   const detail = opts.detail ?? detailFor(scale * st.scale);
+  const n = parseInt(c.body.slice(1), 16);
+  TOP_RIM = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.16 ? 'rgba(205,220,255,0.7)' : null;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale * st.scale, scale * st.scale);
