@@ -534,7 +534,7 @@ export const ARENA_VICTORY_BONUS: Reward = { gold: 60, fruit: 20 };
 // aether caches, and 1 gold per 30 m flown through hazard stretches while playing (never in calm
 // air or at shrines; time only counts with recent input, like every mode). Bots measure ≈ 86 gold
 // and ≈ 40 Emberfruit per active minute for every pilot (Rush reasonable pilot: ≈ 89 / 40; Arena
-// ≈ 80 / 27), so Ascent pays like the other modes. Hard caps per qualified minute keep it there.
+// ≈ 80 / 35 before the victory bonus), so Ascent pays like the other modes. Hard caps per qualified minute keep it there.
 // XP and key progress use the shared qualified-time rules below. Score and upgrades never touch
 // currency. A run counts toward `ascent.runs` (and the first-run milestone) only once it reached
 // `minRunMetres` (bests too): starting and leaving at once pays nothing extra.
