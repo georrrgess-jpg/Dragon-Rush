@@ -317,6 +317,31 @@ export class ArenaRenderer {
     });
   }
 
+  private hostileShot(r: number): HTMLCanvasElement {
+    return this.sprite(`hshot:${r}`, (r + 9) * 2, (c) => {
+      c.strokeStyle = 'rgba(255,90,40,0.55)';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(0, 0, r + 7, 0, TAU);
+      c.stroke();
+      const q = r + 3;
+      c.beginPath();
+      c.moveTo(q, 0);
+      c.lineTo(0, q * 0.62);
+      c.lineTo(-q, 0);
+      c.lineTo(0, -q * 0.62);
+      c.closePath();
+      c.fillStyle = '#ff6a2a';
+      c.strokeStyle = DANGER_DARK;
+      c.lineWidth = 2.5;
+      c.lineJoin = 'miter';
+      c.fill();
+      c.stroke();
+      c.fillStyle = '#ffe0a0';
+      c.fillRect(-2.5, -2.5, 5, 5);
+    });
+  }
+
   private glow(color: string, r: number): HTMLCanvasElement {
     return this.sprite(`glow:${color}:${r}`, r * 2, (c) => {
       const g = c.createRadialGradient(0, 0, r * 0.08, 0, 0, r);
@@ -423,31 +448,12 @@ export class ArenaRenderer {
     // shots
     for (const s of sim.shots) {
       if (s.hostile) {
-        // enemy attack: hard-edged diamond, dark outline, warm halo
+        // enemy attack: hard-edged diamond, dark outline, warm halo (one cached image)
         const a = Math.atan2(s.vy, s.vx) + (calm ? 0 : t * 5);
         ctx.save();
         ctx.translate(s.x, s.y);
-        ctx.strokeStyle = 'rgba(255,90,40,0.55)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, s.r + 7, 0, TAU);
-        ctx.stroke();
         ctx.rotate(a);
-        const r = s.r + 3;
-        ctx.beginPath();
-        ctx.moveTo(r, 0);
-        ctx.lineTo(0, r * 0.62);
-        ctx.lineTo(-r, 0);
-        ctx.lineTo(0, -r * 0.62);
-        ctx.closePath();
-        ctx.fillStyle = '#ff6a2a';
-        ctx.strokeStyle = DANGER_DARK;
-        ctx.lineWidth = 2.5;
-        ctx.lineJoin = 'miter';
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#ffe0a0';
-        ctx.fillRect(-2.5, -2.5, 5, 5);
+        ctx.drawImage(this.hostileShot(s.r), -s.r - 9, -s.r - 9, (s.r + 9) * 2, (s.r + 9) * 2);
         ctx.restore();
       } else {
         const a = Math.atan2(s.vy, s.vx);

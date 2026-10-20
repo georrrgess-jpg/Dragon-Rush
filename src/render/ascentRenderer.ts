@@ -182,14 +182,14 @@ export class AscentRenderer {
           this.flashColor = 'rgba(255,60,80,';
           this.burst(sim.dragonScreenX, sim.y, '#ff6a7a', 12, 1.3, 3.5);
           this.ring(sim.dragonScreenX, sim.y, '#ff4a5a', 80, 0.45);
-          this.text(sim.dragonScreenX + 30, sim.y - 64, `Hit: ${causeText(e.cause)}`, '#ffffff', 28, 1.4);
+          this.text(sim.dragonScreenX + 30, Math.max(120, sim.y - 64), `Hit: ${causeText(e.cause)}`, '#ffffff', 28, 1.4);
           break;
         case 'blocked':
           this.flash = 0.6;
           this.flashColor = 'rgba(200,240,255,';
           this.ring(sim.dragonScreenX, sim.y, this.color, 86, 0.45);
           this.burst(sim.dragonScreenX, sim.y, '#ffffff', 10, 1.1, 3);
-          this.text(sim.dragonScreenX + 30, sim.y - 64, e.by === 'shell' ? 'Shell blocked it!' : 'Ward blocked it!', '#e8fbff', 26);
+          this.text(sim.dragonScreenX + 30, Math.max(120, sim.y - 64), e.by === 'shell' ? 'Shell blocked it!' : 'Ward blocked it!', '#e8fbff', 26);
           break;
         case 'challenge':
           this.ring(sim.dragonScreenX, sim.y, '#ffe27a', 120, 0.5);

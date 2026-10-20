@@ -20,6 +20,7 @@ import { SettingsPanel } from './ui/settings';
 import { Shell } from './ui/shell';
 import type { Overlay, Screen, Tab, UI } from './ui/types';
 import { MODES } from './content/modes';
+import { rushTip } from './sim/flight';
 // Update 5: Aether Ascent
 import { xpToNext } from './content/progression';
 import { HATCHERY, REGIONS } from './content/world';
@@ -584,7 +585,7 @@ export class App implements UI {
     const s = this.save.settings;
     sfx.music('flight');
     this.flight = new FlightScreen(
-      { ...this.canvasHost(), onEnd: (sum, early) => this.endFlight(sum, early) },
+      { ...this.canvasHost(), onEnd: (sum, early) => this.endFlight(sum, early), onTutorialSeen: (id) => this.tutorialSeen(id) },
       {
         mode: 'rush',
         stats: flightStats({ species: run.dragon, level: run.level, talents: d.talents }, 'rush'),
@@ -596,8 +597,16 @@ export class App implements UI {
         reducedMotion: s.reducedMotion,
         lowEffects: s.lowEffects,
         showHitboxes: s.showHitboxes,
+        screenShake: s.screenShake,
+        tutorialsSeen: this.save.prefs.tutorials,
       },
     );
+  }
+
+  /** Remembers a contextual tutorial tip as shown (Settings/Journal can reset the list). */
+  tutorialSeen(id: string): void {
+    if (this.save.prefs.tutorials.includes(id)) return;
+    this.commit({ ...this.save, prefs: { ...this.save.prefs, tutorials: [...this.save.prefs.tutorials, id] } });
   }
 
   startTrial(id: string, practice: boolean): void {
@@ -636,6 +645,7 @@ export class App implements UI {
         reducedMotion: s.reducedMotion,
         lowEffects: s.lowEffects,
         showHitboxes: s.showHitboxes,
+        screenShake: s.screenShake,
       },
     );
   }
@@ -715,7 +725,7 @@ export class App implements UI {
     }
     if (medal) sfx.medal(medal);
     else sfx.finish();
-    this.showResults({ kind: sum.mode === 'trials' ? 'trials' : 'rush', settlement, summary: sum, early, trialId: this.lastTrial?.id, practice: this.lastTrial?.practice });
+    this.showResults({ kind: sum.mode === 'trials' ? 'trials' : 'rush', settlement, summary: sum, early, trialId: this.lastTrial?.id, practice: this.lastTrial?.practice, tip: sum.mode === 'trials' ? undefined : rushTip(sum) });
   }
 
   private arenaReport(r: ArenaReport): eco.RunReport {

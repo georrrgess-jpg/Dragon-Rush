@@ -195,7 +195,8 @@ export class ResultsScreen {
     let sub = '';
     if (d.kind === 'rush') {
       title = d.early ? 'Flight ended early' : st.newBest ? 'New best haul!' : 'Flight complete!';
-      sub = `${d.summary?.rushCount ?? 0} Dragon Rush${d.summary?.rushCount === 1 ? '' : 'es'} · ${d.summary?.containersBroken ?? 0} containers · ${d.summary?.rockHits ?? 0} rock hits`;
+      const sm = d.summary;
+      sub = `Score ${(sm?.score ?? 0).toLocaleString()} · best chain ${sm?.bestChain ?? 0} · ${sm?.trailsCompleted ?? 0} trail${sm?.trailsCompleted === 1 ? '' : 's'} completed${sm?.treasureTaken ? ' · treasure taken' : ''} · ${sm?.rushCount ?? 0} Dragon Rush${sm?.rushCount === 1 ? '' : 'es'} · ${sm?.rockHits ?? 0} rock hit${sm?.rockHits === 1 ? '' : 's'}`;
     } else if (d.kind === 'trials') {
       const m = st.trial?.medal ?? 0;
       title = d.practice ? 'Practice run finished' : m ? `${MEDALS[m]} medal!` : 'Course finished';
