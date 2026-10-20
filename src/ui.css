@@ -1773,3 +1773,7 @@ table.compare thead img {
 .codex-egg {
   border-radius: 16px;
 }
+.settings-panel p {
+  font-size: 14px;
+  margin: 4px 0 8px;
+}
