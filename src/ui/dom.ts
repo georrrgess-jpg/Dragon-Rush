@@ -31,7 +31,8 @@ export function $(root: ParentNode, sel: string): HTMLElement {
 
 /** A canvas with a crisp backing store for its CSS size within the scaled stage. */
 export function sizeCanvas(canvas: HTMLCanvasElement, cssW: number, cssH: number, stageScale: number): CanvasRenderingContext2D {
-  const k = Math.max(1, stageScale * (window.devicePixelRatio || 1));
+  // Capped so very large/high-DPI windows don't allocate huge backing stores.
+  const k = Math.min(2.5, Math.max(1, stageScale * (window.devicePixelRatio || 1)));
   canvas.width = Math.round(cssW * k);
   canvas.height = Math.round(cssH * k);
   const ctx = canvas.getContext('2d')!;

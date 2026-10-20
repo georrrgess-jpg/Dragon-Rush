@@ -132,7 +132,8 @@ export class HomeScreen {
       else drawEgg(ctx, 48, 44, 62, 0);
     });
 
-    r('right').innerHTML = this.feedHtml(s) + (s.dragons.tide.owned ? this.goalsHtml(s) + this.decoHtml(s) : this.tideHtml(s));
+    r('right').innerHTML =
+      this.feedHtml(s) + (s.dragons.tide.owned ? this.goalsHtml(s) + this.decoHtml(s) : this.tideHtml(s) + this.howToHtml());
   }
 
   private cardHtml(s: SaveData, id: DragonId): string {
@@ -173,9 +174,11 @@ export class HomeScreen {
     let note = '';
     if (!s.dragons.tide.owned) {
       const left = Math.max(0, COSTS.tideEgg.fruit - (s.wallet.fruit - (can ? cost : 0)));
-      note = can
-        ? `<p class="muted">Emberfruit also counts toward Tide's egg. After feeding, Tide would still need <b>${left}</b> ${icon('fruit')}.</p>`
-        : `<p class="muted">Emberfruit also counts toward Tide's egg — saving it hatches Tide sooner.</p>`;
+      note = !can
+        ? `<p class="muted">Emberfruit also counts toward Tide's egg — saving it hatches Tide sooner.</p>`
+        : left === 0
+          ? `<p class="muted">Emberfruit also counts toward Tide's egg. You'd still have the ${COSTS.tideEgg.fruit} it needs after feeding.</p>`
+          : `<p class="muted">Emberfruit also counts toward Tide's egg. After feeding, Tide would still need <b>${left}</b> Emberfruit.</p>`;
     }
     return `
       <div class="panel card">
@@ -209,6 +212,18 @@ export class HomeScreen {
           <span class="muted" style="font-weight:700">${ready ? 'Ready to hatch!' : `Still needed: ${rem.gold} ${icon('gold')} ${rem.fruit} ${icon('fruit')}`}</span>
           <button class="btn gold" data-a="hatch" ${ready ? '' : 'disabled'}>Hatch Tide</button>
         </div>
+      </div>`;
+  }
+
+  private howToHtml(): string {
+    return `
+      <div class="panel card howto">
+        <h3>How to fly</h3>
+        <ul class="goal-list">
+          <li>Move the mouse <b>up/down</b> to steer (or W/S, ↑/↓).</li>
+          <li><b>Click</b> (or Space) to dash through glowing ${icon('chest')} chests and pods.</li>
+          <li>Fill the meter to trigger <b>Dragon Rush</b>. Mossy rocks are solid.</li>
+        </ul>
       </div>`;
   }
 

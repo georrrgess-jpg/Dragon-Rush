@@ -53,7 +53,7 @@ export const DASH = {
   /** Base container-breaking reach while dashing (added to container radius). */
   reach: 58,
   /** Inputs within this window after resuming are ignored. */
-  resumeInputGuard: 0.2,
+  resumeInputGuard: 0.15,
 } as const;
 
 export const RUSH = {
@@ -63,7 +63,7 @@ export const RUSH = {
   containerCharge: 3,
   /** Extra pickup trail spawns during the first part of Rush so it arrives while Rush lasts. */
   trailWindow: 3.0,
-  trailInterval: 0.3,
+  trailInterval: 0.4,
   trailFruitChance: 0.25,
   trailAmplitude: 85,
 } as const;

@@ -25,7 +25,7 @@ export interface Pattern {
 }
 
 /** Gap between consecutive patterns (world px). */
-export const PATTERN_GAP = 480;
+export const PATTERN_GAP = 540;
 /** No rocks before this world x (the dragon reaches it ~12 s into the run). */
 export const FIRST_ROCK_X = 4600;
 
@@ -141,7 +141,7 @@ export const PATTERNS: Pattern[] = [
     hasRocks: false,
     build: (rng) => {
       const y = rng.range(LANE_MIN + 20, LANE_MAX - 20);
-      return [...line('gold', 0, y, 2, 110), { kind: 'chest', x: 400, y }, { kind: 'gold', x: 560, y }];
+      return [...line('gold', 0, y, 2, 110), { kind: 'chest', x: 400, y }];
     },
   },
   {

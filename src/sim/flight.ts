@@ -289,10 +289,9 @@ export class FlightSim {
         this.lunge -= ROCK.knockback;
         this.rockHits++;
         this.events.push({ type: 'rockHit', x: rock.x - this.dist, y: rock.y });
-        if (!this.rockHintShown) {
-          this.rockHintShown = true;
-          this.events.push({ type: 'hint', text: 'Mossy rocks are solid — steer around them' });
-        }
+        this.rockHintShown = true;
+        this.hintCd = CONTAINERS.hintCooldown;
+        this.events.push({ type: 'hint', text: "Rocks are solid — dash can't break them" });
       }
 
       // Solid resolution with a vertical bias so the dragon always slides off.
@@ -380,13 +379,17 @@ export class FlightSim {
     }
     this.containers = keep;
 
-    // Teaching hint when the marked chest comes into view.
+    // Teaching hints when the marked chest, then the first rocks, come into view.
     if (!this.tutorialShown) {
       const t = this.containers.find((c) => c.tutorial);
       if (t && t.x - this.dist < VIEW.width - 160) {
         this.tutorialShown = true;
         this.events.push({ type: 'hint', text: 'Glowing cracks? Click to dash through!' });
       }
+    }
+    if (!this.rockHintShown && this.rocks.some((r) => r.x - this.dist < VIEW.width - 120)) {
+      this.rockHintShown = true;
+      this.events.push({ type: 'hint', text: 'Mossy rocks are solid — steer around them' });
     }
   }
 

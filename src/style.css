@@ -78,6 +78,11 @@ body {
   pointer-events: auto;
 }
 
+/* The flight HUD must let clicks through to the canvas (only its buttons are interactive). */
+#screen-root > .hud {
+  pointer-events: none;
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
@@ -535,6 +540,15 @@ button:focus-visible {
   font-size: 15px;
   line-height: 1.45;
   font-weight: 600;
+}
+
+.howto .goal-list {
+  line-height: 1.5;
+}
+
+.howto .icon {
+  width: 22px;
+  height: 22px;
 }
 
 .goal-list .done {

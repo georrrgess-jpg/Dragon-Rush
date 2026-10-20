@@ -56,7 +56,10 @@ function island(ctx: Ctx, rng: Rng, x: number, y: number, w: number, tone: 'far'
   ctx.lineTo(x + w / 2, y);
   ctx.closePath();
   if (far) {
-    ctx.fillStyle = 'rgba(150,140,190,0.55)';
+    const g = ctx.createLinearGradient(0, y, 0, y + depth);
+    g.addColorStop(0, 'rgba(176,150,170,0.6)');
+    g.addColorStop(1, 'rgba(160,150,200,0.15)');
+    ctx.fillStyle = g;
   } else {
     const g = ctx.createLinearGradient(0, y, 0, y + depth);
     g.addColorStop(0, '#b48662');
@@ -68,7 +71,7 @@ function island(ctx: Ctx, rng: Rng, x: number, y: number, w: number, tone: 'far'
   ctx.beginPath();
   ctx.ellipse(x, y, w / 2 + 6, 14 + w * 0.03, 0, Math.PI, Math.PI * 2);
   ctx.ellipse(x, y, w / 2 + 6, 8, 0, 0, Math.PI);
-  ctx.fillStyle = far ? 'rgba(150,175,190,0.65)' : '#8fc77a';
+  ctx.fillStyle = far ? 'rgba(150,190,170,0.7)' : '#8fc77a';
   ctx.fill();
   if (!far) {
     // waterfall
