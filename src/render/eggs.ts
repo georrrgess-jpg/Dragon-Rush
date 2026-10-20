@@ -9,12 +9,13 @@
 import { RARITIES, SPECIES } from '../content/species';
 import type { Rarity, SpeciesId } from '../content/types';
 import { mixHex } from './dragonArt';
+import { RARITY_INK, drawRaritySymbol } from './rarityArt';
 import { EGG_BOX, drawFracture, eggBodyPath, eggFracture, eggShapeSpec, eggSpan, polyArea, seeded, speciesSeed, type Pt, type ShellImage } from './eggFracture';
 
 type Ctx = CanvasRenderingContext2D;
 
 /** Bump to invalidate every cached egg picture when the art changes. */
-export const EGG_ART_REV = 1;
+export const EGG_ART_REV = 2;
 /** Most cached shell pictures kept at once (least recently used are dropped). */
 export const EGG_CACHE_LIMIT = 120;
 /** Memory budget for cached shell pictures (width × height × 4 bytes, both layers). */
@@ -40,7 +41,7 @@ export interface EggOptions {
   reducedMotion?: boolean;
   /** Ground shadow (default true). */
   shadow?: boolean;
-  /** Rarity collar accent (default true). */
+  /** Kept for compatibility: the rarity trim is part of the cached shell since Update 5. */
   rarity?: boolean;
   /**
    * Device-pixel height to pick the cached shell by (default: the on-screen size). Pass a fixed
@@ -64,7 +65,7 @@ interface EggLook {
 }
 
 const LOOK: Record<SpeciesId, EggLook> = {
-  ember: { base: '#5c2318', hi: '#94402a', lo: '#230b07', line: '#1c0704', glow: '255,150,50', mat: 'stone', emissive: true },
+  ember: { base: '#ea7a2c', hi: '#ffb46a', lo: '#a5420f', line: '#4a1e08', glow: '255,190,80', mat: 'stone', emissive: false },
   cinder: { base: '#3e3737', hi: '#665c5a', lo: '#181414', line: '#0d0a0a', glow: '255,130,50', mat: 'stone', emissive: true },
   pyrelisk: { base: '#7a3420', hi: '#b45c3c', lo: '#3a140a', line: '#2a0c05', glow: '255,150,50', mat: 'stone', emissive: true },
   solpyre: { base: '#f1d58e', hi: '#fff9e6', lo: '#c08c36', line: '#7a4a08', glow: '255,225,130', mat: 'metal', emissive: true },
@@ -84,8 +85,8 @@ const LOOK: Record<SpeciesId, EggLook> = {
   snowcap: { base: '#8ea6bd', hi: '#dce7f1', lo: '#45658c', line: '#2a3644', glow: '220,240,255', mat: 'stone', emissive: false },
   frostfang: { base: '#7cc0e4', hi: '#e2f6ff', lo: '#3a80b0', line: '#12304a', glow: '200,240,255', mat: 'ice', emissive: true },
   glacielle: { base: '#d6e6f8', hi: '#ffffff', lo: '#9cb4de', line: '#3a4a7a', glow: '200,230,255', mat: 'ice', emissive: false },
-  spark: { base: '#2f3252', hi: '#535984', lo: '#13152a', line: '#0b0c1a', glow: '255,230,90', mat: 'storm', emissive: true },
-  voltwing: { base: '#4566d4', hi: '#8ea8f6', lo: '#20328c', line: '#121e5a', glow: '120,240,255', mat: 'storm', emissive: true },
+  spark: { base: '#ffd94a', hi: '#fff4c4', lo: '#d29a12', line: '#4a3a10', glow: '255,240,150', mat: 'smooth', emissive: false },
+  voltwing: { base: '#4566d4', hi: '#8ea8f6', lo: '#20328c', line: '#121e5a', glow: '255,232,110', mat: 'storm', emissive: true },
   thundercrest: { base: '#4a505e', hi: '#767e90', lo: '#20242d', line: '#121419', glow: '255,225,110', mat: 'storm', emissive: true },
   astralux: { base: '#23254e', hi: '#3e4280', lo: '#0b0c24', line: '#05061a', glow: '200,210,255', mat: 'star', emissive: true },
 };
@@ -450,68 +451,96 @@ interface Design {
 const DESIGNS: Record<SpeciesId, Design> = {
   // ------------------------------------------------------------------- fire
   ember: {
+    // the cheerful starter: warm orange shell, the dragon's yellow chevrons, curved horn nubs and
+    // flame licks around the base (a Common: no glow)
     surface(d) {
       fillBody(d);
       const c = d.c;
-      if (d.t > 0) {
-        // charcoal strata
-        c.fillStyle = 'rgba(0,0,0,0.14)';
-        for (const [y, a] of [
-          [-0.2, 0.05],
-          [0.08, -0.04],
-          [0.3, 0.06],
-        ]) {
-          c.beginPath();
-          c.moveTo(-0.5, y);
-          c.quadraticCurveTo(0, y + a + 0.04, 0.5, y - a);
-          c.lineTo(0.5, y - a + 0.05);
-          c.quadraticCurveTo(0, y + a + 0.09, -0.5, y + 0.05);
-          c.fill();
-        }
-        const w = c.createRadialGradient(0.02, 0.1, 0, 0.02, 0.1, 0.42);
-        w.addColorStop(0, 'rgba(255,110,30,0.22)');
-        w.addColorStop(1, 'rgba(255,110,30,0)');
-        c.fillStyle = w;
-        c.fillRect(-0.6, -0.6, 1.2, 1.2);
+      // pale belly glow low on the front (the dragon's belly colour)
+      const bl = c.createRadialGradient(-0.04, 0.2, 0.02, -0.02, 0.2, 0.34);
+      bl.addColorStop(0, 'rgba(255,226,150,0.5)');
+      bl.addColorStop(1, 'rgba(255,226,150,0)');
+      c.fillStyle = bl;
+      c.fillRect(-0.6, -0.3, 1.2, 0.9);
+      if (d.t === 2) speckle(d, 50, 0.003, 0.007, '#a8400f', 0.25);
+      // flame licks rising from the base
+      const fl = new Path2D();
+      const n = d.t === 0 ? 5 : 7;
+      for (let i = 0; i < n; i++) {
+        const x0 = -0.42 + (i / (n - 1)) * 0.84;
+        const hgt = (i % 2 ? 0.12 : 0.19) * (d.t === 0 ? 1.1 : 1);
+        fl.moveTo(x0 - 0.075, 0.56);
+        fl.quadraticCurveTo(x0 - 0.05, 0.5 - hgt * 0.5, x0 + 0.02, 0.5 - hgt);
+        fl.quadraticCurveTo(x0 + 0.01, 0.5 - hgt * 0.45, x0 + 0.075, 0.56);
+        fl.closePath();
       }
-      if (d.t === 2) speckle(d, 40, 0.003, 0.007, '#c87a5a', 0.35);
-      // glowing seam network: exactly where the shell will crack
-      const seams = crackPaths(d);
-      c.save();
-      c.strokeStyle = d.L.lo;
-      c.lineWidth = lw(d, 3, d.t === 0 ? 0.04 : 0.028);
-      c.stroke(seams);
-      c.restore();
-      glow(d, seams, '#ffc865', '255,130,40', lw(d, 1.3, d.t === 0 ? 0.018 : 0.011));
+      c.fillStyle = vgrad(d, 0.3, 0.52, [
+        [0, '#ffcf4a'],
+        [1, '#d4661b'],
+      ]);
+      c.fill(fl);
+      c.strokeStyle = 'rgba(110,46,14,0.55)';
+      c.lineWidth = lw(d, 1.2, d.t === 0 ? 0.014 : 0.008);
+      c.stroke(fl);
+      // chevrons down the front, smaller toward the crown (the dragon's marking)
+      const rows: [number, number, number][] =
+        d.t === 0
+          ? [
+              [-0.2, 0.15, 0.05],
+              [0.02, 0.2, 0.065],
+            ]
+          : [
+              [-0.3, 0.1, 0.04],
+              [-0.15, 0.15, 0.05],
+              [0.02, 0.2, 0.06],
+            ];
+      for (const [y, w, h] of rows) {
+        const p = new Path2D();
+        const t = h * 0.75;
+        polyTo(p, [
+          [-w, y],
+          [0, y + h],
+          [w, y],
+          [w, y + t],
+          [0, y + h + t],
+          [-w, y + t],
+        ]);
+        emboss(d, p, '#ffd24a', 0, '#fff1b8', 'rgba(150,60,10,0.75)', true);
+      }
     },
     front(d) {
-      for (const [x, hgt] of [
-        [-0.085, 0.055],
-        [0.0, 0.08],
-        [0.08, 0.06],
-      ]) {
-        const y = topY(d, x) + 0.012;
+      // two horn nubs curving back, dark like the dragon's horns
+      for (const s of [-1, 1]) {
+        const x = s * 0.07;
+        const y = topY(d, x) + 0.016;
         const p = new Path2D();
-        p.moveTo(x - 0.035, y + 0.01);
-        p.quadraticCurveTo(x - 0.01, y - hgt * 0.9, x + 0.055, y - hgt);
-        p.quadraticCurveTo(x + 0.02, y - hgt * 0.35, x + 0.04, y + 0.01);
+        p.moveTo(x - 0.03 * s, y + 0.012);
+        p.quadraticCurveTo(x, y - 0.07, x + s * 0.07, y - 0.085);
+        p.quadraticCurveTo(x + s * 0.035, y - 0.04, x + s * 0.04, y + 0.012);
         p.closePath();
-        part(d, p, vgrad(d, y - hgt, y, [
-          [0, '#8a3a24'],
-          [1, '#2a0e08'],
+        part(d, p, vgrad(d, y - 0.09, y, [
+          [0, '#6a4a3e'],
+          [1, '#2a1a16'],
         ]));
-        const edge = new Path2D();
-        edge.moveTo(x - 0.03, y);
-        edge.quadraticCurveTo(x - 0.008, y - hgt * 0.85, x + 0.05, y - hgt * 0.97);
-        glow(d, edge, '#ffb44a', '255,140,40', lw(d, 1, 0.008));
+        if (d.t > 0) {
+          const h = new Path2D();
+          h.moveTo(x - 0.016 * s, y);
+          h.quadraticCurveTo(x + s * 0.008, y - 0.055, x + s * 0.05, y - 0.075);
+          d.c.save();
+          d.c.strokeStyle = 'rgba(255,220,190,0.55)';
+          d.c.lineWidth = lw(d, 1, 0.007);
+          d.c.stroke(h);
+          d.c.restore();
+        }
       }
     },
   },
   cinder: {
+    // charcoal wyvern: matte layered planes split by a network of glowing cracks (the dragon's
+    // marking), three small spikes at the crown, embers smouldering at the base
     surface(d) {
       fillBody(d);
       const c = d.c;
-      // layered matte planes
       const planes: Pt[][] = [
         [[-0.4, -0.3], [0.4, -0.14], [0.4, 0.02], [-0.4, -0.08]],
         [[-0.4, 0.12], [0.4, 0.02], [0.4, 0.2], [-0.4, 0.3]],
@@ -522,54 +551,63 @@ const DESIGNS: Record<SpeciesId, Design> = {
         polyTo(p, pl);
         c.fillStyle = i % 2 ? 'rgba(255,240,230,0.06)' : 'rgba(0,0,0,0.16)';
         c.fill(p);
-        c.strokeStyle = 'rgba(255,230,220,0.12)';
-        c.lineWidth = lw(d, 1, 0.006);
-        c.beginPath();
-        c.moveTo(pl[0][0], pl[0][1]);
-        c.lineTo(pl[1][0], pl[1][1]);
-        c.stroke();
       });
-      // pores
-      const n = [7, 22, 46][d.t];
-      for (let i = 0; i < n; i++) {
-        const y = -0.42 + d.r() * 0.8;
-        const [xl, xr] = span(d, y);
-        const x = xl + (xr - xl) * (0.1 + d.r() * 0.8);
-        const rr = (d.t === 0 ? 0.016 : 0.009) + d.r() * 0.01;
-        c.fillStyle = 'rgba(255,235,225,0.16)';
-        c.beginPath();
-        c.ellipse(x + rr * 0.3, y + rr * 0.35, rr, rr * 0.75, 0, 0, Math.PI * 2);
-        c.fill();
-        c.fillStyle = '#141010';
-        c.beginPath();
-        c.ellipse(x, y, rr, rr * 0.75, 0, 0, Math.PI * 2);
-        c.fill();
+      if (d.t > 0) {
+        const n = d.t === 2 ? 30 : 14;
+        for (let i = 0; i < n; i++) {
+          const y = -0.42 + d.r() * 0.8;
+          const [xl, xr] = span(d, y);
+          const x = xl + (xr - xl) * (0.1 + d.r() * 0.8);
+          const rr = 0.007 + d.r() * 0.008;
+          c.fillStyle = 'rgba(255,235,225,0.14)';
+          c.beginPath();
+          c.ellipse(x + rr * 0.3, y + rr * 0.35, rr, rr * 0.75, 0, 0, Math.PI * 2);
+          c.fill();
+          c.fillStyle = '#141010';
+          c.beginPath();
+          c.ellipse(x, y, rr, rr * 0.75, 0, 0, Math.PI * 2);
+          c.fill();
+        }
       }
-      // ember freckles, denser low on the shell
-      const f = new Path2D();
-      const fn = [6, 11, 15][d.t];
-      for (let i = 0; i < fn; i++) {
-        const y = -0.2 + Math.sqrt(d.r()) * 0.6;
-        const [xl, xr] = span(d, y);
-        const x = xl + (xr - xl) * (0.15 + d.r() * 0.7);
-        const rr = (d.t === 0 ? 0.017 : 0.01) + d.r() * 0.008;
-        f.moveTo(x + rr, y);
-        f.arc(x, y, rr, 0, Math.PI * 2);
-      }
-      glow(d, f, '#ffb35a', '255,120,40', 0.012, true);
-      // narrow glowing base
-      const w = c.createLinearGradient(0, 0.5, 0, 0.22);
-      w.addColorStop(0, 'rgba(255,120,40,0.55)');
-      w.addColorStop(1, 'rgba(255,120,40,0)');
+      // smouldering base
+      const w = c.createLinearGradient(0, 0.5, 0, 0.18);
+      w.addColorStop(0, 'rgba(255,110,30,0.5)');
+      w.addColorStop(1, 'rgba(255,110,30,0)');
       c.save();
       c.globalCompositeOperation = 'lighter';
       c.fillStyle = w;
-      c.fillRect(-0.4, 0.22, 0.8, 0.3);
+      c.fillRect(-0.5, 0.18, 1, 0.34);
       c.restore();
-      const b = new Path2D();
-      b.moveTo(-0.115, 0.484);
-      b.lineTo(0.115, 0.484);
-      glow(d, b, '#ffd27a', '255,130,40', lw(d, 1.6, 0.016));
+      // glowing crack network: exactly where the shell will break
+      const seams = crackPaths(d);
+      c.save();
+      c.strokeStyle = '#0a0606';
+      c.lineWidth = lw(d, 3.2, d.t === 0 ? 0.042 : 0.03);
+      c.stroke(seams);
+      c.restore();
+      glow(d, seams, '#ffb24a', '255,120,40', lw(d, 1.4, d.t === 0 ? 0.02 : 0.012));
+    },
+    front(d) {
+      for (const [x, hgt] of [
+        [-0.07, 0.05],
+        [0.0, 0.075],
+        [0.07, 0.055],
+      ]) {
+        const y = topY(d, x) + 0.012;
+        const p = new Path2D();
+        p.moveTo(x - 0.03, y + 0.01);
+        p.lineTo(x + 0.012, y - hgt);
+        p.lineTo(x + 0.034, y + 0.01);
+        p.closePath();
+        part(d, p, vgrad(d, y - hgt, y, [
+          [0, '#5a4a48'],
+          [1, '#1a1212'],
+        ]));
+        const edge = new Path2D();
+        edge.moveTo(x - 0.024, y + 0.004);
+        edge.lineTo(x + 0.01, y - hgt * 0.92);
+        glow(d, edge, '#ffb44a', '255,140,40', lw(d, 1, 0.008));
+      }
     },
   },
   pyrelisk: {
@@ -1716,43 +1754,126 @@ const DESIGNS: Record<SpeciesId, Design> = {
   },
   // ------------------------------------------------------------------ storm
   spark: {
+    // the yellow spark: a bright shell with the dragon's navy bolt stripe, white sparks and two
+    // soft ears at the crown (a Common: no glow)
     surface(d) {
       fillBody(d);
       const c = d.c;
-      if (d.t === 2) speckle(d, 24, 0.002, 0.004, '#fff3a0', 0.3);
-      const fil = new Path2D();
-      const r = seeded(speciesSeed(d.id) ^ 11);
-      const roots: [number, number, number][] = [
-        [-0.34, 0.08, -0.2],
-        [0.32, -0.12, Math.PI + 0.35],
-        [0.06, 0.48, -Math.PI / 2 + 0.25],
-      ];
-      for (const [x, y, a] of roots.slice(0, d.t === 0 ? 2 : 3)) branch(fil, r, x, y, a, d.t === 0 ? 0.24 : 0.2, d.t === 0 ? 1 : d.t + 1, 0.8, 0.5);
-      c.strokeStyle = 'rgba(10,10,20,0.6)';
-      c.lineWidth = lw(d, 2.5, d.t === 0 ? 0.03 : 0.018);
-      c.stroke(fil);
-      glow(d, fil, '#fff6b0', '255,225,80', lw(d, 1, d.t === 0 ? 0.014 : 0.008));
+      const ch = c.createRadialGradient(0.02, 0.18, 0.02, 0.02, 0.18, 0.3);
+      ch.addColorStop(0, 'rgba(255,250,225,0.6)');
+      ch.addColorStop(1, 'rgba(255,250,225,0)');
+      c.fillStyle = ch;
+      c.fillRect(-0.6, -0.2, 1.2, 0.7);
+      if (d.t === 2) speckle(d, 40, 0.002, 0.005, '#c89010', 0.3);
+      // zigzag bolt band across the shell
+      const top: Pt[] = [];
+      const bot: Pt[] = [];
+      const n = 7;
+      for (let i = 0; i <= n; i++) {
+        const x = -0.46 + (i / n) * 0.92;
+        const y = -0.04 + (i % 2 ? -0.07 : 0.05);
+        top.push([x, y - 0.035]);
+        bot.push([x, y + 0.035]);
+      }
+      const band = new Path2D();
+      polyTo(band, [...top, ...[...bot].reverse()]);
+      c.save();
+      c.fillStyle = '#3a3a5a';
+      c.fill(band);
+      c.strokeStyle = '#23233a';
+      c.lineWidth = lw(d, 1.4, d.t === 0 ? 0.016 : 0.01);
+      c.stroke(band);
+      if (d.t > 0) {
+        // a lit edge along the stripe
+        c.strokeStyle = 'rgba(255,255,255,0.5)';
+        c.lineWidth = lw(d, 1, 0.006);
+        c.beginPath();
+        polyTo(c, top.map(([x, y]) => [x, y - 0.006] as Pt), false);
+        c.stroke();
+      }
+      c.restore();
+      // two small bolt marks
+      for (const [x, y, k] of [
+        [-0.17, 0.24, 1],
+        [0.2, -0.28, 0.8],
+      ] as const) {
+        const b = new Path2D();
+        polyTo(b, [
+          [x - 0.02 * k, y - 0.07 * k],
+          [x + 0.035 * k, y - 0.07 * k],
+          [x + 0.01 * k, y - 0.01 * k],
+          [x + 0.04 * k, y - 0.01 * k],
+          [x - 0.025 * k, y + 0.075 * k],
+          [x - 0.005 * k, y + 0.012 * k],
+          [x - 0.035 * k, y + 0.012 * k],
+        ]);
+        c.fillStyle = '#3a3a5a';
+        c.fill(b);
+      }
+      // white sparks
+      const sp = new Path2D();
+      for (const [x, y, r] of [
+        [0.16, 0.2, 0.03],
+        [-0.22, -0.2, 0.026],
+        [0.05, -0.36, 0.02],
+      ] as const)
+        starPath(sp, x, y, r, r * 0.3, 4, 0);
+      c.fillStyle = '#ffffff';
+      c.fill(sp);
     },
     front(d) {
-      for (const [x, hgt, s] of [
-        [-0.1, 0.07, -1],
-        [0.0, 0.1, 0],
-        [0.1, 0.07, 1],
-      ]) {
-        const y = topY(d, x) + 0.012;
+      for (const s of [-1, 1]) {
+        const x = s * 0.11;
+        const y = topY(d, x) + 0.02;
         const p = new Path2D();
-        p.moveTo(x - 0.035, y + 0.01);
-        p.quadraticCurveTo(x - 0.02 + s * 0.01, y - hgt * 0.8, x + s * 0.03 + 0.012, y - hgt);
-        p.quadraticCurveTo(x + 0.025, y - hgt * 0.45, x + 0.035, y + 0.01);
+        p.moveTo(x - 0.05, y + 0.02);
+        p.quadraticCurveTo(x - 0.02 + s * 0.02, y - 0.1, x + s * 0.035, y - 0.105);
+        p.quadraticCurveTo(x + 0.03 + s * 0.01, y - 0.04, x + 0.05, y + 0.02);
         p.closePath();
-        part(d, p, vgrad(d, y - hgt, y, [
-          [0, '#fff3a0'],
+        part(d, p, vgrad(d, y - 0.1, y, [
+          [0, '#fff2a0'],
           [1, '#e0a91a'],
         ]));
+        // navy ear tip (the dragon's accent)
+        const tip = new Path2D();
+        tip.moveTo(x - 0.012 + s * 0.01, y - 0.07);
+        tip.quadraticCurveTo(x + s * 0.02, y - 0.1, x + s * 0.035, y - 0.105);
+        tip.quadraticCurveTo(x + s * 0.03 + 0.006, y - 0.07, x + 0.02 + s * 0.005, y - 0.06);
+        tip.closePath();
+        d.c.fillStyle = '#3a3a5a';
+        d.c.fill(tip);
       }
     },
   },
   voltwing: {
+    // blue banded cells joined by glowing yellow conductors (the dragon's bolts; no cyan halo, so
+    // the shell never reads lime at small sizes), with swept charged wing-fins at the shoulders
+    back(d) {
+      for (const s of [-1, 1]) {
+        const [xl, xr] = span(d, -0.12);
+        const x = s < 0 ? xl + 0.03 : xr - 0.03;
+        const p = new Path2D();
+        p.moveTo(x, -0.2);
+        p.quadraticCurveTo(x + s * 0.08, -0.3, x + s * 0.15, -0.34);
+        p.lineTo(x + s * 0.11, -0.22);
+        p.lineTo(x + s * 0.14, -0.2);
+        p.lineTo(x + s * 0.09, -0.08);
+        p.quadraticCurveTo(x + s * 0.04, -0.06, x, -0.02);
+        p.closePath();
+        part(d, p, vgrad(d, -0.32, -0.04, [
+          [0, '#8ea8f6'],
+          [1, '#3552be'],
+        ]));
+        const e = new Path2D();
+        e.moveTo(x + s * 0.02, -0.24);
+        e.quadraticCurveTo(x + s * 0.08, -0.31, x + s * 0.145, -0.335);
+        d.c.save();
+        d.c.strokeStyle = '#f6f04a';
+        d.c.lineWidth = lw(d, 1.4, d.t === 0 ? 0.016 : 0.01);
+        d.c.stroke(e);
+        d.c.restore();
+      }
+    },
     surface(d) {
       fillBody(d);
       const c = d.c;
@@ -1777,13 +1898,7 @@ const DESIGNS: Record<SpeciesId, Design> = {
       c.strokeStyle = '#0c1440';
       c.lineWidth = lw(d, 3.4, d.t === 0 ? 0.042 : 0.03);
       c.stroke(grooves);
-      glow(d, grooves, '#8ff6ff', '120,240,255', lw(d, 1.4, d.t === 0 ? 0.02 : 0.012));
-      c.save();
-      c.setLineDash([0.035, 0.05]);
-      c.strokeStyle = '#f6f04a';
-      c.lineWidth = lw(d, 1.4, d.t === 0 ? 0.02 : 0.012);
-      c.stroke(grooves);
-      c.restore();
+      glow(d, grooves, '#fff3a0', '255,226,80', lw(d, 1.4, d.t === 0 ? 0.02 : 0.012));
       if (d.t > 0) {
         // conductive nodes where grooves meet
         const seen = new Set<string>();
@@ -1800,19 +1915,58 @@ const DESIGNS: Record<SpeciesId, Design> = {
     },
   },
   thundercrest: {
+    // armoured storm drake: bevelled grey plates with dark seams (no glow), one bold lightning
+    // bolt down the front and the crown of plates
     surface(d) {
       fillBody(d);
       const c = d.c;
       speckle(d, [6, 40, 90][d.t], 0.003, d.t === 0 ? 0.012 : 0.008, '#9aa2b4', 0.35);
       if (d.t > 0) speckle(d, d.t === 2 ? 70 : 30, 0.003, 0.008, '#15171d', 0.4);
-      const fis = crackPaths(d);
+      const fr = eggFracture(d.id);
+      if (d.t > 0) {
+        // plate bevels: a lit upper-left rim and a darker lower-right rim per plate
+        for (const cell of fr.cells) {
+          const p = new Path2D();
+          polyTo(p, inset(cell.poly, cell.centroid, 0.022));
+          c.save();
+          c.lineWidth = lw(d, 1.6, 0.01);
+          c.translate(-0.004, -0.004);
+          c.strokeStyle = 'rgba(255,255,255,0.14)';
+          c.stroke(p);
+          c.translate(0.008, 0.008);
+          c.strokeStyle = 'rgba(0,0,0,0.3)';
+          c.stroke(p);
+          c.restore();
+        }
+      }
+      engrave(d, crackPaths(d), lw(d, 2.4, d.t === 0 ? 0.03 : 0.018), '#121419', 'rgba(170,180,200,0.45)');
+      // bold bolt emblem
+      const b = new Path2D();
+      polyTo(b, [
+        [-0.03, -0.3],
+        [0.1, -0.3],
+        [0.03, -0.06],
+        [0.12, -0.06],
+        [-0.07, 0.3],
+        [-0.02, 0.02],
+        [-0.1, 0.02],
+      ]);
+      c.save();
       c.strokeStyle = '#0a0c11';
-      c.lineWidth = lw(d, 5, d.t === 0 ? 0.06 : 0.042);
-      c.stroke(fis);
-      c.strokeStyle = '#7a5a10';
-      c.lineWidth = lw(d, 2.6, d.t === 0 ? 0.03 : 0.02);
-      c.stroke(fis);
-      glow(d, fis, '#fff3a0', '255,215,90', lw(d, 1.2, d.t === 0 ? 0.016 : 0.009));
+      c.lineWidth = lw(d, 3, d.t === 0 ? 0.034 : 0.024);
+      c.stroke(b);
+      c.restore();
+      glow(d, b, '#ffe14a', '255,215,90', 0.01, true);
+      if (d.t > 0) {
+        c.save();
+        c.strokeStyle = 'rgba(255,255,230,0.9)';
+        c.lineWidth = lw(d, 1, 0.008);
+        c.beginPath();
+        c.moveTo(-0.02, -0.285);
+        c.lineTo(0.08, -0.285);
+        c.stroke();
+        c.restore();
+      }
     },
     front(d) {
       const plates: [number, number, number][] = [
@@ -1996,6 +2150,192 @@ function solCrown(d: Dc, back: boolean) {
   glow(d, ring, back ? '#f2c860' : '#fff0a8', '255,225,130', lw(d, 3, d.t === 0 ? 0.032 : 0.022));
 }
 
+// --- rarity trim ------------------------------------------------------------------------------------
+
+/**
+ * One consistent rarity treatment on every egg (Update 5), baked into the cached shell so the
+ * shell pieces carry it when the egg hatches. It sits low on the shell and never replaces the
+ * species design:
+ *   Common ◆   a single pewter stud (understated)
+ *   Rare ◆◆    an ornamental silver collar with beads and two sapphire studs
+ *   Epic ◆◆◆   a layered violet-silver double collar with a glowing inlay and three studs
+ *   Legendary ★ a gold collar with engraved notches, filigree scrolls and a star gem
+ */
+const TRIM_Y = 0.335;
+const TRIM_SAG = 0.03;
+
+/** y of the collar's centre line at x (the band wraps the egg, seen slightly from above). */
+function trimY(d: Dc, x: number, y = TRIM_Y): number {
+  const [l, r] = span(d, y);
+  const half = Math.max(0.05, (r - l) / 2);
+  const k = Math.min(1, Math.abs(x - (l + r) / 2) / half);
+  return y + TRIM_SAG * (1 - k * k);
+}
+
+function bandPath(d: Dc, y: number, th: number): Path2D {
+  const y0 = y - th / 2;
+  const y1 = y + th / 2;
+  const [l0, r0] = span(d, y0);
+  const [l1, r1] = span(d, y1);
+  const p = new Path2D();
+  p.moveTo(l0 - 0.03, y0);
+  p.quadraticCurveTo((l0 + r0) / 2, y0 + TRIM_SAG * 2, r0 + 0.03, y0);
+  p.lineTo(r1 + 0.03, y1);
+  p.quadraticCurveTo((l1 + r1) / 2, y1 + TRIM_SAG * 2, l1 - 0.03, y1);
+  p.closePath();
+  return p;
+}
+
+function centreLine(d: Dc, y: number): Path2D {
+  const [l, r] = span(d, y);
+  const p = new Path2D();
+  p.moveTo(l - 0.03, y);
+  p.quadraticCurveTo((l + r) / 2, y + TRIM_SAG * 2, r + 0.03, y);
+  return p;
+}
+
+/** A metal band lit from the left, with a crisp outline and a bright top edge. */
+function metalBand(d: Dc, y: number, th: number, stops: [string, string, string], line: string) {
+  const c = d.c;
+  const p = bandPath(d, y, th);
+  const g = c.createLinearGradient(-d.hw, 0, d.hw, 0);
+  g.addColorStop(0, stops[0]);
+  g.addColorStop(0.4, stops[1]);
+  g.addColorStop(1, stops[2]);
+  c.save();
+  c.fillStyle = g;
+  c.fill(p);
+  c.strokeStyle = line;
+  c.lineWidth = lw(d, 1.3, d.t === 0 ? 0.014 : 0.008);
+  c.stroke(p);
+  if (d.t > 0) {
+    c.strokeStyle = 'rgba(255,255,255,0.55)';
+    c.lineWidth = lw(d, 0.8, 0.005);
+    c.stroke(centreLine(d, y - th / 2 + Math.max(d.u * 1.2, 0.006)));
+  }
+  c.restore();
+}
+
+function diamondStud(d: Dc, x: number, y: number, r: number, face: string, line: string) {
+  const p = new Path2D();
+  polyTo(p, [
+    [x, y - r],
+    [x + r * 0.72, y],
+    [x, y + r],
+    [x - r * 0.72, y],
+  ]);
+  const c = d.c;
+  c.save();
+  c.lineWidth = lw(d, 1.2, d.t === 0 ? 0.014 : 0.008);
+  c.strokeStyle = line;
+  c.stroke(p);
+  c.fillStyle = face;
+  c.fill(p);
+  // facet: lit upper-left half
+  c.fillStyle = 'rgba(255,255,255,0.45)';
+  c.beginPath();
+  polyTo(c, [
+    [x, y - r],
+    [x, y + r],
+    [x - r * 0.72, y],
+  ]);
+  c.fill();
+  c.restore();
+}
+
+function rarityTrim(d: Dc) {
+  const rarity = SPECIES[d.id].rarity;
+  const c = d.c;
+  const t0 = d.t === 0;
+  if (rarity === 'common') {
+    const y = trimY(d, 0) + 0.01;
+    diamondStud(d, 0, y, t0 ? 0.044 : 0.032, mixHex(d.L.hi, '#c8ced6', 0.55), d.L.line);
+    return;
+  }
+  if (rarity === 'rare') {
+    metalBand(d, TRIM_Y, t0 ? 0.05 : 0.04, ['#f6fbff', '#c4d2e2', '#6f819a'], '#23324a');
+    if (!t0) {
+      // beads along the collar
+      const [l, r] = span(d, TRIM_Y);
+      c.save();
+      c.fillStyle = '#ffffff';
+      c.strokeStyle = 'rgba(35,50,74,0.7)';
+      c.lineWidth = lw(d, 0.8, 0.005);
+      for (let x = l + 0.05; x < r - 0.04; x += 0.055) {
+        if (Math.abs(x) < 0.07) continue;
+        c.beginPath();
+        c.arc(x, trimY(d, x), 0.009, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+      }
+      c.restore();
+    }
+    const y = trimY(d, 0);
+    for (const x of [-0.034, 0.034]) diamondStud(d, x, y, t0 ? 0.034 : 0.027, '#5aaaf0', '#123a66');
+    return;
+  }
+  if (rarity === 'epic') {
+    const th = t0 ? 0.03 : 0.022;
+    const stops: [string, string, string] = ['#f6efff', '#bca8de', '#655190'];
+    metalBand(d, TRIM_Y - 0.03, th, stops, '#2c1f48');
+    metalBand(d, TRIM_Y + 0.03, th, stops, '#2c1f48');
+    // glowing inlay between the bands
+    glow(d, centreLine(d, TRIM_Y), '#efe0ff', '200,150,255', lw(d, 1.6, t0 ? 0.016 : 0.01));
+    const y = trimY(d, 0);
+    // three layered gems (the Epic symbol): the middle one larger and raised
+    const r0 = t0 ? 0.03 : 0.024;
+    for (const x of [-0.05, 0.05]) diamondStud(d, x, y + 0.004, r0 * 0.85, '#a66cf0', '#3a1a66');
+    diamondStud(d, 0, y - 0.004, r0 * 1.2, '#c08cff', '#3a1a66');
+    return;
+  }
+  // legendary
+  const th = t0 ? 0.056 : 0.048;
+  metalBand(d, TRIM_Y, th, ['#fff6c8', '#f2c445', '#94640c'], '#4a2e02');
+  if (!t0) {
+    // engraved notches along the gold
+    const [l, r] = span(d, TRIM_Y);
+    c.save();
+    c.strokeStyle = 'rgba(90,58,4,0.55)';
+    c.lineWidth = lw(d, 0.9, 0.005);
+    c.beginPath();
+    for (let x = l + 0.04; x < r - 0.03; x += 0.035) {
+      if (Math.abs(x) < 0.07) continue;
+      const y = trimY(d, x);
+      c.moveTo(x, y - th * 0.3);
+      c.lineTo(x, y + th * 0.3);
+    }
+    c.stroke();
+    c.restore();
+    // filigree scrolls rising from the collar
+    for (const s of [-1, 1]) {
+      const p = new Path2D();
+      const x0 = s * 0.075;
+      const y0 = trimY(d, x0) - th / 2;
+      // a low scroll lying along the collar: out from the gem, a gentle wave, a small curl
+      p.moveTo(x0, y0 - 0.004);
+      p.bezierCurveTo(x0 + s * 0.04, y0 - 0.05, x0 + s * 0.09, y0 + 0.004, x0 + s * 0.13, y0 - 0.035);
+      p.arc(x0 + s * 0.112, y0 - 0.035, 0.018, s > 0 ? 0 : Math.PI, s > 0 ? -Math.PI * 1.2 : Math.PI * 2.2, s > 0);
+      c.save();
+      c.strokeStyle = '#4a2e02';
+      c.lineWidth = lw(d, 2.6, 0.016);
+      c.stroke(p);
+      c.strokeStyle = '#f6cf5a';
+      c.lineWidth = lw(d, 1.4, 0.008);
+      c.stroke(p);
+      c.restore();
+    }
+  }
+  const gem = new Path2D();
+  const gy = trimY(d, 0);
+  starPath(gem, 0, gy, t0 ? 0.05 : 0.042, t0 ? 0.022 : 0.018, 5);
+  c.save();
+  c.strokeStyle = '#4a2e02';
+  c.lineWidth = lw(d, 2, t0 ? 0.02 : 0.012);
+  c.stroke(gem);
+  c.restore();
+  glow(d, gem, '#fff6c8', '255,225,130', 0.01, true);
+}
+
 // --- shell cache ------------------------------------------------------------------------------------
 
 interface ShellEntry extends ShellImage {
@@ -2089,6 +2429,7 @@ function renderShell(c: Ctx, g: Ctx | null, id: SpeciesId, tier: EggTier, Q: num
   des.surface(d);
   formShade(d, L.mat === 'ice' ? 0.6 : 1);
   highlight(d);
+  rarityTrim(d);
   c.restore();
   g?.restore();
   // crisp inner edge of the silhouette
@@ -2119,9 +2460,6 @@ function cachedGrad(ctx: Ctx, key: string, make: () => CanvasGradient): CanvasGr
 }
 
 const SHEEN: Partial<Record<Material, boolean>> = { pearl: true, ice: true, metal: true };
-const DASH_RARE = [0.05, 0.03];
-const DASH_EPIC = [0.002, 0.032];
-const NO_DASH: number[] = [];
 
 /**
  * Draws a species egg centered at (x, y), h pixels tall. Static shell art comes from the cache;
@@ -2137,6 +2475,8 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
   const time = o.time ?? 0;
   const animate = tier === 2 && !o.reducedMotion;
   const glowK = Math.max(0, Math.min(1, o.glow ?? 0));
+  // every alpha below is relative to the caller's (fades and cross-fades compose)
+  const a0 = ctx.globalAlpha;
   ctx.save();
   ctx.translate(x, y + h / 2);
   if (o.shadow !== false) {
@@ -2150,7 +2490,7 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
   ctx.save();
   ctx.scale(h, h);
   if (glowK > 0) {
-    ctx.globalAlpha = glowK;
+    ctx.globalAlpha = a0 * glowK;
     ctx.fillStyle = cachedGrad(ctx, `halo:${id}`, () => {
       const g = ctx.createRadialGradient(0, 0, 0.15, 0, 0, 0.9);
       g.addColorStop(0, rgba(L.glow, 0.55));
@@ -2160,15 +2500,15 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
     ctx.beginPath();
     ctx.arc(0, 0, 0.9, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = a0;
   }
   ctx.drawImage(e.canvas, e.box.x, e.box.y, e.box.w, e.box.h);
   if (e.emissive) {
     const pulse = animate ? 0.6 + 0.3 * Math.sin(time * 2.3 + (speciesSeed(id) % 7)) + (L.mat === 'storm' ? 0.08 * Math.sin(time * 7.1) : 0) : 0.72;
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = Math.min(1, pulse + glowK * 0.4);
+    ctx.globalAlpha = a0 * Math.min(1, pulse + glowK * 0.4);
     ctx.drawImage(e.emissive, e.box.x, e.box.y, e.box.w, e.box.h);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = a0;
     ctx.globalCompositeOperation = 'source-over';
   }
   if ((animate && SHEEN[L.mat]) || glowK > 0) {
@@ -2191,7 +2531,7 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
     }
     if (glowK > 0) {
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = glowK * 0.7;
+      ctx.globalAlpha = a0 * glowK * 0.7;
       ctx.fillStyle = cachedGrad(ctx, `inner:${id}`, () => {
         const g = ctx.createRadialGradient(0, 0.05, 0, 0, 0.05, 0.55);
         g.addColorStop(0, rgba(L.glow, 0.6));
@@ -2202,52 +2542,10 @@ export function drawEgg(ctx: Ctx, id: SpeciesId, x: number, y: number, h: number
     }
     ctx.restore();
   }
-  if (o.rarity !== false) drawCollar(ctx, id, h * k);
   ctx.restore();
   if ((o.crack ?? 0) > 0) {
     const st = eggStyle(id);
     drawFracture(ctx, id, 0, 0, h, o.crack!, { line: st.line, lip: st.lip, glow: L.glow }, tier);
-  }
-  ctx.restore();
-}
-
-/** Rarity accent: a thin collar low on the shell (dashed rare, dotted epic, gold legendary). */
-function drawCollar(ctx: Ctx, id: SpeciesId, px: number) {
-  const r = SPECIES[id].rarity;
-  if (r === 'common') return;
-  const y = 0.35;
-  const [xl, xr] = eggSpan(id, y);
-  const rx = (xr - xl) / 2 + 0.004;
-  const cx = (xl + xr) / 2;
-  const u = 1 / px;
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.ellipse(cx, y, rx, 0.036, 0, 0.08, Math.PI - 0.08);
-  if (r === 'legendary') {
-    ctx.strokeStyle = '#5a3a04';
-    ctx.lineWidth = Math.max(3.4 * u, 0.034);
-    ctx.stroke();
-    ctx.strokeStyle = '#f6c445';
-    ctx.lineWidth = Math.max(2 * u, 0.02);
-    ctx.stroke();
-    const gem = new Path2D();
-    starPath(gem, cx, y + 0.036, 0.034, 0.014, 4, 0);
-    ctx.fillStyle = '#5a3a04';
-    ctx.lineWidth = Math.max(2 * u, 0.014);
-    ctx.strokeStyle = '#5a3a04';
-    ctx.stroke(gem);
-    ctx.fillStyle = '#fff6c8';
-    ctx.fill(gem);
-  } else {
-    ctx.setLineDash(r === 'rare' ? DASH_RARE : DASH_EPIC);
-    ctx.strokeStyle = 'rgba(10,16,30,0.55)';
-    ctx.lineWidth = Math.max((r === 'epic' ? 3.4 : 3) * u, r === 'epic' ? 0.03 : 0.024);
-    ctx.stroke();
-    ctx.strokeStyle = r === 'rare' ? '#ffffff' : '#ead8ff';
-    ctx.lineWidth = Math.max((r === 'epic' ? 2.2 : 1.6) * u, r === 'epic' ? 0.02 : 0.014);
-    ctx.stroke();
-    ctx.setLineDash(NO_DASH);
   }
   ctx.restore();
 }
@@ -2280,24 +2578,40 @@ export function eggIcon(id: SpeciesId, size: number): HTMLCanvasElement {
   return c;
 }
 
-/** Rarity plaque: symbol + word, with a border that differs per tier. */
+/**
+ * Rarity plaque: the shared rarity symbol (drawRaritySymbol: one gem, two gems, three layered gems,
+ * a crowned star) + the word, with a border that differs per tier. Reads without colour.
+ */
 export function drawRarityPlaque(ctx: Ctx, rarity: Rarity, x: number, y: number, w: number): void {
   const r = RARITIES[rarity];
+  const ink = RARITY_INK[rarity];
   ctx.save();
-  ctx.font = `700 ${Math.round(w * 0.13)}px 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif`;
-  ctx.textAlign = 'center';
+  const fs = Math.round(w * 0.13);
+  ctx.font = `800 ${fs}px 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif`;
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const h = w * 0.24;
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx.strokeStyle = r.color;
-  ctx.lineWidth = rarity === 'legendary' ? 4 : rarity === 'epic' ? 3 : 2;
-  if (rarity === 'rare' || rarity === 'epic') ctx.setLineDash(rarity === 'rare' ? [6, 3] : [2, 3]);
+  ctx.fillStyle = rarity === 'legendary' ? '#fff6dc' : 'rgba(255,255,255,0.94)';
+  ctx.strokeStyle = rarity === 'common' ? '#9aa8b4' : ink.ink;
+  ctx.lineWidth = rarity === 'legendary' ? 3 : rarity === 'epic' ? 2.5 : 2;
   ctx.beginPath();
   ctx.roundRect(x - w / 2, y - h / 2, w, h, h / 2);
   ctx.fill();
   ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = '#1f2a3a';
-  ctx.fillText(`${r.symbol} ${r.name}`, x, y + 1);
+  if (rarity === 'epic') {
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(143,79,214,0.45)';
+    ctx.beginPath();
+    ctx.roundRect(x - w / 2 + 3, y - h / 2 + 3, w - 6, h - 6, h / 2 - 3);
+    ctx.stroke();
+  }
+  const sym = h * 0.62;
+  const symW = rarity === 'common' ? sym * 0.62 : rarity === 'rare' ? sym * 1.05 : rarity === 'epic' ? sym * 1.2 : sym * 0.9;
+  const tw = ctx.measureText(r.name).width;
+  const gap = fs * 0.3;
+  const x0 = x - (symW + gap + tw) / 2;
+  drawRaritySymbol(ctx, rarity, x0 + symW / 2, y + 0.5, sym);
+  ctx.fillStyle = ink.dark;
+  ctx.fillText(r.name, x0 + symW + gap, y + 1);
   ctx.restore();
 }

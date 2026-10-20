@@ -61,21 +61,43 @@ export function elementTag(id: SpeciesId): string {
   return `<span class="element" style="--c:${e.color}">${e.symbol} ${e.name}</span>`;
 }
 
+/** Stable id of a goal for prefs.dismissedGoal: the goal reappears as soon as it changes. */
+export function goalId(g: NextGoal): string {
+  return `${g.action}|${g.text}`.slice(0, 80);
+}
+
 export function goalStrip(ui: UI, screen: Tab): string {
   const g: NextGoal = nextGoal(ui.save, screen);
+  const id = goalId(g);
+  if (ui.save.prefs.dismissedGoal === id) return '';
   return `
-    <div class="goal-strip" role="note">
+    <div class="goal-strip" role="note" aria-label="Next goal">
       <span class="goal-label">Next goal</span>
       <span class="goal-text">${esc(g.text)}</span>
       <span class="goal-bar">${bar(g.progress, g.target, 'thin')}</span>
       <span class="goal-num">${Math.min(g.progress, g.target)}/${g.target}</span>
       <button class="btn small" data-goal="${g.action}" data-fk="goal">${esc(g.actionLabel)}</button>
+      <button class="goal-x" data-goal-dismiss="${esc(id)}" data-fk="goal-x" aria-label="Dismiss this goal" title="Dismiss this goal (it returns when your next goal changes)"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
     </div>`;
 }
 
-/** Handles clicks on the goal strip's action button inside `root`. */
-export function bindGoal(root: HTMLElement, ui: UI): void {
+/**
+ * Handles clicks on the goal strip inside `root`: its action button, and its dismiss button
+ * (stored in prefs.dismissedGoal; focus then moves to `afterDismiss` or the active tab).
+ */
+export function bindGoal(root: HTMLElement, ui: UI, afterDismiss?: () => HTMLElement | null): void {
   root.addEventListener('click', (e) => {
+    const x = (e.target as Element).closest<HTMLButtonElement>('[data-goal-dismiss]');
+    if (x) {
+      sfx.click();
+      const id = x.dataset.goalDismiss!;
+      const strip = x.closest('.goal-strip');
+      const hadFocus = !!strip && strip.contains(document.activeElement);
+      ui.commit({ ...ui.save, prefs: { ...ui.save.prefs, dismissedGoal: id } });
+      strip?.remove();
+      if (hadFocus) (afterDismiss?.() ?? document.querySelector<HTMLElement>('.tabs [aria-current=page]'))?.focus({ preventScroll: true });
+      return;
+    }
     const b = (e.target as Element).closest<HTMLButtonElement>('[data-goal]');
     if (!b) return;
     sfx.click();

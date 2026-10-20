@@ -171,6 +171,115 @@ export function drawFruitSlice(ctx: Ctx, x: number, y: number, r: number, seed =
   ctx.restore();
 }
 
+// --- pickup readability -------------------------------------------------------------
+
+/** Soft halo drawn behind a pickup so coins and Emberfruit stand out from busy backdrops. */
+export function drawPickupGlow(ctx: Ctx, x: number, y: number, r: number, rgb: string): void {
+  const g = ctx.createRadialGradient(x, y, r * 0.15, x, y, r);
+  g.addColorStop(0, `rgba(${rgb},0.75)`);
+  g.addColorStop(0.55, `rgba(${rgb},0.28)`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** Four-point sparkle (treasure and trail-complete accents). */
+export function drawSparkle(ctx: Ctx, x: number, y: number, r: number, color = '#fff6c8'): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const d = i % 2 ? r * 0.28 : r;
+    ctx.lineTo(Math.cos(a) * d, Math.sin(a) * d);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Treasure-route banner: a hanging pennant with a crown and an arrow pointing along the narrow
+ * route. Visual only (never collides).
+ */
+export function drawTreasureSign(ctx: Ctx, x: number, y: number, pulse: number, label = 'TREASURE'): void {
+  ctx.save();
+  ctx.translate(x, y);
+  // glow
+  const g = ctx.createRadialGradient(0, 0, 10, 0, 0, 120);
+  g.addColorStop(0, `rgba(255,214,90,${0.35 + 0.2 * pulse})`);
+  g.addColorStop(1, 'rgba(255,214,90,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, 120, 0, Math.PI * 2);
+  ctx.fill();
+  // banner
+  ctx.font = `800 22px 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const w = ctx.measureText(label).width + 74;
+  ctx.fillStyle = '#7a3a12';
+  roundRect(ctx, -w / 2 + 3, -19, w, 40, 12);
+  ctx.fill();
+  const bg = ctx.createLinearGradient(0, -22, 0, 18);
+  bg.addColorStop(0, '#ffe58a');
+  bg.addColorStop(1, '#f2b431');
+  ctx.fillStyle = bg;
+  roundRect(ctx, -w / 2, -22, w, 40, 12);
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#8a4a14';
+  ctx.stroke();
+  // crown
+  ctx.save();
+  ctx.translate(-w / 2 + 22, -2);
+  ctx.fillStyle = '#c0392b';
+  ctx.strokeStyle = '#6b1d12';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-11, 8);
+  ctx.lineTo(-12, -7);
+  ctx.lineTo(-5, 0);
+  ctx.lineTo(0, -10);
+  ctx.lineTo(5, 0);
+  ctx.lineTo(12, -7);
+  ctx.lineTo(11, 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = '#5a2a08';
+  ctx.fillText(label, 6, -1);
+  // arrow
+  ctx.fillStyle = '#5a2a08';
+  ctx.beginPath();
+  ctx.moveTo(w / 2 - 22, -10);
+  ctx.lineTo(w / 2 - 8, -1);
+  ctx.lineTo(w / 2 - 22, 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Light column and crown sparkle that mark the treasure chest from far away. */
+export function drawTreasureBeacon(ctx: Ctx, x: number, y: number, r: number, pulse: number, t: number): void {
+  ctx.save();
+  const g = ctx.createLinearGradient(x - r, 0, x + r, 0);
+  g.addColorStop(0, 'rgba(255,226,122,0)');
+  g.addColorStop(0.5, `rgba(255,236,160,${0.22 + 0.12 * pulse})`);
+  g.addColorStop(1, 'rgba(255,226,122,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y < 360 ? 0 : y, r * 2, y < 360 ? y : 720 - y);
+  for (let i = 0; i < 3; i++) {
+    const a = t * 1.8 + (i * Math.PI * 2) / 3;
+    drawSparkle(ctx, x + Math.cos(a) * r * 1.25, y + Math.sin(a) * r * 1.0, 7 + 3 * pulse);
+  }
+  ctx.restore();
+}
+
 // --- containers --------------------------------------------------------------------
 
 function glowCracks(ctx: Ctx, pts: [number, number][][], pulse: number, width: number) {

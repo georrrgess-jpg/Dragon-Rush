@@ -20,6 +20,11 @@ import { SettingsPanel } from './ui/settings';
 import { Shell } from './ui/shell';
 import type { Overlay, Screen, Tab, UI } from './ui/types';
 import { MODES } from './content/modes';
+// Update 5: Aether Ascent
+import { xpToNext } from './content/progression';
+import { HATCHERY, REGIONS } from './content/world';
+import type { AscentReport } from './sim/ascent';
+import { AscentScreen, type AscentEndInfo } from './ui/ascentScreen';
 import type { ModeId } from './save';
 
 export class App implements UI {
@@ -38,6 +43,10 @@ export class App implements UI {
   private tab: Tab = 'home';
   flight: FlightScreen | null = null;
   arena: ArenaScreen | null = null;
+  /** Update 5: the running Aether Ascent (also shows its own end screen). */
+  ascent: AscentScreen | null = null;
+  /** Settlements of the current Ascent run (shrine checkpoints + final), summed on the end screen. */
+  private ascentBanked: eco.Settlement[] = [];
   private results: ResultsScreen | null = null;
   private settings: SettingsPanel | null = null;
   private modal: HTMLElement | null = null;
@@ -74,7 +83,7 @@ export class App implements UI {
     this.go('home');
     if (!this.store) this.toast('Saving is unavailable in this browser window; progress will reset on reload.', 6000);
     if (stale.abandoned) {
-      const what = stale.mode === 'arena' ? 'Your Arena session was interrupted; anything already banked at a checkpoint is kept.' : stale.mode === 'trials' ? 'Your last Sky Trial attempt was interrupted, so it did not count.' : 'Your last flight was interrupted by a reload, so its unbanked haul was lost.';
+      const what = stale.mode === 'arena' ? 'Your Arena session was interrupted; anything already banked at a checkpoint is kept.' : stale.mode === 'ascent' ? 'Your Aether Ascent run was interrupted; everything banked at an upgrade shrine is kept.' : stale.mode === 'trials' ? 'Your last Sky Trial attempt was interrupted, so it did not count.' : 'Your last flight was interrupted by a reload, so its unbanked haul was lost.';
       this.toast(what, 6000);
     }
     if (unrevealed(save).length) this.toast('An egg you opened is waiting to be revealed in the Hatchery.', 5000);
@@ -124,6 +133,7 @@ export class App implements UI {
     this.readOnly = true;
     this.flight?.focusLost();
     this.arena?.focusLost();
+    this.ascent?.focusLost();
     this.toast('Emberwild was changed in another tab. This tab stopped saving so nothing is overwritten. Reload the page to continue here.', 12000);
     this.shell?.render();
     if (this.shell && !this.root.querySelector('.readonly-banner')) {
@@ -178,11 +188,12 @@ export class App implements UI {
     document.addEventListener('fullscreenchange', this.resize);
     window.addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
     window.addEventListener('pointermove', (e) => {
-      if (!this.flight) return;
+      const steer = this.flight ?? this.ascent; // Ascent steers exactly like Rush
+      if (!steer) return;
       if ((e.target as Element | null)?.closest?.('button, .overlay')) return;
       if (this.nearHudButton(e.clientX, e.clientY)) return;
       const p = this.toLogical(e.clientX, e.clientY);
-      if (p.inside && (e.movementX !== 0 || e.movementY !== 0 || e.pointerType !== 'mouse')) this.flight.pointerMove(p.y);
+      if (p.inside && (e.movementX !== 0 || e.movementY !== 0 || e.pointerType !== 'mouse')) steer.pointerMove(p.y);
     });
     this.canvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
@@ -194,6 +205,11 @@ export class App implements UI {
       } else if (this.arena) {
         e.preventDefault();
         this.arena.pointerDash();
+      } else if (this.ascent) {
+        e.preventDefault();
+        const p = this.toLogical(e.clientX, e.clientY);
+        if (p.inside) this.ascent.pointerMove(p.y);
+        this.ascent.pointerDash();
       }
     });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -207,6 +223,7 @@ export class App implements UI {
       }
       if (this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
       else if (this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
+      else if (this.ascent && this.ascent.key(e.code, true, e.repeat)) e.preventDefault();
       else if (e.code === 'Escape') {
         if (this.modal) this.closeModal(false);
         else if (this.overlay) this.closeOverlay();
@@ -216,15 +233,18 @@ export class App implements UI {
     window.addEventListener('keyup', (e) => {
       if (this.flight && this.flight.key(e.code, false, false)) e.preventDefault();
       else if (this.arena && this.arena.key(e.code, false, false)) e.preventDefault();
+      else if (this.ascent && this.ascent.key(e.code, false, false)) e.preventDefault();
     });
     window.addEventListener('blur', () => {
       this.flight?.focusLost();
       this.arena?.focusLost();
+      this.ascent?.focusLost();
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         this.flight?.focusLost();
         this.arena?.focusLost();
+        this.ascent?.focusLost();
       }
     });
   }
@@ -239,6 +259,7 @@ export class App implements UI {
     if (this.frameTimes.length > 240) this.frameTimes.shift();
     if (this.flight) this.flight.update(dt);
     else if (this.arena) this.arena.update(dt);
+    else if (this.ascent) this.ascent.update(dt);
     else if (this.overlay) this.overlay.update?.(dt);
     else this.screen?.update?.(dt);
     this.results?.update(dt);
@@ -263,11 +284,13 @@ export class App implements UI {
     this.flight = null;
     this.arena?.destroy();
     this.arena = null;
+    this.ascent?.destroy();
+    this.ascent = null;
   }
 
   go(tab: Tab, arg?: string): void {
     this.closeOverlay(false);
-    const sameShell = !!this.shell && !this.flight && !this.arena && !this.results;
+    const sameShell = !!this.shell && !this.flight && !this.arena && !this.ascent && !this.results;
     if (!sameShell) {
       this.clearAll();
       this.shell = new Shell(this);
@@ -437,9 +460,119 @@ export class App implements UI {
     else this.startAscent();
   }
 
-  /** Aether Ascent (Update 5) — implemented by the Ascent mode integration. */
+  // --- Aether Ascent (Update 5) ------------------------------------------------------------------
+  // Lifecycle like Rush: beginRun writes the run marker; every upgrade shrine banks a checkpoint
+  // (like the Arena victory checkpoint, so a reload keeps it); ending or defeat settles the rest
+  // once under the same run id. The screen shows its own end screen with Retry / Change mode.
+
   startAscent(): void {
-    this.go('play', 'ascent');
+    if (this.flight || this.arena) return;
+    if (MODES.ascent.locked(this.save)) {
+      this.go('play');
+      return;
+    }
+    this.lastTrial = null;
+    this.ascentBanked = [];
+    this.beginRun({ mode: 'ascent' });
+    const run = this.save.activeRun!;
+    const d = this.save.dragons[run.dragon];
+    const s = this.save.settings;
+    const assist = this.save.ascent.assist;
+    sfx.music('flight');
+    this.ascent = new AscentScreen(
+      {
+        ...this.canvasHost(),
+        onCheckpoint: (r) => this.ascentCheckpoint(r),
+        onEnd: (r) => this.endAscent(r),
+        onRetry: () => this.startAscent(),
+        onChangeMode: () => this.go('play', 'ascent'),
+        onHome: () => this.go('home'),
+      },
+      {
+        // same effective flight stats as Rush (level, talents and species passives apply)
+        stats: flightStats({ species: run.dragon, level: run.level, talents: d.talents }, 'rush'),
+        look: { species: run.dragon, stage: stageOf(run.level), marking: d.marking, abilityVariant: d.abilityVariant },
+        seed: (Math.random() * 2 ** 31) >>> 0,
+        assist,
+        autoAbility: s.autoAbility,
+        reducedMotion: s.reducedMotion,
+        lowEffects: s.lowEffects,
+        showHitboxes: s.showHitboxes,
+        screenShake: s.screenShake,
+        best: assist ? this.save.ascent.bestAssist : this.save.ascent.best,
+        dragonName: eco.dragonName(this.save, run.dragon),
+      },
+    );
+  }
+
+  private ascentReport(r: AscentReport): eco.RunReport {
+    return {
+      completed: true,
+      activeSeconds: r.activeSeconds,
+      qualifiedSeconds: r.qualifiedSeconds,
+      gold: r.gold,
+      fruit: r.fruit,
+      pickups: r.pickups,
+      abilityUses: r.abilityUses,
+      dashBreaks: r.dashBreaks,
+      containers: r.caches,
+      ascent: { distance: r.distance, score: r.score, assist: r.assist, region: r.region },
+    };
+  }
+
+  private ascentCheckpoint(r: AscentReport) {
+    if (!this.runId) return;
+    const { save, settlement } = eco.settleRun(this.save, this.runId, this.ascentReport(r), { final: false });
+    if (settlement) {
+      this.commit(save);
+      this.lastSettlement = settlement;
+      this.ascentBanked.push(settlement);
+      this.announce(settlement.events);
+    }
+  }
+
+  private endAscent(r: AscentReport): AscentEndInfo | null {
+    const runId = this.runId;
+    this.runId = null;
+    if (!runId) return null;
+    const { save, settlement } = eco.settleRun(this.save, runId, this.ascentReport(r), { final: true });
+    if (!settlement) {
+      this.go('home');
+      return null;
+    }
+    this.commit(save);
+    this.lastSettlement = settlement;
+    const all = [...this.ascentBanked, settlement];
+    this.ascentBanked = [];
+    sfx.music(null);
+    const d = this.save.dragons[settlement.dragon];
+    const news: string[] = [];
+    for (const st of all) {
+      const ev = st.events;
+      for (const c of ev.contracts) news.push(`Contract complete: ${esc(c.title)} (+${rewardText(c.reward)})`);
+      for (const m of ev.milestones) news.push(`Milestone: ${esc(m.title)} (+${rewardText(m.reward)})`);
+      for (const m of ev.mastery) news.push(`Mastery: ${esc(m.title)} → ${esc(m.rewardText)}`);
+      for (const id of ev.newSpecies) news.push(`<b>${esc(SPECIES[id].name)} joined your roster!</b>`);
+      for (const g of ev.regions) news.push(`New region unlocked: <b>${esc(REGIONS[g].name)}</b>`);
+    }
+    const first = all[0];
+    return {
+      gold: all.reduce((n, st) => n + st.total.gold, 0),
+      fruit: all.reduce((n, st) => n + st.total.fruit, 0),
+      bonusPercent: settlement.bonusPercent,
+      xp: all.reduce((n, st) => n + st.xp, 0),
+      keysEarned: all.reduce((n, st) => n + st.keysEarned, 0),
+      keyProgress: settlement.keyProgress,
+      secondsPerKey: HATCHERY.secondsPerKey,
+      levelFrom: first.level_.from,
+      levelTo: settlement.level_.to,
+      levelXp: d.xp,
+      levelXpNext: Math.max(1, xpToNext(d.level)),
+      newBest: all.some((st) => st.ascent?.newBest),
+      best: settlement.ascent?.best ?? 0,
+      news,
+      readOnly: this.readOnly,
+    };
   }
 
   startRush(): void {

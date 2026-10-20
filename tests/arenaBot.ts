@@ -61,14 +61,15 @@ export function playArena(sim: ArenaSim, bot: ArenaBot, opts: { endlessSeconds?:
       }
       if (rng.chance(bot.awareness)) {
         for (const h of sim.hazards) {
-          if (h.struck) continue;
+          // a struck circle is gone, except a thorn patch, which stays harmful (and visible) a few seconds
+          if (h.struck && h.persist <= 0) continue;
           const dx = sim.x - h.x;
           const dy = sim.y - h.y;
           const d = Math.max(1, Math.hypot(dx, dy));
           if (d < h.r + 60) {
             fx += (dx / d) * 4;
             fy += (dy / d) * 4;
-            if (h.warn < 0.35) danger = true;
+            if (!h.struck && h.warn < 0.35) danger = true;
           }
         }
         for (const s of sim.shots) {

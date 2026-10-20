@@ -65,6 +65,29 @@ export const RUSH = {
   trailInterval: 0.4,
   trailFruitChance: 0.25,
   trailAmplitude: 85,
+  /** Completing a whole course trail adds this much Rush charge (never while Rush is active)... */
+  trailCompleteCharge: 1,
+  /** ...up to this much per run, so chains can't loop into extra Rushes. */
+  trailChargeCap: 6,
+  /** Rush only: rock hitboxes use this fraction of the drawn radius (the silhouette is ~0.9 r tall). */
+  rockForgiveness: 0.9,
+} as const;
+
+/** Dragon Rush score: separate from currency (never changes gold or Emberfruit). */
+export const RUSH_SCORE = {
+  gold: 10,
+  fruit: 15,
+  container: 50,
+  ring: 25,
+  shatter: 10,
+  /** Trail completion bonus per item in the trail. */
+  trailPerItem: 25,
+  /** Breaking the treasure chest at the end of the narrow treasure route. */
+  treasure: 400,
+  /** Every `chainStep` pickups in a row raise the score multiplier by `chainBonus`, up to `chainMax`. */
+  chainStep: 10,
+  chainBonus: 0.5,
+  chainMax: 3,
 } as const;
 
 export const CONTAINERS = {

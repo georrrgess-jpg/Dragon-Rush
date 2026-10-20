@@ -1,7 +1,34 @@
-/* Hatchery reel, pedestal and reveal styles (Update 4). */
+/* Hatchery reel, pedestal and reveal styles (Update 4; staged close-up in Update 5). */
 
+/* The canvas is as tall as the opened stage; the view clips it to the compact reel when idle and
+   grows (height animated from script) while an opening runs. */
+.hatchery .reel-view {
+  position: relative;
+  width: 1220px;
+  height: 240px;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  background: #0f2438;
+}
+.hatchery .reel-view .reel {
+  border-radius: 0;
+  box-shadow: none;
+}
+.hatchery.staged .hatch-lower {
+  display: none;
+}
+.hatchery .goal-wrap {
+  margin-top: auto;
+}
 .hatchery .reel-ui {
   min-height: 64px;
+}
+.hc-msg {
+  font-size: 15px;
+}
+.hc-skip {
+  min-width: 150px;
 }
 
 /* single result / batch detail */
@@ -29,8 +56,25 @@
 .hc-line {
   font-size: 16px;
 }
-.hc-rarity {
-  font-weight: 700;
+.hc-ess {
+  font-weight: 800;
+  color: var(--teal-800);
+}
+.hc-ess.muted {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.hc-rule {
+  font-size: 13px;
+}
+.hc-first {
+  font-size: 13px;
+  font-weight: 800;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffe7a0, #f6c445);
+  color: #4a3204;
+  border: 1px solid #b8860b;
 }
 .hc-badge {
   display: inline-block;
@@ -93,7 +137,7 @@
 /* Open 5 overview: one card per awarded egg (buttons, keyboard reachable) */
 .hc-batch {
   display: grid;
-  grid-template-columns: 190px 1fr auto;
+  grid-template-columns: 220px 1fr auto;
   align-items: center;
   gap: 12px;
   max-width: 1220px;

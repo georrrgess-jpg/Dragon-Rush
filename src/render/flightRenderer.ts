@@ -1,20 +1,20 @@
 // Draws a FlightSim (Rush or Sky Trials) plus purely visual effects. Effects never touch
 // rewards. Visual language: glowing cracks = breakable, solid stone/moss = avoid, luminous
 // rings = beneficial, pulsing warning glow = telegraphed danger.
-import { FLIGHT, VIEW } from '../config';
+import { DASH, FLIGHT, VIEW } from '../config';
 import type { Stage } from '../content/progression';
 import { ELEMENTS, SPECIES } from '../content/species';
 import type { FlightEffect, RegionId, SpeciesId } from '../content/types';
 import { COSMETIC_BY_ID, type MarkingId } from '../content/world';
 import type { FlightEvent, FlightSim } from '../sim/flight';
-import { drawChest, drawCoin, drawFruit, drawFruitSlice, drawPod, drawPodHalf, drawRock, drawWindRing, makeSprite } from './art';
+import { drawChest, drawCoin, drawFruit, drawFruitSlice, drawPickupGlow, drawPod, drawPodHalf, drawRock, drawSparkle, drawTreasureBeacon, drawTreasureSign, drawWindRing, makeSprite } from './art';
 import { Background } from './background';
 import { drawDragon, mixHex, paletteFor } from './dragonArt';
 import { DragonAnimator } from './dragonAnim';
 
 type Ctx = CanvasRenderingContext2D;
 
-type ParticleKind = 'spark' | 'coin' | 'fruit' | 'slice' | 'half' | 'leaf' | 'shard' | 'text' | 'ring' | 'dust' | 'swirl' | 'ice' | 'beam';
+type ParticleKind = 'spark' | 'coin' | 'fruit' | 'slice' | 'half' | 'leaf' | 'shard' | 'text' | 'ring' | 'dust' | 'swirl' | 'ice' | 'beam' | 'star' | 'tally';
 
 interface Particle {
   kind: ParticleKind;
@@ -32,7 +32,22 @@ interface Particle {
   gravity: number;
   side?: -1 | 1;
   pts?: { x: number; y: number }[];
+  /** Grouped reward text: coins / Emberfruit in this tally. */
+  gold?: number;
+  fruit?: number;
 }
+
+/** Grouped pickup counter that follows the dragon while pickups keep coming. */
+interface Tally {
+  gold: number;
+  fruit: number;
+  /** Seconds since the last pickup joined this tally. */
+  idle: number;
+  pop: number;
+}
+
+/** A pickup joins the open tally if it arrives within this many seconds of the previous one. */
+const TALLY_WINDOW = 0.6;
 
 const MAX_PARTICLES = 320;
 const SPRITE_SCALE = 2;
@@ -62,6 +77,9 @@ export class FlightRenderer {
   reducedMotion = false;
   lowEffects = false;
   showHitboxes = false;
+  /** Settings → screen shake (also off with reduced motion or low effects). */
+  screenShake = true;
+  private tally: Tally | null = null;
   private look: FlightLook = { species: 'ember', stage: 'hatchling', marking: 'default', trail: 'trail.wisp', abilityVariant: false };
   private backgrounds = new Map<RegionId, Background>();
   private particles: Particle[] = [];
@@ -79,6 +97,9 @@ export class FlightRenderer {
   private smallFruit: HTMLCanvasElement;
   private sliceSprite: HTMLCanvasElement;
   private halfSprites: Record<'-1' | '1', HTMLCanvasElement>;
+  private glowGold: HTMLCanvasElement;
+  private glowFruit: HTMLCanvasElement;
+  private glowTreasure: HTMLCanvasElement;
 
   constructor() {
     this.coinSprite = makeSprite(40, 40, SPRITE_SCALE, (c) => drawCoin(c, 20, 20, 16));
@@ -86,6 +107,9 @@ export class FlightRenderer {
     this.smallCoin = makeSprite(26, 26, SPRITE_SCALE, (c) => drawCoin(c, 13, 13, 10));
     this.smallFruit = makeSprite(30, 30, SPRITE_SCALE, (c) => drawFruit(c, 15, 15, 24));
     this.sliceSprite = makeSprite(30, 30, SPRITE_SCALE, (c) => drawFruitSlice(c, 15, 15, 11));
+    this.glowGold = makeSprite(52, 52, 1, (c) => drawPickupGlow(c, 26, 26, 26, '255,246,190'));
+    this.glowFruit = makeSprite(60, 60, 1, (c) => drawPickupGlow(c, 30, 30, 30, '255,190,225'));
+    this.glowTreasure = makeSprite(76, 76, 1, (c) => drawPickupGlow(c, 38, 38, 38, '255,214,90'));
     this.halfSprites = {
       '-1': makeSprite(70, 90, SPRITE_SCALE, (c) => drawPodHalf(c, 35, 45, 36, -1)),
       '1': makeSprite(70, 90, SPRITE_SCALE, (c) => drawPodHalf(c, 35, 45, 36, 1)),
@@ -109,6 +133,7 @@ export class FlightRenderer {
     this.flash = 0;
     this.glowVis = 0;
     this.abilityGlow = 0;
+    this.tally = null;
     this.look = { ...this.look, ...look };
     this.anim = new DragonAnimator(false, Math.random(), { species: this.look.species, stage: this.look.stage });
     this.rockSprites.clear();
@@ -132,12 +157,32 @@ export class FlightRenderer {
       switch (e.type) {
         case 'pickup':
           if (e.kind === 'gold') {
-            this.burst(e.x, e.y, '#fff0a0', this.n(e.rush ? 8 : 5), e.rush ? 1.3 : 0.9, 2.5);
+            this.burst(e.x, e.y, '#fff0a0', this.n(e.rush ? 6 : 4), e.rush ? 1.2 : 0.85, 2.5);
             this.ring(e.x, e.y, '#ffe27a', 22, 0.25);
           } else {
-            this.burst(e.x, e.y, '#ff9ccf', this.n(e.rush ? 7 : 5), 0.6, 4);
+            this.burst(e.x, e.y, '#ff9ccf', this.n(e.rush ? 6 : 4), 0.6, 4);
+            this.burst(e.x, e.y, '#c8f060', this.n(2), 0.5, 3);
             this.ring(e.x, e.y, 'rgba(255,140,200,0.8)', 30, 0.4);
           }
+          this.addTally(e.kind);
+          break;
+        case 'trailComplete':
+          this.tally = null; // the trail banner replaces the running "+N" counter
+          this.trailCompleteEffect(e.points, sim.dragonScreenX, sim.y, e.count, e.bonus, e.charge, e.treasure);
+          break;
+        case 'trailBroken':
+          this.text(e.x + 40, e.y - 34, `Trail ${e.got}/${e.total}`, 'rgba(225,235,240,0.9)', 18);
+          break;
+        case 'treasure':
+          this.flash = this.reducedMotion ? 0 : Math.max(this.flash, 0.6);
+          this.ring(e.x, e.y, '#fff2b0', 200, 0.6);
+          this.ring(e.x, e.y, '#ffd34d', 140, 0.5);
+          for (let i = 0; i < this.n(14); i++) {
+            const a = (i / 14) * Math.PI * 2;
+            this.add({ kind: 'star', x: e.x, y: e.y, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260, life: 0.9, size: 12, color: i % 2 ? '#fff6c8' : '#ffd34d' });
+          }
+          // A centre-screen moment, clear of the trail banner and the chest's own "+8".
+          this.add({ kind: 'text', x: VIEW.width / 2 + 60, y: 250, vy: -14, life: 1.9, size: 44, color: '#ffe27a', text: `TREASURE! +${e.bonus} score` });
           break;
         case 'break':
           this.breakEffect(e.kind, e.x, e.y, e.gold || e.fruit, e.traitBonus, e.byDash);
@@ -162,7 +207,9 @@ export class FlightRenderer {
             const a = Math.random() * Math.PI * 2;
             this.add({ kind: 'dust', x: sim.dragonScreenX + 24, y: sim.y, vx: Math.cos(a) * 110 - 70, vy: Math.sin(a) * 110, life: 0.5, size: 7 + Math.random() * 6, color: e.type === 'boltHit' ? 'rgba(255,240,140,0.8)' : 'rgba(120,110,95,0.7)' });
           }
-          this.text(sim.dragonScreenX + 10, sim.y - 54, e.type === 'boltHit' ? 'Zap!' : 'Thunk!', '#f3efe6', 22);
+          // Explain the penalty right where the player is looking: what hit you, and what it costs.
+          this.text(sim.dragonScreenX + 20, sim.y - 64, e.type === 'boltHit' ? 'Zapped! Slowed briefly' : 'Rock! Slowed briefly', '#ffe0d0', 24, 1.5);
+          if (e.chainLost >= 3) this.text(sim.dragonScreenX + 20, sim.y - 36, `Chain ${e.chainLost} ended · nothing lost`, '#e6f2f4', 17, 1.5);
           break;
         case 'shieldBlock':
           this.ring(sim.dragonScreenX, sim.y, this.color, 70, 0.4);
@@ -250,12 +297,44 @@ export class FlightRenderer {
     this.add({ kind: 'ring', x, y, life, size, color });
   }
 
-  private text(x: number, y: number, text: string, color: string, size = 30) {
-    this.add({ kind: 'text', x, y, vy: -55, life: 1.0, size, color, text });
+  private text(x: number, y: number, text: string, color: string, size = 30, life = 1.0) {
+    // Keep floating text clear of the top and bottom HUD bars.
+    const yy = Math.min(VIEW.height - 150, Math.max(150, y));
+    this.add({ kind: 'text', x: Math.min(VIEW.width - 140, Math.max(140, x)), y: yy, vy: -55 / life, life, size, color, text });
   }
 
   private addShake(n: number) {
-    if (!this.reducedMotion && !this.lowEffects) this.shake = Math.max(this.shake, n);
+    if (this.screenShake && !this.reducedMotion && !this.lowEffects) this.shake = Math.max(this.shake, n);
+  }
+
+  /** Groups a burst of pickups into one "+N" counter beside the dragon. */
+  private addTally(kind: 'gold' | 'fruit') {
+    if (!this.tally || this.tally.idle > TALLY_WINDOW) {
+      this.releaseTally();
+      this.tally = { gold: 0, fruit: 0, idle: 0, pop: 0 };
+    }
+    this.tally[kind] += 1;
+    this.tally.idle = 0;
+    this.tally.pop = 1;
+  }
+
+  /** Lets the open tally float away as a fading text and closes it. */
+  private releaseTally(sim?: FlightSim) {
+    const t = this.tally;
+    this.tally = null;
+    if (!t || !sim || t.gold + t.fruit < 2) return;
+    this.add({ kind: 'tally', x: sim.dragonScreenX + 58, y: sim.y - 58, vy: -40, life: 0.7, size: 22, color: '#fff', gold: t.gold, fruit: t.fruit });
+  }
+
+  private trailCompleteEffect(points: { x: number; y: number }[], x: number, y: number, count: number, bonus: number, charge: number, treasure: boolean) {
+    const col = treasure ? '#ffd34d' : '#fff2b0';
+    // A sparkle where each item of the trail was collected traces the route just flown.
+    for (const p of points) this.add({ kind: 'star', x: p.x, y: p.y, vx: -FLIGHT.scrollSpeed * 0.5, vy: -30, life: 0.6, size: 11, color: col });
+    this.ring(x, y, col, 90, 0.45);
+    // Banner above-right of the dragon (where the "+N" counter was), clear of the dragon itself.
+    const ty = y < 260 ? y + 100 : y - 110;
+    this.text(x + 110, ty, `Trail ${count}/${count}! +${bonus} score`, treasure ? '#ffd34d' : '#fff6c8', 26, 1.3);
+    if (charge) this.text(x + 110, ty + 26, `+${charge} Dragon Rush`, '#ffcf7a', 18, 1.2);
   }
 
   private breakEffect(kind: 'chest' | 'pod', x: number, y: number, amount: number, traitBonus: number, byDash: boolean) {
@@ -316,6 +395,11 @@ export class FlightRenderer {
     this.glowVis = sim.rushActive ? Math.min(1, this.glowVis + dt * 4) : Math.max(0, this.glowVis - dt * 2);
     this.anim.update(dt, { vy: sim.vy, maxVy: FLIGHT.maxVerticalSpeed, dashing: sim.dashActive, rush: sim.rushActive, perch: false, reducedMotion: this.reducedMotion });
 
+    if (this.tally) {
+      this.tally.idle += dt;
+      this.tally.pop = Math.max(0, this.tally.pop - dt * 6);
+      if (this.tally.idle > TALLY_WINDOW) this.releaseTally(sim);
+    }
     for (const p of this.particles) {
       p.life -= dt;
       p.vy += p.gravity * dt;
@@ -352,8 +436,9 @@ export class FlightRenderer {
     // scenic waterfalls: soft, behind everything, never collide
     for (const w of sim.scenery) {
       const x = w.x - sim.dist;
-      if (x < -120 || x > VIEW.width + 120) continue;
-      this.drawWaterfall(ctx, x);
+      if (x < -160 || x > VIEW.width + 160) continue;
+      if (w.kind === 'waterfall') this.drawWaterfall(ctx, x);
+      else if (w.kind === 'finish') this.drawFinish(ctx, x);
     }
 
     if (sim.pathT > 0) this.drawPathBand(ctx, sim);
@@ -381,7 +466,7 @@ export class FlightRenderer {
       }
       ctx.drawImage(spr, x - size / 2, r.y - size / 2, size, size);
       if (r.frozenUntil > sim.time) this.drawIce(ctx, x, r.y, r.r, pulse);
-      if (this.showHitboxes) this.hitCircle(ctx, x, r.y, r.r, '#ff3b6b');
+      if (this.showHitboxes) this.hitCircle(ctx, x, r.y, r.r * sim.rockHitScale, '#ff3b6b');
     }
 
     for (const r of sim.rings) this.drawRing(ctx, sim, r, -1);
@@ -405,15 +490,30 @@ export class FlightRenderer {
           ctx.fill();
         }
       }
+      if (c.treasure) drawTreasureBeacon(ctx, x, c.y, c.r, pulse, this.reducedMotion ? 0 : t);
       if (c.kind === 'chest') drawChest(ctx, x + sway, c.y + bob, c.r, pulse);
       else drawPod(ctx, x + sway, c.y + bob, c.r, pulse);
+      this.drawDashCue(ctx, sim, c, x + sway, c.y + bob, pulse);
       if (c.tutorial) this.drawDashMarker(ctx, x, c.y - c.r - 30 + (this.reducedMotion ? 0 : Math.sin(t * 6) * 5));
+    }
+
+    this.drawTrailGuides(ctx, sim);
+    for (const w of sim.scenery) {
+      const x = w.x - sim.dist;
+      if (w.kind === 'sign' && x > -220 && x < VIEW.width + 220) drawTreasureSign(ctx, x, w.y, pulse);
     }
 
     for (const p of sim.pickups) {
       const x = p.x - sim.dist;
       if (x < -40 || x > VIEW.width + 40) continue;
-      const bob = p.attracted ? 0 : Math.sin(t * 3 + p.phase) * 4;
+      const bob = p.attracted || this.reducedMotion ? 0 : Math.sin(t * 3 + p.phase) * 4;
+      if (!p.attracted && (!this.lowEffects || p.treasure)) {
+        const g = p.treasure ? this.glowTreasure : p.kind === 'gold' ? this.glowGold : this.glowFruit;
+        const gs = g.width;
+        ctx.globalAlpha = p.treasure ? 0.75 + 0.25 * pulse : 0.55;
+        ctx.drawImage(g, x - gs / 2, p.y + bob - gs / 2);
+        ctx.globalAlpha = 1;
+      }
       if (p.kind === 'gold') {
         const spin = 0.35 + 0.65 * Math.abs(Math.cos(t * 3 + p.phase));
         ctx.drawImage(this.coinSprite, x - 20 * spin, p.y + bob - 20, 40 * spin, 40);
@@ -428,6 +528,7 @@ export class FlightRenderer {
 
     this.drawTrail(ctx, sim);
     this.drawAuras(ctx, sim, true);
+    if (sim.slowT > 0) this.drawSlowed(ctx, sim);
 
     const graceAlpha = sim.graceT > 0 ? 0.72 + 0.28 * Math.cos(t * 18) : 1;
     ctx.globalAlpha = graceAlpha * (sim.ghostT > 0 ? 0.55 : 1);
@@ -440,6 +541,7 @@ export class FlightRenderer {
 
     for (const r of sim.rings) this.drawRing(ctx, sim, r, 1);
     this.drawParticles(ctx);
+    this.drawTally(ctx, sim);
     ctx.restore();
 
     if (this.glowVis > 0) {
@@ -454,6 +556,125 @@ export class FlightRenderer {
       ctx.fillStyle = `rgba(255,245,210,${this.flash * 0.4})`;
       ctx.fillRect(0, 0, VIEW.width, VIEW.height);
     }
+  }
+
+  /**
+   * Faint dotted guides through the remaining items of each unbroken trail ahead of the dragon,
+   * so the route reads at a glance (gold for the treasure route).
+   */
+  private drawTrailGuides(ctx: Ctx, sim: FlightSim) {
+    if (sim.mode !== 'rush') return;
+    const groups = new Map<number, { x: number; y: number }[]>();
+    for (const p of sim.pickups) {
+      if (!p.trail || p.attracted || p.missed) continue;
+      const x = p.x - sim.dist;
+      if (x < sim.dragonScreenX - 20 || x > VIEW.width + 60) continue;
+      let g = groups.get(p.trail);
+      if (!g) groups.set(p.trail, (g = []));
+      g.push({ x, y: p.y });
+    }
+    if (!groups.size) return;
+    // Dots every 14 px, batched into one fill per trail (cheaper than dashed strokes).
+    const gap = 14;
+    const drift = this.reducedMotion ? 0 : (this.time * 30) % gap;
+    for (const [id, pts] of groups) {
+      const tr = sim.trails.get(id);
+      if (!tr || tr.broken || pts.length < 2) continue;
+      pts.sort((a, b) => a.x - b.x);
+      const d = tr.treasure ? 5 : 4;
+      ctx.fillStyle = tr.treasure ? 'rgba(255,214,90,0.9)' : 'rgba(255,255,255,0.65)';
+      ctx.beginPath();
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        // leave a clear margin around each item so the dots never cover the art
+        for (let u = 24 + drift; u < len - 24; u += gap) {
+          const k = u / len;
+          ctx.rect(a.x + (b.x - a.x) * k - d / 2, a.y + (b.y - a.y) * k - d / 2, d, d);
+        }
+      }
+      ctx.fill();
+    }
+  }
+
+  /** A pulsing target ring on chests and pods while a dash (or Rush) would break them. */
+  private drawDashCue(ctx: Ctx, sim: FlightSim, c: FlightSim['containers'][number], x: number, y: number, pulse: number) {
+    const dx = x - sim.dragonScreenX;
+    if (dx < -10 || dx > 560 || !(sim.dashReady || sim.rushActive)) return;
+    const inReach = dx < c.r + sim.dashBreakReach + DASH.lungeDistance * 0.7 && Math.abs(y - sim.y) < c.r + 26;
+    ctx.save();
+    ctx.globalAlpha = inReach ? 0.95 : 0.55;
+    ctx.strokeStyle = inReach ? '#ffffff' : '#ffe27a';
+    ctx.lineWidth = inReach ? 4 : 3;
+    const R = c.r + 16 + (this.reducedMotion ? 0 : pulse * 5);
+    // four bracket arcs read as "target" without hiding the art (one stroke)
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2 + Math.PI / 4 + (this.reducedMotion ? 0 : this.time * 0.8);
+      ctx.moveTo(x + Math.cos(a - 0.42) * R, y + Math.sin(a - 0.42) * R);
+      ctx.arc(x, y, R, a - 0.42, a + 0.42);
+    }
+    ctx.stroke();
+    if (inReach && !c.tutorial) {
+      ctx.font = `800 17px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(20,50,60,0.85)';
+      ctx.strokeText(sim.rushActive ? 'RUSH!' : 'DASH!', x, y + R + 18);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(sim.rushActive ? 'RUSH!' : 'DASH!', x, y + R + 18);
+    }
+    ctx.restore();
+  }
+
+  /** While slowed after a hit: drifting dust and a small "slowed" tag on the dragon. */
+  private drawSlowed(ctx: Ctx, sim: FlightSim) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, sim.slowT / 0.15);
+    ctx.font = `800 15px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(40,20,10,0.75)';
+    ctx.strokeText('slowed', sim.dragonScreenX - 10, sim.y + 52);
+    ctx.fillStyle = '#ffd0b8';
+    ctx.fillText('slowed', sim.dragonScreenX - 10, sim.y + 52);
+    ctx.restore();
+  }
+
+  /** The open pickup tally: "+N coin +M fruit" riding beside the dragon. */
+  private drawTally(ctx: Ctx, sim: FlightSim) {
+    const t = this.tally;
+    if (!t || t.gold + t.fruit < 2) return;
+    this.drawTallyAt(ctx, sim.dragonScreenX + 58, sim.y - 58, t.gold, t.fruit, 1 + t.pop * 0.18, Math.min(1, 1.6 - t.idle));
+  }
+
+  private drawTallyAt(ctx: Ctx, x: number, y: number, gold: number, fruit: number, scale: number, alpha: number) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.font = `800 22px ${FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(40,20,10,0.75)';
+    let cx = 0;
+    for (const [n, spr, col] of [
+      [gold, this.smallCoin, '#ffe27a'],
+      [fruit, this.smallFruit, '#ff9ccf'],
+    ] as const) {
+      if (!n) continue;
+      const label = `+${n}`;
+      ctx.strokeText(label, cx, 0);
+      ctx.fillStyle = col;
+      ctx.fillText(label, cx, 0);
+      cx += ctx.measureText(label).width + 2;
+      const s = spr.width / SPRITE_SCALE;
+      ctx.drawImage(spr, cx, -s / 2, s, s);
+      cx += s + 8;
+    }
+    ctx.restore();
   }
 
   private hitCircle(ctx: Ctx, x: number, y: number, r: number, color: string) {
@@ -543,6 +764,37 @@ export class FlightRenderer {
         ctx.stroke();
       }
     }
+    ctx.restore();
+  }
+
+  /** Rush finish line: a checkered band across the flight band with a FINISH pennant. */
+  private drawFinish(ctx: Ctx, x: number) {
+    ctx.save();
+    const sq = 12;
+    for (let y = FLIGHT.minY - 60, i = 0; y < FLIGHT.maxY + 60; y += sq, i++) {
+      ctx.fillStyle = i % 2 ? 'rgba(30,30,30,0.85)' : 'rgba(255,255,255,0.92)';
+      ctx.fillRect(x - sq, y, sq, sq);
+      ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.92)' : 'rgba(30,30,30,0.85)';
+      ctx.fillRect(x, y, sq, sq);
+    }
+    const fy = 168;
+    ctx.fillStyle = '#ffd34d';
+    ctx.strokeStyle = '#7a4a10';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + sq, fy - 24);
+    ctx.lineTo(x + sq + 118, fy - 24);
+    ctx.lineTo(x + sq + 100, fy);
+    ctx.lineTo(x + sq + 118, fy + 24);
+    ctx.lineTo(x + sq, fy + 24);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `800 22px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#4a2a08';
+    ctx.fillText('FINISH', x + sq + 54, fy + 1);
     ctx.restore();
   }
 
@@ -830,6 +1082,13 @@ export class FlightRenderer {
           ctx.fillStyle = p.color;
           ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
           ctx.restore();
+          break;
+        case 'star':
+          ctx.globalAlpha = k;
+          drawSparkle(ctx, p.x, p.y, p.size * (0.5 + 0.5 * k), p.color);
+          break;
+        case 'tally':
+          this.drawTallyAt(ctx, p.x, p.y, p.gold ?? 0, p.fruit ?? 0, 1, k);
           break;
         case 'text':
           ctx.globalAlpha = Math.min(1, k * 2);

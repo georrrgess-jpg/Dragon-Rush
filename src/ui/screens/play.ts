@@ -5,7 +5,10 @@ import { SPECIES } from '../../content/species';
 import { TRIALS, TRIAL_BY_ID, nextMedalText, trialCourse, trialUnlocked } from '../../content/trials';
 import type { RegionId } from '../../content/types';
 import { REGIONS, REGION_IDS } from '../../content/world';
-import { EXPEDITION_FLIGHTS, dragonName, selectRegion, setExpedition } from '../../economy';
+import { EXPEDITION_FLIGHTS, dragonName, selectRegion, setAscentAssist, setExpedition } from '../../economy';
+// Update 5: Aether Ascent panel
+import { MODES } from '../../content/modes';
+import { ascentPower, ascentPowerText } from '../../sim/ascent';
 import { el, esc, fmtTime, rerender } from '../dom';
 import type { Screen, UI } from '../types';
 import { bindGoal, goalStrip, portraitUrl } from './common';
@@ -46,6 +49,12 @@ export class PlayScreen implements Screen {
       case 'arena':
         ui.startArena();
         return;
+      case 'ascent':
+        ui.startMode('ascent');
+        return;
+      case 'ascent-assist':
+        ui.commit(setAscentAssist(ui.save, !ui.save.ascent.assist));
+        break;
       case 'rush-region':
         ui.commit(selectRegion(ui.save, 'rush', v as RegionId));
         break;
@@ -111,7 +120,7 @@ export class PlayScreen implements Screen {
     const expOpen = s.lifetime.flights >= EXPEDITION_FLIGHTS;
     return `
       <div class="play-head"><h2>Choose a mode</h2>${this.dragonBar('rush')}</div>
-      <div class="modes">
+      <div class="modes" style="grid-template-columns:repeat(4,1fr)">
         <article class="panel mode-card mode-rush">
           <h3>Dragon Rush</h3>
           <p>Fly a ${s.rush.expedition ? '120' : '60'}-second course, gather gold and Emberfruit, break chests with a dash and trigger Dragon Rush.</p>
@@ -121,6 +130,7 @@ export class PlayScreen implements Screen {
           <div class="stat-line"><span>Best haul ${s.stats.bestHaul}</span><span>Flights ${s.lifetime.flights}</span></div>
           <button class="btn gold big" data-a="rush" data-fk="go-rush">Fly</button>
         </article>
+        ${this.ascentCard()}
         <article class="panel mode-card mode-trials">
           <h3>Sky Trials</h3>
           <p>12 designed courses. Pass checkpoints, collect rings and avoid collisions for Bronze, Silver and Gold. Stats are standardized: levels and talents never change a medal.</p>
@@ -135,6 +145,27 @@ export class PlayScreen implements Screen {
           <button class="btn gold big" data-a="arena" data-fk="go-arena">Enter the Arena</button>
         </article>
       </div>`;
+  }
+
+  /** Update 5: Aether Ascent (locked until a few Rush flights; assist toggle; separate bests). */
+  private ascentCard(): string {
+    const s = this.ui.save;
+    const a = s.ascent;
+    const locked = MODES.ascent.locked(s);
+    const power = ascentPowerText(ascentPower(SPECIES[s.selected].active.flight));
+    return `
+        <article class="panel mode-card mode-ascent" style="border-top:6px solid #8a7ad8">
+          <h3>Aether Ascent</h3>
+          <p>Fly farther through shifting skyways. Dodge hazards, choose upgrades at shrines and survive the storm. You have ${a.assist ? 4 : 3} wards: each hit costs one.</p>
+          ${
+            locked
+              ? `<p class="muted small">🔒 ${esc(locked)}</p>`
+              : `<p class="muted small"><kbd>E</kbd> ${esc(SPECIES[s.selected].active.name)} in Ascent: ${esc(power)}</p>
+          <button class="toggle" data-a="ascent-assist" data-fk="ascent-assist" aria-pressed="${a.assist}" title="+1 ward and a gentler speed ramp. Assist runs keep their own best distance.">Assist (+1 ward, gentler speed): ${a.assist ? 'on' : 'off'}</button>`
+          }
+          <div class="stat-line"><span>Best ${a.best ? `${a.best.toLocaleString()} m` : '—'}</span>${a.bestAssist ? `<span>Assist best ${a.bestAssist.toLocaleString()} m</span>` : ''}<span>Runs ${a.runs}</span></div>
+          <button class="btn gold big" data-a="ascent" data-fk="go-ascent" ${locked ? 'disabled' : ''}>${locked ? 'Locked' : 'Begin the Ascent'}</button>
+        </article>`;
   }
 
   private trialsHtml(): string {

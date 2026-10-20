@@ -2,10 +2,10 @@
 // audio. The game loop feeds it input and real time; it advances in bounded substeps and
 // reports events. Trials run a fixed seeded course with normalized stats and no Rush.
 
-import { CONTAINERS, DASH, FLIGHT, ROCK, RUSH, VIEW, WIND_RING } from '../config';
+import { CONTAINERS, DASH, FLIGHT, ROCK, RUSH, RUSH_SCORE, VIEW, WIND_RING } from '../config';
 import type { FlightEffect, RegionId, SpeciesId } from '../content/types';
 import type { FlightStats } from '../stats';
-import { PATTERN_GAP, openingFor, pickPattern, type Pattern, type Spawn } from './course';
+import { CALM_FINISH, PATTERN_GAP, TREASURE_VAULT, finishX, openingFor, pickPattern, treasurePlan, type Pattern, type Spawn } from './course';
 import { createRng, type Rng } from './rng';
 
 export interface Pickup {
@@ -20,6 +20,24 @@ export interface Pickup {
   /** Pulled in by an active ability: adds no ability charge (prevents loops). */
   byAbility: boolean;
   phase: number;
+  /** Rush trail id (see TrailState); 0 or absent = not part of a trail. */
+  trail?: number;
+  /** Passed behind the dragon without being collected. */
+  missed?: boolean;
+  /** On the narrow treasure route. */
+  treasure?: boolean;
+}
+
+/** A course trail: collect every item for a score bonus. Missing one only forfeits the bonus. */
+export interface TrailState {
+  id: number;
+  total: number;
+  got: number;
+  broken: boolean;
+  done: boolean;
+  treasure: boolean;
+  /** World positions where its items were collected (for the completion effect). */
+  pts: { x: number; y: number }[];
 }
 
 export interface Container {
@@ -31,6 +49,8 @@ export interface Container {
   tutorial: boolean;
   /** Hanging pods sway on a vine (visual). */
   hanging: boolean;
+  /** The chest at the end of the treasure route. */
+  treasure?: boolean;
 }
 
 export interface Rock {
@@ -72,17 +92,23 @@ export interface Checkpoint {
 }
 
 export type FlightEvent =
-  | { type: 'pickup'; kind: 'gold' | 'fruit'; x: number; y: number; rush: boolean }
+  | { type: 'pickup'; kind: 'gold' | 'fruit'; x: number; y: number; rush: boolean; trailIndex?: number; trailTotal?: number; points?: number }
+  | { type: 'trailComplete'; x: number; y: number; count: number; bonus: number; charge: number; treasure: boolean; points: { x: number; y: number }[] }
+  | { type: 'trailBroken'; x: number; y: number; got: number; total: number; chainLost: number }
+  | { type: 'chain'; chain: number; mult: number }
+  | { type: 'treasure'; x: number; y: number; bonus: number }
+  | { type: 'treasureAhead'; top: boolean }
+  | { type: 'finalStretch' }
   | { type: 'break'; kind: 'chest' | 'pod'; x: number; y: number; gold: number; fruit: number; traitBonus: number; byDash: boolean; byAbility: boolean }
   | { type: 'ring'; x: number; y: number; charge: number }
   | { type: 'dash'; free: boolean }
   | { type: 'dashDenied' }
   | { type: 'rushStart' }
   | { type: 'rushEnd' }
-  | { type: 'rockHit'; x: number; y: number; counted: boolean }
+  | { type: 'rockHit'; x: number; y: number; counted: boolean; chainLost: number }
   | { type: 'shieldBlock'; x: number; y: number }
   | { type: 'rockShatter'; x: number; y: number; gold: number }
-  | { type: 'boltHit'; x: number; y: number }
+  | { type: 'boltHit'; x: number; y: number; chainLost: number }
   | { type: 'nudge'; x: number; y: number }
   | { type: 'hint'; text: string }
   | { type: 'ability'; effect: FlightEffect; power: number; x: number; y: number; targets: { x: number; y: number }[] }
@@ -113,6 +139,13 @@ export interface RunSummary {
   /** Trials only: collisions that count against the medal. */
   collisions: number;
   checkpoints: number;
+  /** Rush score (separate from currency; never banked). */
+  score: number;
+  bestChain: number;
+  trailsCompleted: number;
+  /** Treasure routes offered / treasure chests broken. */
+  treasureSeen: number;
+  treasureTaken: number;
 }
 
 export interface TrialCourseData {
@@ -135,6 +168,24 @@ export interface FlightOptions {
 
 /** Seconds without any engagement after which play stops counting as qualified. */
 export const QUALIFY_WINDOW = 20;
+
+/**
+ * Score chain: every pickup extends it. It ends on a rock/lightning hit, when a trail you
+ * started is broken, or after CHAIN_WINDOW s without a pickup. It only affects score.
+ */
+export const CHAIN_WINDOW = 4;
+
+/**
+ * Keyboard steering (W/S, arrows). While a key is held the target leads the dragon by a distance
+ * that ramps from `leadMin` to `leadMax` (desired speed = lead x followGain, so ~500 -> ~1000 px/s,
+ * the same top speed as the mouse). On release the target is set just ahead of the dragon so it
+ * stops within a few pixels instead of drifting.
+ */
+export const KEY_STEER = { leadMin: 46, leadMax: 92, ramp: 0.16, stop: 0.016 } as const;
+
+/** Small corrections are sharper: the follow gain rises by up to this fraction for tiny gaps. */
+export const PRECISION_BOOST = 0.3;
+const PRECISION_SCALE = 50;
 
 export class FlightSim {
   readonly stats: FlightStats;
@@ -163,6 +214,8 @@ export class FlightSim {
   private abilityRequested = false;
   private hintCd = 0;
   private penalizedRocks = new Set<number>();
+  private keyDir: -1 | 0 | 1 = 0;
+  private keyHeld = 0;
 
   // Ability
   /** 0..1 ready at 1; legendaries can store up to 2. */
@@ -208,6 +261,25 @@ export class FlightSim {
   private chainCount = 0;
   private lastDashBreak = -999;
 
+  // Score (Rush; never affects currency)
+  score = 0;
+  /** Pickups in a row, each within CHAIN_WINDOW s of the previous one. */
+  chain = 0;
+  bestChain = 0;
+  lastChainTime = -999;
+  trails = new Map<number, TrailState>();
+  trailsCompleted = 0;
+  private trailCharge = 0;
+  treasureSeen = 0;
+  treasureTaken = 0;
+  private treasureXs: number[] = [];
+  private treasureIdx = 0;
+  private treasureHintShown = false;
+  private finalShown = false;
+  private nextTrail = 1;
+  /** World x of the finish line (Rush). */
+  readonly finishX: number;
+
   pickups: Pickup[] = [];
   containers: Container[] = [];
   rocks: Rock[] = [];
@@ -215,13 +287,14 @@ export class FlightSim {
   bolts: Bolt[] = [];
   checkpoints: Checkpoint[] = [];
   /** Visual-only set pieces (waterfalls). Never collide. */
-  scenery: { id: number; kind: 'waterfall'; x: number }[] = [];
+  scenery: { id: number; kind: 'waterfall' | 'sign' | 'finish'; x: number; y: number; top?: boolean }[] = [];
 
   private events: FlightEvent[] = [];
   private nextId = 1;
   private rng: Rng;
   private courseX = 0;
   private lastPattern: Pattern | null = null;
+  private prevPattern: Pattern | null = null;
   private pending: Spawn[] = [];
   private tutorialShown = false;
   private rockHintShown = false;
@@ -243,12 +316,44 @@ export class FlightSim {
       this.checkpoints = this.course.checkpoints.map((x, index) => ({ index, x, passed: false }));
     } else {
       this.runSeconds = opts.runSeconds ?? FLIGHT.runSeconds;
+      this.treasureXs = this.mode === 'rush' ? treasurePlan(this.runSeconds) : [];
       const opening = openingFor(this.env);
       this.spawnSegment(opening.spawns, 0);
       this.courseX = opening.length;
     }
+    this.finishX = finishX(this.runSeconds);
+    if (!this.course && this.mode === 'rush') this.scenery.push({ id: this.nextId++, kind: 'finish', x: this.finishX, y: 0 });
     this.prevWX = this.dragonWorldX;
     this.ensureCourse();
+  }
+
+  /** Current score multiplier from the chain (1 to RUSH_SCORE.chainMax). */
+  get chainMult(): number {
+    return Math.min(RUSH_SCORE.chainMax, 1 + Math.floor(this.chain / RUSH_SCORE.chainStep) * RUSH_SCORE.chainBonus);
+  }
+  /** 0..1: how much of the chain window is left before the chain lapses. */
+  get chainLeft(): number {
+    return this.chain > 0 ? Math.max(0, 1 - (this.time - this.lastChainTime) / CHAIN_WINDOW) : 0;
+  }
+  /** Rock hitbox scale (Rush is slightly forgiving so hits match the drawn silhouette). */
+  get rockHitScale(): number {
+    return this.mode === 'rush' ? RUSH.rockForgiveness : 1;
+  }
+  /** Rush charge granted by completed trails so far (bounded by RUSH.trailChargeCap). */
+  get trailChargeGiven(): number {
+    return this.trailCharge;
+  }
+
+  /** Keyboard steering: -1 up, 1 down, 0 released. Frame-rate independent (runs in substeps). */
+  setSteerKeys(dir: -1 | 0 | 1): void {
+    if (dir === this.keyDir) return;
+    if (dir !== 0) {
+      this.keyHeld = 0;
+      this.lastEngage = this.time;
+    } else {
+      this.targetY = clamp(this.y + this.vy * KEY_STEER.stop, FLIGHT.minY, FLIGHT.maxY);
+    }
+    this.keyDir = dir;
   }
 
   get rushActive(): boolean {
@@ -300,6 +405,7 @@ export class FlightSim {
   }
 
   setTarget(y: number): void {
+    this.keyDir = 0;
     const t = Math.min(FLIGHT.maxY, Math.max(FLIGHT.minY, y));
     if (Math.abs(t - this.targetY) > 6) this.lastEngage = this.time;
     this.targetY = t;
@@ -347,6 +453,11 @@ export class FlightSim {
       completed: this.finished,
       collisions: this.collisions,
       checkpoints: this.checkpoints.filter((c) => c.passed).length,
+      score: this.score,
+      bestChain: this.bestChain,
+      trailsCompleted: this.trailsCompleted,
+      treasureSeen: this.treasureSeen,
+      treasureTaken: this.treasureTaken,
     };
   }
 
@@ -369,6 +480,7 @@ export class FlightSim {
     this.updateTimers(dt);
     this.updateDash();
     this.updateAbility(dt);
+    this.updateKeys(dt);
     this.updateVertical(dt);
     this.updateLunge(dt);
 
@@ -380,6 +492,7 @@ export class FlightSim {
     this.updateBolts(wx);
     this.updateCheckpoints(wx);
     this.updateRush(dt);
+    this.updateRunBeats();
     this.cleanup();
 
     this.prevWX = this.dragonWorldX;
@@ -612,15 +725,27 @@ export class FlightSim {
     if (this.paid.has(r.id)) return;
     this.paid.add(r.id);
     this.gold += 1;
+    this.score += RUSH_SCORE.shatter;
     this.events.push({ type: 'rockShatter', x: r.x - this.dist, y: r.y, gold: 1 });
   }
 
   // --- movement ------------------------------------------------------------------------
 
+  private updateKeys(dt: number) {
+    if (!this.keyDir) return;
+    this.keyHeld += dt;
+    this.lastEngage = this.time;
+    const lead = KEY_STEER.leadMin + (KEY_STEER.leadMax - KEY_STEER.leadMin) * Math.min(1, this.keyHeld / KEY_STEER.ramp);
+    this.targetY = clamp(this.y + this.keyDir * lead, FLIGHT.minY, FLIGHT.maxY);
+  }
+
   private updateVertical(dt: number) {
     const handling = this.handlingT > 0 && this.stats.ability.flight.kind === 'handling' ? this.stats.ability.flight.steerMult : 1;
     const maxV = FLIGHT.maxVerticalSpeed * (this.slowT > 0 ? ROCK.slowFactor : 1) * (handling > 1 ? 1 + (handling - 1) * 0.5 : 1);
-    const desired = Math.max(-maxV, Math.min(maxV, (this.targetY - this.y) * FLIGHT.followGain * handling));
+    const gap = this.targetY - this.y;
+    // Sharper response to small corrections (lining up a coin) without changing big moves.
+    const precision = 1 + PRECISION_BOOST * Math.exp(-Math.abs(gap) / PRECISION_SCALE);
+    const desired = Math.max(-maxV, Math.min(maxV, gap * FLIGHT.followGain * precision * handling));
     this.vy += (desired - this.vy) * (1 - Math.exp(-FLIGHT.velocityResponse * handling * dt));
     this.vy = Math.max(-maxV, Math.min(maxV, this.vy));
     this.y += this.vy * dt;
@@ -640,10 +765,11 @@ export class FlightSim {
 
   private collideRocks(wx: number) {
     const br = FLIGHT.bodyRadius;
+    const scale = this.rockHitScale;
     for (const rock of [...this.rocks]) {
       const dx = wx - rock.x;
       const dy = this.y - rock.y;
-      const minD = rock.r + br;
+      const minD = rock.r * scale + br;
       if (Math.abs(dx) > minD || Math.abs(dy) > minD) continue;
       const d = Math.hypot(dx, dy);
       if (d >= minD) continue;
@@ -675,10 +801,11 @@ export class FlightSim {
           this.rockHits++;
           this.collisions++;
           this.lastHitTime = this.time;
-          this.events.push({ type: 'rockHit', x: rock.x - this.dist, y: rock.y, counted: true });
+          this.events.push({ type: 'rockHit', x: rock.x - this.dist, y: rock.y, counted: true, chainLost: this.breakChain() });
           this.rockHintShown = true;
           this.hintCd = CONTAINERS.hintCooldown;
-          this.events.push({ type: 'hint', text: "Rocks are solid — dash can't break them" });
+          // The top hint explains rocks once; every hit is also explained beside the dragon.
+          if (this.rockHits === 1) this.events.push({ type: 'hint', text: "Rocks are solid — dash can't break them" });
         }
       }
 
@@ -713,6 +840,7 @@ export class FlightSim {
         if (this.magnetT > 0 && d > FLIGHT.attractRadius * this.stats.attractMult) p.byAbility = true;
       }
       if (pathOn && !p.attracted && p.x > wx && p.x < wx + 900 && Math.abs(p.y - this.y) <= this.pathBand / 2) this.pullPickup(p);
+      if (!p.attracted && !p.missed && p.x < wx - ar - 12) this.missPickup(p);
       if (p.attracted && d > cr) {
         p.attractT += dt;
         const move = Math.min(d, (FLIGHT.attractBaseSpeed + FLIGHT.attractAccel * p.attractT) * dt);
@@ -737,7 +865,61 @@ export class FlightSim {
     // (passive events do not count as input)
     if (!this.rushActive && !p.noCharge && this.mode === 'rush') this.addCharge(RUSH.loosePickupCharge);
     if (!p.byAbility) this.addAbilityCharge(this.stats.ability.chargeFrom.pickup ?? 0);
-    this.events.push({ type: 'pickup', kind: p.kind, x: p.x - this.dist, y: p.y, rush: this.rushActive });
+    const points = this.pickupScore(p.kind);
+    const t = p.trail ? this.trails.get(p.trail) : undefined;
+    if (t) {
+      t.got += 1;
+      t.pts.push({ x: p.x, y: p.y });
+    }
+    this.events.push({ type: 'pickup', kind: p.kind, x: p.x - this.dist, y: p.y, rush: this.rushActive, trailIndex: t?.got, trailTotal: t?.total, points });
+    if (t && !t.broken && !t.done && t.got >= t.total) this.completeTrail(t, p);
+  }
+
+  /** Score for one pickup; extends the chain (pickups within CHAIN_WINDOW s of each other). */
+  private pickupScore(kind: 'gold' | 'fruit'): number {
+    if (this.time - this.lastChainTime > CHAIN_WINDOW) this.chain = 0;
+    const before = this.chainMult;
+    this.chain += 1;
+    this.lastChainTime = this.time;
+    this.bestChain = Math.max(this.bestChain, this.chain);
+    const mult = this.chainMult;
+    if (mult > before) this.events.push({ type: 'chain', chain: this.chain, mult });
+    const points = Math.round((kind === 'gold' ? RUSH_SCORE.gold : RUSH_SCORE.fruit) * mult);
+    this.score += points;
+    return points;
+  }
+
+  /** A hit ends the score chain (score only: nothing collected is lost). Returns the lost chain. */
+  private breakChain(): number {
+    const lost = this.time - this.lastChainTime <= CHAIN_WINDOW ? this.chain : 0;
+    this.chain = 0;
+    return lost;
+  }
+
+  private completeTrail(t: TrailState, p: Pickup) {
+    t.done = true;
+    this.trailsCompleted += 1;
+    const bonus = RUSH_SCORE.trailPerItem * t.total;
+    this.score += bonus;
+    // A small, bounded Rush contribution; never while Rush is active (no feedback loop).
+    let charge = 0;
+    if (this.mode === 'rush' && !this.rushActive && this.trailCharge < RUSH.trailChargeCap) {
+      charge = Math.min(RUSH.trailCompleteCharge, RUSH.trailChargeCap - this.trailCharge);
+      this.trailCharge += charge;
+    }
+    const points = t.pts.map((q) => ({ x: q.x - this.dist, y: q.y }));
+    this.events.push({ type: 'trailComplete', x: p.x - this.dist, y: p.y, count: t.total, bonus, charge, treasure: t.treasure, points });
+    if (charge) this.addCharge(charge);
+  }
+
+  private missPickup(p: Pickup) {
+    p.missed = true;
+    const t = p.trail ? this.trails.get(p.trail) : undefined;
+    if (!t || t.broken || t.done) return;
+    t.broken = true;
+    // Only worth mentioning (and only ends the chain) when the player had started this trail;
+    // skipping the other branch of a fork is never a mistake.
+    if (t.got > 0) this.events.push({ type: 'trailBroken', x: p.x - this.dist, y: p.y, got: t.got, total: t.total, chainLost: this.breakChain() });
   }
 
   private updateContainers(wx: number) {
@@ -822,8 +1004,14 @@ export class FlightSim {
     if (!byAbility) this.addAbilityCharge(this.stats.ability.chargeFrom.container ?? 0);
     this.gold += gold;
     this.fruit += fruit;
+    this.score += Math.round(RUSH_SCORE.container * this.chainMult);
     if (!this.rushActive && this.mode === 'rush') this.addCharge(RUSH.containerCharge);
     this.events.push({ type: 'break', kind: c.kind, x: c.x - this.dist, y: c.y, gold, fruit, traitBonus, byDash, byAbility });
+    if (c.treasure) {
+      this.treasureTaken += 1;
+      this.score += RUSH_SCORE.treasure;
+      this.events.push({ type: 'treasure', x: c.x - this.dist, y: c.y, bonus: RUSH_SCORE.treasure });
+    }
   }
 
   private updateRings(dt: number, wx: number) {
@@ -839,6 +1027,7 @@ export class FlightSim {
         if (Math.abs(y - r.y) <= r.r * radiusMult) {
           r.passed = true;
           this.ringsPassed++;
+          this.score += RUSH_SCORE.ring;
           // (passive events do not count as input)
           const charge = this.mode === 'rush' && !this.rushActive ? WIND_RING.charge + this.stats.ringCharge : 0;
           this.events.push({ type: 'ring', x: r.x - this.dist, y: r.y, charge });
@@ -882,7 +1071,7 @@ export class FlightSim {
             this.rockHits++;
             this.collisions++;
             this.lastHitTime = this.time;
-            this.events.push({ type: 'boltHit', x: b.x - this.dist, y: this.y });
+            this.events.push({ type: 'boltHit', x: b.x - this.dist, y: this.y, chainLost: this.breakChain() });
           }
         }
       }
@@ -948,6 +1137,23 @@ export class FlightSim {
     if (this.rings.some((r) => r.x < left)) this.rings = this.rings.filter((r) => r.x >= left);
     if (this.bolts.some((b) => b.x < left)) this.bolts = this.bolts.filter((b) => b.x >= left);
     if (this.scenery.some((w) => w.x < left - 300)) this.scenery = this.scenery.filter((w) => w.x >= left - 300);
+    if (this.trails.size > 24) for (const [id, t] of this.trails) if ((t.done || t.broken) && !this.pickups.some((p) => p.trail === id)) this.trails.delete(id);
+  }
+
+  /** Treasure route announcement and the final stretch (Rush). */
+  private updateRunBeats() {
+    if (this.mode !== 'rush') return;
+    if (!this.treasureHintShown) {
+      const sign = this.scenery.find((w) => w.kind === 'sign' && w.x - this.dist < VIEW.width - 80 && w.x - this.dist > 0);
+      if (sign) {
+        this.treasureHintShown = true;
+        this.events.push({ type: 'treasureAhead', top: !!sign.top });
+      }
+    } else if (!this.scenery.some((w) => w.kind === 'sign' && w.x > this.dist)) this.treasureHintShown = false;
+    if (!this.finalShown && this.timeLeft <= 5 && this.runSeconds > 10) {
+      this.finalShown = true;
+      this.events.push({ type: 'finalStretch' });
+    }
   }
 
   private ensureCourse() {
@@ -959,24 +1165,54 @@ export class FlightSim {
       return;
     }
     while (this.courseX < horizon) {
-      const p = pickPattern(this.rng, this.lastPattern, this.courseX, this.env);
+      // Calm collection routes lead into the finish line; the treasure set piece comes at the climax.
+      const calmOnly = this.mode === 'rush' && this.courseX > this.finishX - CALM_FINISH;
+      let p: Pattern;
+      const treasureDue = !calmOnly && this.treasureIdx < this.treasureXs.length && this.courseX >= this.treasureXs[this.treasureIdx] - 600;
+      if (treasureDue && !this.lastPattern?.hasRocks) {
+        p = TREASURE_VAULT;
+        this.treasureIdx++;
+      } else p = pickPattern(this.rng, this.lastPattern, this.courseX, this.env, { beforePrevious: this.prevPattern, calmOnly: calmOnly || treasureDue });
       this.spawnSegment(p.build(this.rng), this.courseX);
+      this.prevPattern = this.lastPattern;
       this.lastPattern = p;
       this.courseX += p.length + PATTERN_GAP;
     }
   }
 
   private spawnSegment(spawns: Spawn[], x0: number) {
+    // Trails (Rush only): tags local to this segment become run-wide ids; fewer than 3 items is no trail.
+    const tagIds = new Map<number, number>();
+    if (this.mode === 'rush') {
+      const counts = new Map<number, number>();
+      for (const s of spawns) if (s.trail && (s.kind === 'gold' || s.kind === 'fruit')) counts.set(s.trail, (counts.get(s.trail) ?? 0) + 1);
+      for (const [tag, n] of counts) {
+        if (n < 3) continue;
+        const id = this.nextTrail++;
+        tagIds.set(tag, id);
+        this.trails.set(id, { id, total: n, got: 0, broken: false, done: false, treasure: spawns.some((s) => s.trail === tag && s.treasure), pts: [] });
+      }
+    }
     for (const s of spawns) {
       const x = x0 + s.x;
       switch (s.kind) {
         case 'gold':
-        case 'fruit':
-          this.pickups.push(this.makePickup(s.kind, x, s.y, false));
+        case 'fruit': {
+          const p = this.makePickup(s.kind, x, s.y, false);
+          if (s.trail && tagIds.has(s.trail)) p.trail = tagIds.get(s.trail);
+          if (s.treasure) p.treasure = true;
+          this.pickups.push(p);
           break;
+        }
         case 'chest':
         case 'pod':
-          this.containers.push({ id: this.nextId++, kind: s.kind, x, y: s.y, r: CONTAINERS[s.kind].radius, tutorial: !!s.tutorial, hanging: !!s.hanging });
+          this.containers.push({ id: this.nextId++, kind: s.kind, x, y: s.y, r: CONTAINERS[s.kind].radius, tutorial: !!s.tutorial, hanging: !!s.hanging, treasure: !!s.treasure });
+          break;
+        case 'sign':
+          if (this.mode === 'rush') {
+            this.scenery.push({ id: this.nextId++, kind: 'sign', x, y: s.y, top: s.y < VIEW.height / 2 });
+            this.treasureSeen += 1;
+          }
           break;
         case 'rock':
           this.rocks.push({ id: this.nextId++, x, y: s.y, r: s.r ?? 58, seed: this.rng.int(1, 1e9), frozenUntil: -1 });
@@ -988,7 +1224,7 @@ export class FlightSim {
           this.bolts.push({ id: this.nextId++, x, gapY: s.y, gapH: s.r ?? 230, state: 0, warnT: 0, hit: false });
           break;
         case 'waterfall':
-          this.scenery.push({ id: this.nextId++, kind: 'waterfall', x });
+          this.scenery.push({ id: this.nextId++, kind: 'waterfall', x, y: 0 });
           break;
       }
     }
@@ -1014,4 +1250,20 @@ export function segDist(ax: number, ay: number, bx: number, by: number, px: numb
   let t = len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0;
   t = clamp(t, 0, 1);
   return Math.hypot(ax + vx * t - px, ay + vy * t - py);
+}
+
+/**
+ * One concrete improvement tip for a Dragon Rush results screen, chosen from what happened in
+ * the flight (most useful first). Pure, so the results screen and tests can call it.
+ */
+export function rushTip(s: RunSummary): string {
+  if (s.mode !== 'rush') return '';
+  if (s.rockHits >= 3) return 'Mossy stone slows you briefly: steer around it early. Your dash is for glowing chests and pods, not rocks.';
+  if (s.pickups < 25) return 'Follow the coin and Emberfruit trails: the dotted line shows where each trail goes next.';
+  if (s.containersBroken < 3) return 'Watch for the white target ring on chests and pods, then click or press Space to dash through them.';
+  if (s.treasureSeen > 0 && s.treasureTaken === 0) return 'Near the end a TREASURE sign marks a narrow route along the edge. Squeeze in and dash the chest for a big score bonus.';
+  if (s.trailsCompleted < 6) return 'Collect every item in a trail for a score bonus, and to add a little Dragon Rush charge.';
+  if (s.rushCount === 0) return 'Every pickup charges Dragon Rush; whole trails add a little extra.';
+  if (s.bestChain < 30) return 'Avoid rocks and finish the trails you start to keep your chain going: every 10 in a row raises the score multiplier.';
+  return 'Great flight! Try a different region, or chase a longer chain for a higher score.';
 }

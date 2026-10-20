@@ -134,3 +134,50 @@ describe('egg shell cache', () => {
     expect(eggs.eggIcon('tide', 48)).toBe(a);
   });
 });
+
+describe('Update 5 eggs', () => {
+  it('no egg stands on a narrow vase-like foot (Cinder has a sturdy rounded base)', async () => {
+    const { eggShapeSpec, eggOutline } = await import('../src/render/eggFracture');
+    for (const id of SPECIES_IDS) {
+      expect(eggShapeSpec(id).foot, id).toBeUndefined();
+      // the outline closes in a single point at the base
+      expect(eggOutline(id).filter((p) => p[1] === 0.5), id).toHaveLength(1);
+    }
+  });
+
+  it("drawEgg composes with the caller's alpha (fades never flash to full opacity)", async () => {
+    const eggs = await import('../src/render/eggs');
+    const set: number[] = [];
+    const store: Record<string | symbol, unknown> = { globalAlpha: 0.4 };
+    const ctx = new Proxy(store, {
+      get(t, k) {
+        if (k in t) return t[k];
+        if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
+        if (k === 'getTransform') return () => ({ a: 1, b: 0 });
+        return noop;
+      },
+      set(t, k, v) {
+        if (k === 'globalAlpha') set.push(v as number);
+        t[k] = v;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    for (const id of ['pyrelisk', 'voltwing', 'ember', 'solpyre'] as const) eggs.drawEgg(ctx, id, 0, 0, 120, { tier: 2, glow: 1, crack: 0.6, time: 1 });
+    expect(set.length).toBeGreaterThan(0);
+    expect(Math.max(...set)).toBeLessThanOrEqual(0.4 + 1e-9);
+  });
+
+  it("the Hatchery's working set (reel eggs + close-up + Open 5) fits the shell budget at DPR 1, 2 and 2.5", async () => {
+    const eggs = await import('../src/render/eggs');
+    for (const k of [1, 2, 2.5]) {
+      eggs.clearEggCache();
+      for (const id of SPECIES_IDS) eggs.eggShellImage(id, 0, 104 * k);
+      eggs.eggShellImage('solpyre', 2, 176 * k);
+      for (const id of ['pyrelisk', 'abyssfin', 'thundercrest', 'frostfang', 'astralux'] as const) eggs.eggShellImage(id, 1, 120 * k);
+      const st = eggs.eggCacheStats();
+      // nothing was evicted: the reel never rebuilds a shell while it runs
+      expect(st.entries, `k=${k}`).toBe(SPECIES_IDS.length + 6);
+      expect(st.bytes, `k=${k}`).toBeLessThanOrEqual(eggs.EGG_CACHE_BYTES);
+    }
+  });
+});

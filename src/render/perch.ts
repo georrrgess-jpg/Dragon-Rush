@@ -10,6 +10,12 @@
 //      otherwise one still frame of precipitation is baked into the surface instead.
 //   3. banner, perch cosmetic (back part), the dragon's contact shadow, the dragon, the
 //      cosmetic's front part (nest rim, corner crystals), feeding fruit and feedback.
+//
+// Home overlook (HeroState.overlook, Update 5 main menu) adds: per-region light grading, god
+// rays, a backlight behind the dragon and foreground framing (all baked into the surface); a
+// live layer of drifting cloud bands (cached sprites), motes and distant birds; the rarity
+// aura behind the dragon; and a calm crossfade between two reused surfaces when the region
+// changes (also across Home visits). Reduced motion / Low effects keep it still.
 import type { Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
 import type { Family, RegionId, SpeciesId } from '../content/types';
@@ -19,6 +25,7 @@ import { drawFruitSlice } from './art';
 import { Background, paintRegion } from './background';
 import { drawDragon, mouthPoint, stageScale, type DragonPose } from './dragonArt';
 import { DragonAnimator } from './dragonAnim';
+import { drawRarityAura } from './rarityArt';
 
 type Ctx = CanvasRenderingContext2D;
 type Pt = [number, number];
@@ -44,6 +51,19 @@ export interface HeroState {
    * the App's Low effects setting (the `low-effects` body class).
    */
   quality?: 'high' | 'low';
+  /**
+   * Home overlook: region light grading, foreground framing, drifting clouds, motes and
+   * birds, a calm crossfade when the region changes, and the rarity aura behind the dragon.
+   */
+  overlook?: boolean;
+}
+
+/** Screen-space box around the perched dragon (for hit targets and speech bubbles). */
+export interface HeroBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /**
@@ -63,7 +83,10 @@ const REF_SCALE = 1.875;
 const LEDGE_BACK = 8;
 const LEDGE_LIP = 42;
 
-/** Optional animator hooks (present on newer rigs); called only when available. */
+/** Seconds of the calm backdrop crossfade when the region changes. */
+const REGION_FADE = 0.9;
+/** Region the last Home overlook showed, so the next one can fade in from it. */
+let lastOverlookRegion: RegionId | null = null;
 
 interface Float {
   x: number;
@@ -102,6 +125,11 @@ export class HeroView {
   /** Cached static scene (see the file header); reused across rebuilds when the size matches. */
   private surface: HTMLCanvasElement | null = null;
   private surfaceKey = '';
+  private surfaceRegion: RegionId | null = null;
+  /** Previous region's scene while it fades out; recycled as the spare surface afterwards. */
+  private prevSurface: HTMLCanvasElement | null = null;
+  private spare: HTMLCanvasElement | null = null;
+  private fadeT = -1;
   private weather: Background | null = null;
   private weatherRegion: RegionId | null = null;
 
@@ -122,6 +150,34 @@ export class HeroView {
       return;
     }
     this.cheerNow();
+  }
+
+  /** A short personality reaction (the player said hello), then a smooth return to idle. */
+  react(): void {
+    // the species' own reaction (playful hop, stoic snort, curious head tilt…); under reduced
+    // motion the animator changes only the expression, and no particles are added here
+    this.anim.react();
+    if (this.rm) return;
+    const m = this.mouth ?? [this.w * 0.5, this.h * 0.45];
+    for (let i = 0; i < 5; i++) this.floats.push({ x: m[0] + (Math.random() - 0.3) * 50, y: m[1] - 20, vy: -36 - Math.random() * 40, life: 1, kind: 'spark' });
+  }
+
+  /** Where the dragon stands on screen for state `s` (same layout as draw()). */
+  dragonBox(s: HeroState): HeroBox {
+    const { scale, cx, baseY } = this.layout(s);
+    const st = stageScale(s.stage);
+    const u = scale * st;
+    const ox = cx - 10 * scale;
+    // measured extents of the perched rigs (local units × stage scale), generous enough for wings
+    const top = { hatchling: 118, juvenile: 128, adult: 140, elder: 150 }[s.stage];
+    return { x: ox - 118 * u, y: baseY - top * u, w: 228 * u, h: (top + 8) * u };
+  }
+
+  private layout(s: HeroState) {
+    const { w, h } = this;
+    const base = Math.min(w / 520, h / 360) * 1.25;
+    const scale = base * (this.zoomNow ?? s.zoom ?? 1);
+    return { base, scale, pu: scale / REF_SCALE, cx: w * (s.focusX ?? 0.5), baseY: h * 0.8 };
   }
 
   private cheerNow(): void {
@@ -178,6 +234,10 @@ export class HeroView {
       }
       if (this.feedT > 2) this.feedT = -1;
     }
+    if (this.fadeT >= 0) {
+      this.fadeT += dt;
+      if (this.fadeT >= REGION_FADE || s.reducedMotion) this.endFade();
+    }
     this.glowT = Math.max(0, this.glowT - dt);
     this.heartT = Math.max(0, this.heartT - dt);
     if (s.reducedMotion) {
@@ -216,18 +276,27 @@ export class HeroView {
     ctx.clearRect(0, 0, w, h);
     const quality = s.quality ?? (bodyFlag('low-effects') ? 'low' : 'high');
     const still = s.reducedMotion || quality === 'low';
-    const cx = w * (s.focusX ?? 0.5);
-    const baseY = h * 0.8;
-    const base = Math.min(w / 520, h / 360) * 1.25;
-    const scale = base * (this.zoomNow ?? s.zoom ?? 1);
-    const pu = scale / REF_SCALE;
+    const { base, scale, pu, cx, baseY } = this.layout(s);
     if (s.backdrop) {
       // backing resolution follows the destination's device scale, so the per-frame blit is
       // 1:1 (the unfiltered fast path) instead of a resample
       const m = ctx.getTransform();
       const dev = Math.min(2, Math.max(0.5, Math.hypot(m.a, m.b) || 1));
       const k = quality === 'low' ? Math.min(1, dev) : dev;
-      ctx.drawImage(this.sceneSurface(s, quality, k, still, cx, baseY, pu), 0, 0, w, h);
+      if (s.overlook && !this.surface && lastOverlookRegion && lastOverlookRegion !== s.region && !s.reducedMotion) {
+        // a new Home opens after the region changed elsewhere: fade in from the last one shown
+        this.sceneSurface({ ...s, region: lastOverlookRegion }, quality, k, still, cx, baseY, pu);
+      }
+      if (s.overlook) lastOverlookRegion = s.region;
+      const surf = this.sceneSurface(s, quality, k, still, cx, baseY, pu);
+      if (this.prevSurface && this.fadeT >= 0) {
+        const f = Math.min(1, this.fadeT / REGION_FADE);
+        ctx.drawImage(this.prevSurface, 0, 0, w, h);
+        ctx.globalAlpha = f * f * (3 - 2 * f);
+        ctx.drawImage(surf, 0, 0, w, h);
+        ctx.globalAlpha = 1;
+      } else ctx.drawImage(surf, 0, 0, w, h);
+      if (s.overlook) drawOverlookLive(ctx, s.region, w, h, k, still ? 0 : this.t, still);
       if (!still) this.drawWeather(ctx, s.region);
     }
     this.drawBanner(ctx, s.banner, w * 0.12, h * 0.08, base / REF_SCALE, s.reducedMotion);
@@ -271,6 +340,9 @@ export class HeroView {
       ctx.fillStyle = g;
       ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
     }
+
+    // Epic / Legendary menu aura behind the dragon (rarity art module; Home only)
+    if (s.overlook) drawRarityAura(ctx, s.species, ox, oy, scale, this.t, still);
 
     const pose = this.pose(s);
     if (this.evo) {
@@ -329,10 +401,19 @@ export class HeroView {
   /** The cached static scene; rebuilt only when one of its inputs changes. */
   private sceneSurface(s: HeroState, quality: 'high' | 'low', k: number, still: boolean, cx: number, baseY: number, pu: number): HTMLCanvasElement {
     const { w, h } = this;
-    const key = `${s.region}|${w}x${h}|${quality}|${k.toFixed(3)}|${still ? 1 : 0}|${s.perch}|${cx.toFixed(1)}|${baseY.toFixed(1)}|${pu.toFixed(4)}`;
+    const key = `${s.region}|${w}x${h}|${quality}|${k.toFixed(3)}|${still ? 1 : 0}|${s.perch}|${cx.toFixed(1)}|${baseY.toFixed(1)}|${pu.toFixed(4)}|${s.overlook ? s.stage : '-'}`;
     const bw = Math.max(1, Math.ceil(w * k));
     const bh = Math.max(1, Math.ceil(h * k));
     if (this.surface && key === this.surfaceKey) return this.surface;
+    if (this.surface && this.surfaceRegion && this.surfaceRegion !== s.region && !s.reducedMotion) {
+      // region changed: keep the old scene to fade out from and paint the new one on the spare
+      // (at most two surfaces per view, reused, so a crossfade allocates no canvases)
+      if (this.prevSurface) this.endFade();
+      this.prevSurface = this.surface;
+      this.surface = this.spare;
+      this.spare = null;
+      this.fadeT = 0;
+    } else if (this.prevSurface && this.surfaceRegion !== s.region) this.endFade();
     if (!this.surface) this.surface = document.createElement('canvas');
     const c = this.surface;
     if (c.width !== bw || c.height !== bh) {
@@ -351,10 +432,24 @@ export class HeroView {
     v.addColorStop(1, 'rgba(20,30,40,0.26)');
     g.fillStyle = v;
     g.fillRect(0, 0, w, h);
+    if (s.overlook) overlookAtmosphere(g, s.region, w, h, cx, baseY, pu * stageScale(s.stage));
     drawLedge(g, s.region, cx, baseY, pu, w, h);
     groundShadow(g, s.perch, cx, baseY, pu);
+    if (s.overlook) overlookForeground(g, s.region, w, h);
     this.surfaceKey = key;
+    this.surfaceRegion = s.region;
     return c;
+  }
+
+  /** Ends a region crossfade: the old scene becomes the spare (its backing store released). */
+  private endFade(): void {
+    if (this.prevSurface) {
+      this.prevSurface.width = 1;
+      this.prevSurface.height = 1;
+      this.spare = this.prevSurface;
+    }
+    this.prevSurface = null;
+    this.fadeT = -1;
   }
 
   private drawWeather(ctx: Ctx, region: RegionId) {
@@ -1697,4 +1792,615 @@ function heart(ctx: Ctx, x: number, y: number, s: number) {
   ctx.bezierCurveTo(x - s * 1.4, y - s * 0.1, x - s * 0.6, y - s * 1.1, x, y - s * 0.35);
   ctx.bezierCurveTo(x + s * 0.6, y - s * 1.1, x + s * 1.4, y - s * 0.1, x, y + s * 0.9);
   ctx.fill();
+}
+
+// --- Home overlook ------------------------------------------------------------------------
+// The main menu's panorama: each region gets its own key light, haze and accents on top of
+// the shared region painting. Grading and foreground framing are baked into the cached scene
+// surface; the live layer (drifting cloud bands, motes, distant birds) only blits cached
+// sprites and draws a few small shapes, so idle frames create no canvases.
+
+interface Mood {
+  /** Sun position as a fraction of the view (key light from the upper left everywhere). */
+  sun: Pt;
+  /** rgb of the key light, the distance haze, the shadow tint and the backlight behind the dragon. */
+  light: string;
+  haze: string;
+  shade: string;
+  halo: string;
+  /** Strength of the god rays and of the distance haze (1 = default). */
+  rays: number;
+  hazeK: number;
+  /** rgb multiplied into the upper sky (deepens the zenith) and the backlight strength. */
+  zenith: string;
+  haloK: number;
+  cloud: string;
+  mote: string;
+  motes: 'pollen' | 'ember' | 'spray' | 'glint' | 'spark';
+  birds: boolean;
+}
+
+const MOODS: Record<RegionId, Mood> = {
+  isles: { sun: [0.08, -0.04], light: '255,236,178', haze: '250,246,228', shade: '34,74,70', halo: '255,244,206', rays: 1, hazeK: 1, zenith: '160,206,236', haloK: 1, cloud: '255,255,250', mote: '255,250,206', motes: 'pollen', birds: true },
+  canyon: { sun: [0.04, 0.1], light: '255,176,104', haze: '255,212,168', shade: '96,34,48', halo: '255,206,150', rays: 1.15, hazeK: 0.8, zenith: '206,130,140', haloK: 1, cloud: '255,224,196', mote: '255,196,120', motes: 'ember', birds: true },
+  coast: { sun: [0.16, -0.08], light: '178,236,228', haze: '226,250,255', shade: '18,72,96', halo: '214,255,252', rays: 0.8, hazeK: 0.45, zenith: '104,186,222', haloK: 0.55, cloud: '255,255,255', mote: '240,255,255', motes: 'spray', birds: true },
+  frost: { sun: [0.1, -0.02], light: '206,232,255', haze: '230,242,255', shade: '38,58,112', halo: '214,238,255', rays: 0.75, hazeK: 0.7, zenith: '150,184,232', haloK: 0.8, cloud: '238,246,255', mote: '238,250,255', motes: 'glint', birds: false },
+  storm: { sun: [0.06, -0.06], light: '196,176,255', haze: '170,160,226', shade: '26,18,64', halo: '196,178,255', rays: 0.55, hazeK: 0.8, zenith: '110,90,170', haloK: 1, cloud: '196,186,236', mote: '206,226,255', motes: 'spark', birds: false },
+};
+
+/** Baked grading: distance haze, the region's key light and god rays, a backlight behind the dragon. */
+function overlookAtmosphere(g: Ctx, region: RegionId, w: number, h: number, cx: number, baseY: number, u: number) {
+  const m = MOODS[region];
+  g.save();
+  // aerial perspective: a haze band toward the horizon pushes the far islands back
+  const hz = g.createLinearGradient(0, h * 0.18, 0, h);
+  hz.addColorStop(0, `rgba(${m.haze},0)`);
+  hz.addColorStop(0.45, `rgba(${m.haze},${(0.17 * m.hazeK).toFixed(3)})`);
+  hz.addColorStop(0.75, `rgba(${m.haze},${(0.09 * m.hazeK).toFixed(3)})`);
+  hz.addColorStop(1, `rgba(${m.haze},0)`);
+  g.fillStyle = hz;
+  g.fillRect(0, 0, w, h);
+  // a deeper zenith gives the pale flight skies some atmosphere
+  g.globalCompositeOperation = 'multiply';
+  const zg = g.createLinearGradient(0, 0, 0, h * 0.6);
+  zg.addColorStop(0, `rgba(${m.zenith},0.55)`);
+  zg.addColorStop(1, `rgba(${m.zenith},0)`);
+  g.fillStyle = zg;
+  g.fillRect(0, 0, w, h * 0.6);
+  g.globalCompositeOperation = 'source-over';
+  // the region's light: warm/cool key from the sun corner, its shadow tint toward the far corner
+  const sx = w * m.sun[0];
+  const sy = h * m.sun[1];
+  g.globalCompositeOperation = 'soft-light';
+  const gr = g.createLinearGradient(sx, sy, w, h);
+  gr.addColorStop(0, `rgba(${m.light},0.75)`);
+  gr.addColorStop(0.55, `rgba(${m.light},0.12)`);
+  gr.addColorStop(1, `rgba(${m.shade},0.7)`);
+  g.fillStyle = gr;
+  g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'screen';
+  // sun bloom
+  const sb = g.createRadialGradient(sx, sy, 0, sx, sy, w * 0.5);
+  sb.addColorStop(0, `rgba(${m.light},0.55)`);
+  sb.addColorStop(0.35, `rgba(${m.light},0.16)`);
+  sb.addColorStop(1, `rgba(${m.light},0)`);
+  g.fillStyle = sb;
+  g.fillRect(0, 0, w, h);
+  // god rays fanning down and to the right
+  const rng = createRng(region.length * 31 + 7);
+  const len = Math.hypot(w, h) * 1.05;
+  for (let i = 0; i < 7; i++) {
+    const a = 0.2 + i * 0.14 + rng.range(-0.03, 0.03);
+    const spread = rng.range(0.018, 0.045);
+    const rg = g.createLinearGradient(sx, sy, sx + Math.cos(a) * len, sy + Math.sin(a) * len);
+    const s0 = (0.08 + rng.range(0, 0.07)) * m.rays;
+    rg.addColorStop(0, `rgba(${m.light},${s0.toFixed(3)})`);
+    rg.addColorStop(0.55, `rgba(${m.light},${(s0 * 0.45).toFixed(3)})`);
+    rg.addColorStop(1, `rgba(${m.light},0)`);
+    g.fillStyle = rg;
+    g.beginPath();
+    g.moveTo(sx, sy);
+    g.lineTo(sx + Math.cos(a - spread) * len, sy + Math.sin(a - spread) * len);
+    g.lineTo(sx + Math.cos(a + spread) * len, sy + Math.sin(a + spread) * len);
+    g.closePath();
+    g.fill();
+  }
+  // soft backlight behind the dragon so it reads as the focal point against the painting
+  const hx = cx - 20 * u * REF_SCALE;
+  const hy = baseY - 95 * u * REF_SCALE;
+  const hr = 260 * u * REF_SCALE;
+  const hl = g.createRadialGradient(hx, hy, 0, hx, hy, hr);
+  hl.addColorStop(0, `rgba(${m.halo},${(0.42 * m.haloK).toFixed(3)})`);
+  hl.addColorStop(0.5, `rgba(${m.halo},${(0.14 * m.haloK).toFixed(3)})`);
+  hl.addColorStop(1, `rgba(${m.halo},0)`);
+  g.fillStyle = hl;
+  g.fillRect(hx - hr, hy - hr, hr * 2, hr * 2);
+  g.restore();
+}
+
+/** Baked foreground: region framing in the near corners (slightly soft, for depth) and a grounding vignette. */
+function overlookForeground(g: Ctx, region: RegionId, w: number, h: number) {
+  const m = MOODS[region];
+  const rng = createRng(region.length * 53 + 5);
+  g.save();
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.filter = 'blur(1.2px)';
+  const s = h / 660;
+  g.save();
+  g.scale(s, s);
+  switch (region) {
+    case 'canyon':
+      canyonFrame(g, rng, h / s);
+      break;
+    case 'coast':
+      coastFrame(g, rng, h / s);
+      break;
+    case 'frost':
+      frostFrame(g, rng, h / s);
+      break;
+    case 'storm':
+      stormFrame(g, rng, h / s);
+      break;
+    default:
+      islesFrame(g, rng, h / s);
+  }
+  g.restore();
+  g.filter = 'none';
+  // grounding: the lower edge and far corners settle into the region's shadow tint
+  const bv = g.createLinearGradient(0, h * 0.72, 0, h);
+  bv.addColorStop(0, `rgba(${m.shade},0)`);
+  bv.addColorStop(1, `rgba(${m.shade},0.32)`);
+  g.fillStyle = bv;
+  g.fillRect(0, h * 0.72, w, h * 0.28);
+  const ev = g.createRadialGradient(w * 0.4, h * 0.5, h * 0.45, w * 0.4, h * 0.5, w * 0.82);
+  ev.addColorStop(0, `rgba(${m.shade},0)`);
+  ev.addColorStop(1, `rgba(${m.shade},0.3)`);
+  g.fillStyle = ev;
+  g.fillRect(0, 0, w, h);
+  g.restore();
+}
+
+/** A leafy frond: spine from (x, y) along `ang` with leaflets on both sides (palms, ferns). */
+function frond(g: Ctx, x: number, y: number, len: number, ang: number, curl: number, leaf: number, dark: string, light: string) {
+  const ex = x + Math.cos(ang) * len;
+  const ey = y + Math.sin(ang) * len;
+  const qx = (x + ex) / 2 - Math.sin(ang) * curl;
+  const qy = (y + ey) / 2 + Math.cos(ang) * curl;
+  const n = 14;
+  for (let pass = 0; pass < 2; pass++) {
+    g.fillStyle = pass ? light : dark;
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const px = (1 - t) * (1 - t) * x + 2 * (1 - t) * t * qx + t * t * ex;
+      const py = (1 - t) * (1 - t) * y + 2 * (1 - t) * t * qy + t * t * ey;
+      const tx = 2 * (1 - t) * (qx - x) + 2 * t * (ex - qx);
+      const ty = 2 * (1 - t) * (qy - y) + 2 * t * (ey - qy);
+      const ta = Math.atan2(ty, tx);
+      const L = leaf * (1 - t * 0.7) * (pass ? 0.8 : 1);
+      for (const side of [-1, 1]) {
+        const la = ta + side * 1.0 + 0.35;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.quadraticCurveTo(px + Math.cos(la - side * 0.3) * L * 0.6, py + Math.sin(la - side * 0.3) * L * 0.6, px + Math.cos(la) * L, py + Math.sin(la) * L);
+        g.quadraticCurveTo(px + Math.cos(la + side * 0.25) * L * 0.5, py + Math.sin(la + side * 0.25) * L * 0.5, px, py);
+        g.fill();
+      }
+    }
+  }
+  g.strokeStyle = dark;
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(x, y);
+  g.quadraticCurveTo(qx, qy, ex, ey);
+  g.stroke();
+}
+
+/** A broad palm frond: arching rib with long leaflets hanging down from it. */
+function palmFrond(g: Ctx, x: number, y: number, len: number, ang: number, curl: number) {
+  const ex = x + Math.cos(ang) * len;
+  const ey = y + Math.sin(ang) * len + curl;
+  const qx = x + Math.cos(ang) * len * 0.55;
+  const qy = y + Math.sin(ang) * len * 0.55 - curl * 0.6;
+  const n = 18;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const px = (1 - t) * (1 - t) * x + 2 * (1 - t) * t * qx + t * t * ex;
+      const py = (1 - t) * (1 - t) * y + 2 * (1 - t) * t * qy + t * t * ey;
+      const L = (70 - 40 * t) * (pass ? 0.92 : 1);
+      for (const side of [-1, 1]) {
+        // leaflets droop: both sides hang toward the ground, the far side a little shorter
+        const la = Math.PI / 2 + side * 0.55 - (ang * 0.4);
+        const lx = px + Math.cos(la) * L * (side > 0 ? 1 : 0.8);
+        const ly = py + Math.sin(la) * L * (side > 0 ? 1 : 0.8);
+        g.fillStyle = pass ? (side > 0 ? '#4f9a6a' : '#3f8a5e') : '#1d4e44';
+        // a long tapering leaf: widest a third of the way out
+        const nx = -Math.sin(la) * L * 0.13;
+        const ny = Math.cos(la) * L * 0.13;
+        const mx = px + (lx - px) * 0.35;
+        const my = py + (ly - py) * 0.35;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.quadraticCurveTo(mx + nx, my + ny, lx, ly);
+        g.quadraticCurveTo(mx - nx, my - ny, px, py);
+        g.fill();
+      }
+    }
+  }
+  g.strokeStyle = '#2d5a3a';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(x, y);
+  g.quadraticCurveTo(qx, qy, ex, ey);
+  g.stroke();
+}
+
+/** Grass blades rising from the bottom edge between x0 and x1. */
+function grass(g: Ctx, rng: Rng, x0: number, x1: number, bottom: number, tall: number, colors: string[]) {
+  for (let i = 0; i < 26; i++) {
+    const x = rng.range(x0, x1);
+    const hgt = tall * rng.range(0.45, 1) * (1 - (x - x0) / (x1 - x0) * 0.55);
+    const lean = rng.range(-0.25, 0.45) * hgt;
+    g.fillStyle = colors[i % colors.length];
+    g.beginPath();
+    g.moveTo(x - 5, bottom);
+    g.quadraticCurveTo(x + lean * 0.3, bottom - hgt * 0.6, x + lean, bottom - hgt);
+    g.quadraticCurveTo(x + lean * 0.4 + 2, bottom - hgt * 0.5, x + 6, bottom);
+    g.closePath();
+    g.fill();
+  }
+}
+
+/** A hanging vine from (x, 0) with small leaves; returns its tip. */
+function vine(g: Ctx, rng: Rng, x: number, len: number, stem: string, leaf: string, flower?: string): Pt {
+  let px = x;
+  let py = -4;
+  g.strokeStyle = stem;
+  g.lineWidth = 2.5;
+  g.beginPath();
+  g.moveTo(px, py);
+  const pts: Pt[] = [];
+  for (let y = 0; y <= len; y += 12) {
+    px = x + Math.sin(y * 0.045 + x) * 7;
+    py = y;
+    g.lineTo(px, py);
+    pts.push([px, py]);
+  }
+  g.stroke();
+  for (let i = 1; i < pts.length; i++) {
+    const [lx, ly] = pts[i];
+    const side = i % 2 ? 1 : -1;
+    g.fillStyle = leaf;
+    g.beginPath();
+    g.ellipse(lx + side * 7, ly, 8, 4, side * 0.6, 0, TAU);
+    g.fill();
+    if (flower && rng.next() < 0.22) {
+      g.fillStyle = flower;
+      g.beginPath();
+      g.arc(lx - side * 5, ly + 3, 3.5, 0, TAU);
+      g.fill();
+    }
+  }
+  return [px, py];
+}
+
+function islesFrame(g: Ctx, rng: Rng, h: number) {
+  // an overhanging Sunleaf bough in the top-left corner with a few hanging vines
+  g.strokeStyle = '#5a3f2a';
+  g.lineWidth = 16;
+  g.beginPath();
+  g.moveTo(-20, 70);
+  g.quadraticCurveTo(110, 22, 300, 6);
+  g.stroke();
+  g.strokeStyle = 'rgba(255,230,180,0.35)';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(-20, 63);
+  g.quadraticCurveTo(110, 15, 296, 0);
+  g.stroke();
+  for (const x of [70, 150, 240]) vine(g, rng, x, rng.range(70, 150), '#3c6a3a', '#4f9a52');
+  for (const [x, y, r] of [
+    [10, 40, 52],
+    [95, 10, 48],
+    [190, -4, 44],
+    [285, -10, 38],
+  ] as const)
+    leafCluster(g, rng, x, y, r, '#1f5a3a', '#2f7d4a', 'rgba(214,255,190,0.55)');
+  // ferns and grass in the lower-left corner
+  frond(g, -10, h + 6, 210, -1.0, -40, 30, '#1f5a3a', '#3f8f4f');
+  frond(g, 30, h + 10, 170, -1.35, 30, 24, '#24603e', '#4c9c58');
+  grass(g, rng, -10, 230, h + 4, 120, ['#2a6a40', '#3a8a4c', '#235a36']);
+}
+
+function canyonFrame(g: Ctx, rng: Rng, h: number) {
+  // sandstone overhang with flowering vines
+  g.fillStyle = '#8a4a2e';
+  g.beginPath();
+  g.moveTo(-10, -10);
+  g.lineTo(330, -10);
+  g.quadraticCurveTo(250, 30, 160, 34);
+  g.quadraticCurveTo(70, 52, -10, 96);
+  g.closePath();
+  g.fill();
+  g.fillStyle = 'rgba(255,190,120,0.35)';
+  g.beginPath();
+  g.moveTo(-10, 80);
+  g.quadraticCurveTo(70, 40, 160, 26);
+  g.quadraticCurveTo(250, 22, 330, -10);
+  g.lineTo(330, -4);
+  g.quadraticCurveTo(250, 30, 160, 34);
+  g.quadraticCurveTo(70, 52, -10, 96);
+  g.closePath();
+  g.fill();
+  for (const x of [30, 90, 150, 215, 270]) vine(g, rng, x, rng.range(60, 170) - x * 0.15, '#5a6a2a', '#7a9a3a', '#ff8a5a');
+  // dry grass and a weathered rock in the lower-left corner
+  g.fillStyle = '#7a3e28';
+  g.beginPath();
+  g.ellipse(70, h + 10, 120, 54, -0.1, Math.PI, TAU);
+  g.fill();
+  g.fillStyle = 'rgba(255,186,120,0.4)';
+  g.beginPath();
+  g.ellipse(52, h - 22, 70, 18, -0.15, Math.PI, TAU);
+  g.fill();
+  grass(g, rng, -10, 250, h + 4, 110, ['#b07a3a', '#c8924a', '#8a5a2a']);
+}
+
+function coastFrame(g: Ctx, rng: Rng, h: number) {
+  // a leaning palm crown in the top-left corner: broad, drooping fronds around a crown
+  for (const [ang, len, curl] of [
+    [0.12, 340, 70],
+    [0.55, 300, 60],
+    [1.0, 250, 40],
+    [-0.25, 260, 50],
+  ] as const)
+    palmFrond(g, 30, -30, len, ang, curl);
+  g.fillStyle = '#6a4a2a';
+  g.beginPath();
+  g.ellipse(30, -26, 34, 22, 0.3, 0, TAU);
+  g.fill();
+  // beach grass and a pale rock with shells
+  g.fillStyle = '#c9c2ae';
+  g.beginPath();
+  g.ellipse(60, h + 14, 130, 50, 0, Math.PI, TAU);
+  g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.5)';
+  g.beginPath();
+  g.ellipse(40, h - 22, 70, 14, -0.1, Math.PI, TAU);
+  g.fill();
+  for (const [x, y] of [
+    [110, h - 18],
+    [150, h - 6],
+  ] as const) {
+    g.fillStyle = '#f2c4b4';
+    g.beginPath();
+    g.ellipse(x, y, 9, 7, 0, 0, TAU);
+    g.fill();
+  }
+  grass(g, rng, 120, 260, h + 4, 95, ['#5a8a4a', '#7aa85a', '#4a7a40']);
+}
+
+function frostFrame(g: Ctx, rng: Rng, h: number) {
+  // a frozen rock overhang in the top-left corner: snow along its lip and a fringe of icicles
+  const lip: Pt[] = [];
+  for (let x = -20; x <= 360; x += 22) lip.push([x, 118 - x * 0.3 + Math.sin(x * 0.03) * 8 + rng.range(-4, 4)]);
+  g.fillStyle = '#3c4a6c';
+  g.beginPath();
+  g.moveTo(-20, -10);
+  g.lineTo(340, -10);
+  for (let i = lip.length - 1; i >= 0; i--) g.lineTo(lip[i][0], lip[i][1]);
+  g.closePath();
+  g.fill();
+  g.fillStyle = 'rgba(30,40,70,0.45)';
+  g.beginPath();
+  for (const [x, y] of lip) g.lineTo(x, y);
+  for (let i = lip.length - 1; i >= 0; i--) g.lineTo(lip[i][0], lip[i][1] - 16);
+  g.closePath();
+  g.fill();
+  // icicles: translucent, longest near the corner
+  for (let i = 0; i < lip.length - 1; i++) {
+    for (let j = 0; j < 2; j++) {
+      const t = rng.range(0, 1);
+      const x = lip[i][0] + (lip[i + 1][0] - lip[i][0]) * t;
+      const y = lip[i][1] + (lip[i + 1][1] - lip[i][1]) * t - 2;
+      const len = rng.range(14, 52) * (1 - x / 520);
+      const w = rng.range(4, 8);
+      g.fillStyle = 'rgba(206,238,255,0.85)';
+      g.beginPath();
+      g.moveTo(x - w, y);
+      g.quadraticCurveTo(x - w * 0.3, y + len * 0.6, x + rng.range(-2, 2), y + len);
+      g.quadraticCurveTo(x + w * 0.3, y + len * 0.6, x + w, y);
+      g.closePath();
+      g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      g.fillRect(x - w * 0.45, y + 2, 1.6, len * 0.5);
+    }
+  }
+  // snow resting on the lip, in soft lumps
+  for (const [x, y] of lip) {
+    const r = rng.range(8, 13);
+    g.fillStyle = 'rgba(150,176,220,0.7)';
+    g.beginPath();
+    g.ellipse(x + 2, y - 1, r * 1.3, r * 0.5, 0, 0, TAU);
+    g.fill();
+    g.fillStyle = '#f5f9ff';
+    g.beginPath();
+    g.ellipse(x, y - 4, r * 1.3, r * 0.5, 0, 0, TAU);
+    g.fill();
+  }
+  // frost-lit cracks on the underside
+  g.strokeStyle = 'rgba(190,220,255,0.35)';
+  g.lineWidth = 2;
+  for (let i = 1; i < lip.length - 2; i += 2) {
+    g.beginPath();
+    g.moveTo(lip[i][0], lip[i][1] - 14);
+    g.lineTo(lip[i][0] + 14, lip[i][1] - 34);
+    g.stroke();
+  }
+  // snow drift with ice shards in the lower-left corner
+  g.fillStyle = '#eef6ff';
+  g.beginPath();
+  g.ellipse(80, h + 20, 170, 66, 0, Math.PI, TAU);
+  g.fill();
+  g.fillStyle = 'rgba(170,200,240,0.45)';
+  g.beginPath();
+  g.ellipse(120, h + 12, 120, 30, 0, Math.PI, TAU);
+  g.fill();
+  for (const [x, hh, lean] of [
+    [40, 90, -0.15],
+    [70, 60, 0.12],
+    [180, 52, 0.25],
+  ] as const) {
+    g.fillStyle = 'rgba(200,236,255,0.85)';
+    g.beginPath();
+    g.moveTo(x - 12, h - 30);
+    g.lineTo(x + lean * hh, h - 30 - hh);
+    g.lineTo(x + 12, h - 30);
+    g.closePath();
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.8)';
+    g.beginPath();
+    g.moveTo(x - 6, h - 30);
+    g.lineTo(x + lean * hh, h - 30 - hh);
+    g.lineTo(x - 1, h - 30);
+    g.closePath();
+    g.fill();
+  }
+}
+
+function stormFrame(g: Ctx, rng: Rng, h: number) {
+  // a dark rock overhang with a hanging chain and glowing crystals
+  g.fillStyle = '#1e1a3a';
+  g.beginPath();
+  g.moveTo(-10, -10);
+  g.lineTo(300, -10);
+  g.lineTo(240, 26);
+  g.lineTo(150, 38);
+  g.lineTo(90, 70);
+  g.lineTo(-10, 92);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = 'rgba(176,156,255,0.6)';
+  g.lineWidth = 2.5;
+  g.beginPath();
+  g.moveTo(-10, 88);
+  g.lineTo(90, 66);
+  g.lineTo(150, 34);
+  g.lineTo(240, 22);
+  g.stroke();
+  g.strokeStyle = '#4a4470';
+  g.lineWidth = 3;
+  for (let y = 40; y < 170; y += 12) {
+    g.beginPath();
+    g.ellipse(200 + Math.sin(y * 0.05) * 3, y, 4, 6.5, 0, 0, TAU);
+    g.stroke();
+  }
+  const crystal = (x: number, y: number, hh: number, lean: number) => {
+    const cg = g.createRadialGradient(x, y - hh / 2, 0, x, y - hh / 2, hh);
+    cg.addColorStop(0, 'rgba(160,220,255,0.45)');
+    cg.addColorStop(1, 'rgba(160,220,255,0)');
+    g.fillStyle = cg;
+    g.fillRect(x - hh, y - hh * 1.5, hh * 2, hh * 2);
+    g.fillStyle = '#6a5ad8';
+    g.beginPath();
+    g.moveTo(x - 9, y);
+    g.lineTo(x + lean, y - hh);
+    g.lineTo(x + 9, y);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#c6e6ff';
+    g.beginPath();
+    g.moveTo(x - 3, y);
+    g.lineTo(x + lean, y - hh);
+    g.lineTo(x + 2, y);
+    g.closePath();
+    g.fill();
+  };
+  // a few under the overhang, pointing down
+  g.save();
+  g.scale(1, -1);
+  crystal(60, -76, 34, 4);
+  crystal(130, -42, 26, -3);
+  g.restore();
+  g.fillStyle = '#211c40';
+  g.beginPath();
+  g.ellipse(70, h + 14, 150, 56, 0, Math.PI, TAU);
+  g.fill();
+  crystal(40, h - 26, 80, -10);
+  crystal(78, h - 30, 58, 8);
+  crystal(120, h - 22, 44, 12);
+  grass(g, rng, 140, 260, h + 4, 70, ['#2c2650', '#3a3466']);
+}
+
+// Live layer: cloud bands are cached sprites (per region and device scale, bounded), drawn
+// at whole-device-pixel offsets; motes and birds are a few small shapes.
+const cloudSprites = new Map<string, HTMLCanvasElement>();
+const CLOUD_W = 1400;
+
+function cloudBand(region: RegionId, kind: 'far' | 'mist', k: number): HTMLCanvasElement {
+  const key = `${region}:${kind}:${k.toFixed(3)}`;
+  let c = cloudSprites.get(key);
+  if (c) return c;
+  const m = MOODS[region];
+  const bh = kind === 'far' ? 170 : 130;
+  c = document.createElement('canvas');
+  c.width = Math.ceil(CLOUD_W * k);
+  c.height = Math.ceil(bh * k);
+  const g = c.getContext('2d')!;
+  g.scale(k, k);
+  const rng = createRng(region.length * 11 + (kind === 'far' ? 1 : 2));
+  const n = kind === 'far' ? 16 : 22;
+  for (let i = 0; i < n; i++) {
+    const x = rng.range(0, CLOUD_W);
+    const y = bh * (kind === 'far' ? rng.range(0.35, 0.7) : rng.range(0.45, 0.75));
+    const r = kind === 'far' ? rng.range(40, 90) : rng.range(50, 110);
+    const a = kind === 'far' ? rng.range(0.22, 0.42) : rng.range(0.16, 0.3);
+    // wrap seamlessly: puffs near an edge are drawn again one width over
+    for (const dx of [-CLOUD_W, 0, CLOUD_W]) {
+      const px = x + dx;
+      if (px + r < 0 || px - r > CLOUD_W) continue;
+      g.save();
+      g.translate(px, y);
+      g.scale(1, kind === 'far' ? 0.42 : 0.3);
+      const pg = g.createRadialGradient(0, 0, 0, 0, 0, r);
+      pg.addColorStop(0, `rgba(${m.cloud},${a})`);
+      pg.addColorStop(0.6, `rgba(${m.cloud},${a * 0.55})`);
+      pg.addColorStop(1, `rgba(${m.cloud},0)`);
+      g.fillStyle = pg;
+      g.fillRect(-r, -r, r * 2, r * 2);
+      g.restore();
+    }
+  }
+  cloudSprites.set(key, c);
+  while (cloudSprites.size > 12) cloudSprites.delete(cloudSprites.keys().next().value!);
+  return c;
+}
+
+function drawBand(ctx: Ctx, c: HTMLCanvasElement, y: number, bh: number, off: number, w: number) {
+  const m = ctx.getTransform();
+  const px = Math.abs(m.a) || 1;
+  const o = Math.round((((off % CLOUD_W) + CLOUD_W) % CLOUD_W) * px) / px;
+  for (let x = -o; x < w; x += CLOUD_W) ctx.drawImage(c, x, y, CLOUD_W, bh);
+}
+
+/** Live overlook layer; `t` is 0 and `still` true under reduced motion or low effects. */
+function drawOverlookLive(ctx: Ctx, region: RegionId, w: number, h: number, k: number, t: number, still: boolean) {
+  const m = MOODS[region];
+  const s = h / 660;
+  drawBand(ctx, cloudBand(region, 'far', k), h * 0.1, 170, 260 + t * 7, w);
+  drawBand(ctx, cloudBand(region, 'mist', k), h - 120 * s, 130, 600 + t * 16, w);
+  if (still) return;
+  // motes drifting through the light: pollen, embers, sea spray, ice glints or storm sparks
+  const n = 16;
+  for (let i = 0; i < n; i++) {
+    const seed = i * 97.13;
+    const sp = 6 + (i % 5) * 3;
+    const rise = m.motes === 'ember' || m.motes === 'spark' ? -10 - (i % 3) * 4 : m.motes === 'glint' ? 6 : -3;
+    const x = ((seed * 7.3 + t * sp) % (w * 0.72)) + w * 0.02;
+    const y = (((seed * 3.1 + t * rise) % (h * 0.7)) + h * 0.7) % (h * 0.7) + h * 0.08;
+    const tw = 0.5 + 0.5 * Math.sin(t * (1.3 + (i % 4) * 0.4) + seed);
+    ctx.globalAlpha = 0.25 + 0.55 * tw;
+    ctx.fillStyle = `rgb(${m.mote})`;
+    ctx.beginPath();
+    ctx.arc(x + Math.sin(t * 0.7 + seed) * 8, y, m.motes === 'spark' || m.motes === 'glint' ? 1.6 : 2.2, 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  if (!m.birds) return;
+  // two distant birds gliding across the far sky, with an occasional lazy flap
+  ctx.strokeStyle = region === 'canyon' ? 'rgba(90,40,40,0.55)' : 'rgba(40,70,80,0.5)';
+  ctx.lineWidth = 1.6;
+  for (let i = 0; i < 2; i++) {
+    const period = 46 + i * 17;
+    const p = ((t + i * 23) % period) / period;
+    const x = -40 + p * (w * 0.75);
+    const y = h * (0.2 + i * 0.07) + Math.sin(t * 0.4 + i) * 10;
+    const flap = Math.sin(t * (i ? 5.5 : 4.2)) * (Math.sin(t * 0.5 + i * 2) > 0.3 ? 1 : 0.15);
+    const bw = 7 - i * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - bw, y - 2 - flap * 3);
+    ctx.quadraticCurveTo(x - bw * 0.4, y - 3 - flap * 2, x, y);
+    ctx.quadraticCurveTo(x + bw * 0.4, y - 3 - flap * 2, x + bw, y - 2 - flap * 3);
+    ctx.stroke();
+  }
 }

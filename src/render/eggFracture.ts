@@ -39,7 +39,7 @@ export interface EggShapeSpec {
 
 const SHAPE: Record<SpeciesId, EggShapeSpec> = {
   ember: { w: 0.74, eT: 0.56, eB: 0.5, a: 0.1 },
-  cinder: { w: 0.67, eT: 0.64, eB: 0.46, a: 0.05, foot: 0.13 },
+  cinder: { w: 0.68, eT: 0.64, eB: 0.4, a: 0.04 },
   pyrelisk: { w: 0.84, eT: 0.5, eB: 0.42, a: 0.06, facets: [7, 7] },
   solpyre: { w: 0.76, eT: 0.52, eB: 0.48, a: 0.1 },
   tide: { w: 0.74, eT: 0.56, eB: 0.5, a: 0.12 },
@@ -795,8 +795,9 @@ export function drawFracture(ctx: Ctx, id: SpeciesId, x: number, y: number, h: n
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   const widen = 0.7 + 0.6 * p;
+  const a0 = ctx.globalAlpha;
   const pass = (color: string, w: number, dx: number, dy: number, alpha: number, op: GlobalCompositeOperation = 'source-over') => {
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = a0 * alpha;
     ctx.globalCompositeOperation = op;
     ctx.strokeStyle = color;
     ctx.lineWidth = w;
@@ -826,7 +827,7 @@ export function drawFracture(ctx: Ctx, id: SpeciesId, x: number, y: number, h: n
   if (tier > 0) {
     const r = seeded(speciesSeed(id) ^ 0x51ed);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 0.75;
+    ctx.globalAlpha = a0 * 0.75;
     ctx.strokeStyle = style.line;
     ctx.lineWidth = lw * 0.5;
     ctx.beginPath();
@@ -869,6 +870,7 @@ export function drawShellFragments(ctx: Ctx, id: SpeciesId, shell: ShellImage, x
   const fr = eggFracture(id);
   const u = 1 / h;
   const body = eggBodyPath(id);
+  const a0 = ctx.globalAlpha;
   // far pieces first
   const order = [...fr.fragments].sort((a, b) => a.depth - b.depth);
   for (const f of order) {
@@ -881,7 +883,7 @@ export function drawShellFragments(ctx: Ctx, id: SpeciesId, shell: ShellImage, x
     ctx.rotate(pose.rot);
     ctx.scale(pose.scale, pose.scale);
     ctx.translate(-f.pivot[0], -f.pivot[1]);
-    ctx.globalAlpha = pose.alpha;
+    ctx.globalAlpha = a0 * pose.alpha;
     const clip = polyPath(`frag:${id}:${f.index}`, f.clip);
     ctx.clip(clip);
     ctx.drawImage(shell.canvas, shell.box.x, shell.box.y, shell.box.w, shell.box.h);
@@ -900,7 +902,7 @@ export function drawShellFragments(ctx: Ctx, id: SpeciesId, shell: ShellImage, x
     ctx.stroke(clip);
     if (style.glow) {
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = pose.alpha * 0.5 * (1 - t);
+      ctx.globalAlpha = a0 * pose.alpha * 0.5 * (1 - t);
       ctx.strokeStyle = `rgb(${style.glow})`;
       ctx.lineWidth = Math.max(3 * u, 0.03);
       ctx.stroke(clip);

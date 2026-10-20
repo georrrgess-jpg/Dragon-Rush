@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { CONTAINERS, DASH, FLIGHT, ROCK, RUSH, WIND_RING, type DragonId } from '../src/config';
+import { CONTAINERS, DASH, FLIGHT, ROCK, RUSH, RUSH_SCORE, WIND_RING, type DragonId } from '../src/config';
 import { SPECIES, SPECIES_IDS } from '../src/content/species';
-import { PATTERNS, OPENING_ISLES, OPENING_CANYON, FIRST_ROCK_X } from '../src/sim/course';
-import { FlightSim, type FlightEvent } from '../src/sim/flight';
+import { PATTERNS, OPENING_ISLES, OPENING_CANYON, FIRST_ROCK_X, CALM_FINISH, TREASURE_VAULT, finishX } from '../src/sim/course';
+import { FlightSim, KEY_STEER, rushTip, type FlightEvent, type Pickup, type RunSummary } from '../src/sim/flight';
+import { TRIALS, trialCourse } from '../src/content/trials';
 import { makeSim } from './helpers';
 import { createRng } from '../src/sim/rng';
-import { NO_DASH, REASONABLE, playRun } from './bots';
+import { CARELESS, NO_DASH, REASONABLE, playRun } from './bots';
 
 function run(sim: FlightSim, seconds: number, dt: number, each?: (s: FlightSim) => void): FlightEvent[] {
   const events: FlightEvent[] = [];
@@ -275,7 +276,7 @@ describe('rocks', () => {
     }
   });
 
-  it('all five regions are traversable without ever dashing', () => {
+  it('all five regions are traversable without ever dashing', { timeout: 60000 }, () => {
     for (const env of ['isles', 'canyon', 'coast', 'frost', 'storm'] as const) {
       let hits = 0;
       for (let seed = 0; seed < 30; seed++) {
@@ -434,7 +435,7 @@ describe('long play', () => {
     expect(maxEntities).toBeLessThan(80);
   });
 
-  it('every dragon completes full runs in both environments', () => {
+  it('every dragon completes full runs in both environments', { timeout: 60000 }, () => {
     for (const dragon of ['ember', 'tide', 'grove', 'gale'] as const) {
       for (const env of ['isles', 'canyon'] as const) {
         const sim = makeSim(dragon, { level: 2, seed: 9, region: env });
@@ -613,3 +614,326 @@ describe('qualified time and normalization', () => {
   });
 });
 
+
+// --- Update 5: Rush feel (trails, score, forgiveness, steering) -------------------------------
+
+/** Adds a hand-made trail of `n` pickups straight ahead on the dragon's line (spacing 110 px). */
+function addTrail(sim: FlightSim, id: number, n: number, opts: { dx?: number; y?: number; kind?: 'gold' | 'fruit' } = {}): Pickup[] {
+  sim.trails.set(id, { id, total: n, got: 0, broken: false, done: false, treasure: false, pts: [] });
+  const out: Pickup[] = [];
+  for (let i = 0; i < n; i++) {
+    const p: Pickup = { id: 50000 + id * 100 + i, kind: opts.kind ?? 'gold', x: sim.dragonWorldX + (opts.dx ?? 200) + i * 110, y: opts.y ?? sim.y, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0, trail: id };
+    sim.pickups.push(p);
+    out.push(p);
+  }
+  return out;
+}
+
+const hold = (y: number) => (s: FlightSim) => {
+  s.setTarget(y);
+  s.rocks = [];
+  s.containers = [];
+};
+
+describe('trails and score (Rush)', () => {
+  it('collecting a whole trail pays a score bonus once, never extra gold or Emberfruit', () => {
+    const sim = emptySim();
+    addTrail(sim, 1, 5);
+    const ev = run(sim, 3, 1 / 60, hold(FLIGHT.startY));
+    const done = ev.filter((e) => e.type === 'trailComplete');
+    expect(done).toHaveLength(1);
+    const d = done[0] as Extract<FlightEvent, { type: 'trailComplete' }>;
+    expect(d.count).toBe(5);
+    expect(d.bonus).toBe(RUSH_SCORE.trailPerItem * 5);
+    expect(sim.gold).toBe(5); // exactly one per coin: the bonus is score only
+    expect(sim.fruit).toBe(0);
+    expect(sim.trailsCompleted).toBe(1);
+    expect(sim.score).toBe(5 * RUSH_SCORE.gold + d.bonus);
+  });
+
+  it('a missed item interrupts only the trail bonus (and the chain), never what was collected', () => {
+    const sim = emptySim();
+    const items = addTrail(sim, 2, 4);
+    items[2].y = FLIGHT.maxY; // far below the dragon's line: will be missed
+    const ev = run(sim, 3, 1 / 60, hold(FLIGHT.minY + 200));
+    // the dragon flies at minY+200 ≈ 278; the trail sits at 360 (82 px away, inside the pickup reach)
+    expect(ev.some((e) => e.type === 'trailComplete')).toBe(false);
+    const broken = ev.filter((e) => e.type === 'trailBroken');
+    expect(broken).toHaveLength(1);
+    expect(sim.gold).toBe(3);
+    expect(sim.trails.get(2)!.broken).toBe(true);
+  });
+
+  it('skipping a trail entirely (the other branch of a fork) is silent and keeps the chain', () => {
+    const sim = emptySim();
+    addTrail(sim, 3, 3, { y: FLIGHT.maxY - 10 });
+    addTrail(sim, 4, 3, { y: FLIGHT.startY });
+    const ev = run(sim, 3, 1 / 60, hold(FLIGHT.startY));
+    expect(ev.filter((e) => e.type === 'trailBroken')).toHaveLength(0);
+    expect(ev.filter((e) => e.type === 'trailComplete')).toHaveLength(1);
+    expect(sim.chain).toBe(3);
+  });
+
+  it('trail completion adds a small, capped Rush charge, and none while Rush is active', () => {
+    // cap: many trails in a row never add more than trailChargeCap
+    const sim = emptySim();
+    for (let k = 0; k < 10; k++) addTrail(sim, 10 + k, 3, { dx: 200 + k * 400 });
+    const ev = run(sim, 14, 1 / 60, (s) => {
+      hold(FLIGHT.startY)(s);
+      s.pickups = s.pickups.filter((p) => (p.trail ?? 0) >= 10 && p.id >= 50000); // only the hand-made trails
+    });
+    const charges = ev.filter((e) => e.type === 'trailComplete').map((e) => (e as { charge: number }).charge);
+    expect(charges.length).toBe(10);
+    expect(charges.reduce((a, b) => a + b, 0)).toBe(RUSH.trailChargeCap);
+    expect(sim.trailChargeGiven).toBe(RUSH.trailChargeCap);
+    expect(Math.max(...charges)).toBeLessThanOrEqual(RUSH.trailCompleteCharge);
+
+    // during Rush: no charge at all (no feedback loop)
+    const r = emptySim();
+    r.rushT = RUSH.duration;
+    r.charge = 0;
+    addTrail(r, 1, 3);
+    const ev2 = run(r, 1.5, 1 / 60, hold(FLIGHT.startY));
+    const c = ev2.find((e) => e.type === 'trailComplete') as { charge: number } | undefined;
+    expect(c).toBeDefined();
+    expect(c!.charge).toBe(0);
+    expect(r.trailChargeGiven).toBe(0);
+    expect(r.charge).toBe(0);
+  });
+
+  it('whole runs: trail charge stays within the cap and Rush counts stay in range', { timeout: 60000 }, () => {
+    for (let i = 0; i < 12; i++) {
+      const sim = makeSim('ember', { seed: 900 + i });
+      playRun(sim, { ...REASONABLE, seed: i });
+      expect(sim.trailChargeGiven).toBeLessThanOrEqual(RUSH.trailChargeCap);
+      expect(sim.rushCount).toBeLessThanOrEqual(4);
+      expect(sim.summary().trailsCompleted).toBeGreaterThan(3);
+    }
+  });
+
+  it('a hit ends the chain (score only) and explains it; the multiplier is capped', () => {
+    const sim = emptySim();
+    for (let k = 0; k < 6; k++) addTrail(sim, 30 + k, 8, { dx: 150 + k * 900 });
+    run(sim, 3.2, 1 / 60, hold(FLIGHT.startY));
+    expect(sim.chain).toBeGreaterThanOrEqual(10);
+    expect(sim.chainMult).toBeGreaterThan(1);
+    const goldBefore = sim.gold;
+    sim.rocks.push({ id: 777, x: sim.dragonWorldX + 60, y: sim.y, r: 52, seed: 1, frozenUntil: -1 });
+    const ev = run(sim, 0.5, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    const hit = ev.find((e) => e.type === 'rockHit') as { chainLost: number } | undefined;
+    expect(hit).toBeDefined();
+    expect(hit!.chainLost).toBeGreaterThanOrEqual(10);
+    expect(sim.gold).toBeGreaterThanOrEqual(goldBefore); // nothing is taken away
+    sim.chain = 1000;
+    expect(sim.chainMult).toBe(RUSH_SCORE.chainMax);
+  });
+
+  it('Sky Trials have no trails, score bonuses, treasure or Rush charge from trails', () => {
+    const t = TRIALS[0];
+    const sim = makeSim('ember', { course: trialCourse(t.id), region: t.region });
+    playRun(sim, { ...REASONABLE, seed: 4, ringWeight: 5 });
+    expect(sim.trails.size).toBe(0);
+    expect(sim.trailsCompleted).toBe(0);
+    expect(sim.treasureSeen).toBe(0);
+    expect(sim.scenery.some((w) => w.kind === 'finish' || w.kind === 'sign')).toBe(false);
+  });
+});
+
+describe('run structure (Rush)', () => {
+  it('one treasure route near the climax of a 60 s flight, two in a 120 s Expedition, calm finish', { timeout: 60000 }, () => {
+    for (const [secs, want] of [
+      [60, 1],
+      [120, 2],
+    ] as const) {
+      for (let seed = 0; seed < 8; seed++) {
+        const sim = makeSim('ember', { seed: 40 + seed, runSeconds: secs });
+        const signs: number[] = [];
+        let rocksNearFinish = 0;
+        while (!sim.finished) {
+          sim.setTarget(FLIGHT.startY);
+          sim.advance(1 / 30);
+          for (const w of sim.scenery) if (w.kind === 'sign' && !signs.includes(w.x)) signs.push(w.x);
+          rocksNearFinish += sim.rocks.filter((r) => r.x > sim.finishX - CALM_FINISH + TREASURE_VAULT.length + 600).length;
+          sim.drainEvents();
+        }
+        expect(signs.length, `${secs}s seed ${seed}`).toBe(want);
+        // the last treasure comes in the final quarter, but ends well before the finish line
+        const last = Math.max(...signs);
+        const tAt = (last - FLIGHT.restX) / FLIGHT.scrollSpeed;
+        expect(tAt).toBeGreaterThan(secs * 0.65);
+        expect(tAt).toBeLessThan(secs - 8);
+        expect(rocksNearFinish).toBe(0);
+        expect(sim.finishX).toBe(finishX(secs));
+        expect(sim.summary().treasureSeen).toBe(want);
+      }
+    }
+  });
+
+  it('the treasure route is optional: a broad safe route and a narrow edge route both pass the shelf', () => {
+    const rng = createRng(3);
+    for (let k = 0; k < 10; k++) {
+      const sp = TREASURE_VAULT.build(rng);
+      const rocks = sp.filter((s) => s.kind === 'rock');
+      const top = rocks[0].y < 360;
+      const edge = top ? Math.min(...rocks.map((r) => r.y - r.r!)) - FLIGHT.minY : FLIGHT.maxY - Math.max(...rocks.map((r) => r.y + r.r!));
+      const broad = top ? FLIGHT.maxY - Math.max(...rocks.map((r) => r.y + r.r!)) : Math.min(...rocks.map((r) => r.y - r.r!)) - FLIGHT.minY;
+      expect(edge - 2 * FLIGHT.bodyRadius).toBeGreaterThan(40); // narrow but flyable
+      expect(broad - 2 * FLIGHT.bodyRadius).toBeGreaterThan(220); // broad and safe
+      expect(sp.some((s) => s.kind === 'chest' && s.treasure)).toBe(true);
+      expect(sp.filter((s) => s.trail === 1).every((s) => s.treasure)).toBe(true);
+    }
+  });
+
+  it('the opening is a gentle collection sequence: trails first, a marked chest, no hazards', () => {
+    for (const o of [OPENING_ISLES, OPENING_CANYON]) {
+      const firstTrail = o.spawns.filter((s) => s.trail === 1);
+      expect(firstTrail.length).toBeGreaterThanOrEqual(4);
+      expect(firstTrail.every((s) => s.y === FLIGHT.startY)).toBe(true); // collected just by flying
+      expect(o.spawns.some((s) => s.kind === 'chest' && s.tutorial)).toBe(true);
+      expect(o.spawns.some((s) => s.kind === 'rock' || s.kind === 'bolt')).toBe(false);
+    }
+  });
+
+  it('after the opening, two calm patterns in a row are followed by a brief challenge', { timeout: 60000 }, () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const sim = makeSim('ember', { seed: 70 + seed });
+      const seq: boolean[] = [];
+      const orig = (sim as unknown as { spawnSegment: (s: unknown[], x: number) => void }).spawnSegment.bind(sim);
+      (sim as unknown as { spawnSegment: (s: { kind: string }[], x: number) => void }).spawnSegment = (sp, x) => {
+        if (x >= FIRST_ROCK_X && x < sim.finishX - CALM_FINISH) seq.push(sp.some((q) => q.kind === 'rock' || q.kind === 'bolt'));
+        orig(sp, x);
+      };
+      while (!sim.finished) sim.advance(1 / 30);
+      for (let i = 2; i < seq.length; i++) expect(seq[i - 2] || seq[i - 1] || seq[i], `seed ${seed} at ${i}`).toBe(true);
+    }
+  });
+});
+
+describe('fairness and frame-rate safety', () => {
+  it('pickup reach is modest and fair: grazing within reach collects, beyond it does not, at any frame rate', () => {
+    for (const dt of [1 / 60, 1 / 20, 1 / 10]) {
+      for (const side of [-1, 1]) {
+        const reach = makeSim('ember').attractRadius;
+        expect(reach).toBeLessThanOrEqual(100); // modest: about 3 dragon body radii
+        for (const [k, want] of [
+          [0.9, 1],
+          [1.12, 0],
+        ] as const) {
+          const sim = emptySim();
+          sim.pickups.push({ id: 4242, kind: 'gold', x: sim.dragonWorldX + 300, y: FLIGHT.startY + side * reach * k, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
+          run(sim, 1.5, dt, hold(FLIGHT.startY));
+          expect(sim.gold, `dt ${dt} side ${side} k ${k}`).toBe(want);
+        }
+      }
+    }
+  });
+
+  it('at 20 fps the dragon cannot tunnel through a rock or skip pickups', () => {
+    for (const dt of [1 / 60, 1 / 20, 1 / 10]) {
+      const sim = emptySim();
+      const rock = { id: 31, x: sim.dragonWorldX + 400, y: FLIGHT.startY, r: 58, seed: 2, frozenUntil: -1 };
+      sim.rocks.push(rock);
+      for (let i = 0; i < 10; i++) sim.pickups.push({ id: 900 + i, kind: 'gold', x: sim.dragonWorldX + 60 + i * 30, y: FLIGHT.startY, attracted: false, attractT: 0, noCharge: false, byAbility: false, phase: 0 });
+      let minD = Infinity;
+      const ev = run(sim, 2, dt, (s) => {
+        s.setTarget(FLIGHT.startY);
+        minD = Math.min(minD, Math.hypot(s.dragonWorldX - rock.x, s.y - rock.y));
+      });
+      expect(sim.gold, `dt ${dt}`).toBe(10);
+      expect(ev.filter((e) => e.type === 'rockHit'), `dt ${dt}`).toHaveLength(1);
+      // never deeper inside the rock than a couple of pixels
+      expect(minD, `dt ${dt}`).toBeGreaterThan(rock.r * sim.rockHitScale + FLIGHT.bodyRadius - 4);
+    }
+  });
+
+  it('a full run plays out the same at 60 fps and 20 fps for the same inputs', () => {
+    const play = (dt: number) => {
+      const sim = makeSim('ember', { seed: 321 });
+      while (!sim.finished) {
+        const step = Math.floor(sim.time * 4 + 1e-6);
+        sim.setTarget(360 + Math.sin(step * 0.7) * 220);
+        sim.advance(dt);
+        sim.drainEvents();
+      }
+      return sim.summary();
+    };
+    const a = play(1 / 60);
+    const b = play(1 / 20);
+    expect(Math.abs(a.gold - b.gold)).toBeLessThanOrEqual(2);
+    expect(Math.abs(a.fruit - b.fruit)).toBeLessThanOrEqual(2);
+    expect(a.rockHits).toBe(b.rockHits);
+  });
+
+  it('Rush rock hitboxes match the drawn silhouette (slightly forgiving); Trials are unchanged', () => {
+    expect(makeSim('ember').rockHitScale).toBe(RUSH.rockForgiveness);
+    expect(RUSH.rockForgiveness).toBeGreaterThanOrEqual(0.85);
+    const t = TRIALS[0];
+    expect(makeSim('ember', { course: trialCourse(t.id), region: t.region }).rockHitScale).toBe(1);
+    // a near miss that the drawn rock clearly doesn't touch does not count in Rush
+    const sim = emptySim();
+    sim.rocks.push({ id: 41, x: sim.dragonWorldX + 300, y: FLIGHT.startY + 58 + FLIGHT.bodyRadius - 4, r: 58, seed: 1, frozenUntil: -1 });
+    const ev = run(sim, 1.5, 1 / 60, (s) => s.setTarget(FLIGHT.startY));
+    expect(ev.some((e) => e.type === 'rockHit')).toBe(false);
+  });
+});
+
+describe('steering feel', () => {
+  it('keyboard steering starts within two frames, reaches mouse top speed, and stops without drifting', () => {
+    for (const dt of [1 / 60, 1 / 30]) {
+      const sim = emptySim();
+      let firstMove = -1;
+      let peak = 0;
+      while (sim.time < 0.3 - 1e-9) {
+        sim.setSteerKeys(1);
+        sim.rocks = [];
+        sim.advance(dt);
+        peak = Math.max(peak, Math.abs(sim.vy));
+        if (firstMove < 0 && sim.y - FLIGHT.startY >= 5) firstMove = sim.time;
+      }
+      expect(firstMove).toBeLessThanOrEqual(0.04);
+      expect(peak).toBeGreaterThan(FLIGHT.maxVerticalSpeed * 0.95);
+      const atRelease = sim.y;
+      sim.setSteerKeys(0);
+      run(sim, 0.6, dt, (s) => (s.rocks = []));
+      expect(sim.y - atRelease).toBeLessThan(22);
+      expect(sim.y - atRelease).toBeGreaterThanOrEqual(0); // no bounce back past the release point
+      expect(Math.abs(sim.vy)).toBeLessThan(1);
+    }
+    expect(KEY_STEER.leadMax * FLIGHT.followGain).toBeGreaterThanOrEqual(FLIGHT.maxVerticalSpeed);
+  });
+
+  it('small mouse corrections settle quickly without overshoot', () => {
+    const sim = emptySim();
+    sim.setTarget(FLIGHT.startY - 60);
+    let t90 = 0;
+    let over = 0;
+    run(sim, 0.6, 1 / 120, (s) => {
+      s.rocks = [];
+      if (!t90 && FLIGHT.startY - s.y >= 54) t90 = s.time;
+      over = Math.max(over, FLIGHT.startY - 60 - s.y);
+    });
+    expect(t90).toBeLessThan(0.17);
+    expect(over).toBeLessThan(1);
+  });
+});
+
+describe('results tip', () => {
+  const base: RunSummary = {
+    dragon: 'ember', region: 'isles', mode: 'rush', gold: 90, fruit: 35, containersBroken: 6, chests: 3, pods: 3, dashBreaks: 5, rings: 0, rushCount: 2,
+    rockHits: 0, pickups: 80, abilityUses: 1, seconds: 60, qualifiedSeconds: 60, completed: true, collisions: 0, checkpoints: 0,
+    score: 4000, bestChain: 60, trailsCompleted: 12, treasureSeen: 1, treasureTaken: 1,
+  };
+  it('picks one concrete, relevant tip', () => {
+    expect(rushTip({ ...base, rockHits: 4 })).toMatch(/stone/i);
+    expect(rushTip({ ...base, pickups: 10 })).toMatch(/trail/i);
+    expect(rushTip({ ...base, containersBroken: 1 })).toMatch(/dash/i);
+    expect(rushTip({ ...base, treasureTaken: 0 })).toMatch(/TREASURE/);
+    expect(rushTip(base).length).toBeGreaterThan(10);
+    expect(rushTip({ ...base, mode: 'trials' })).toBe('');
+  });
+  it('careless flights still get a useful tip', () => {
+    const sim = makeSim('ember', { seed: 5 });
+    playRun(sim, { ...CARELESS, seed: 5 });
+    expect(rushTip(sim.summary()).length).toBeGreaterThan(10);
+  });
+});

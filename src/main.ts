@@ -1,6 +1,8 @@
 import './style.css';
 import './ui.css';
 import './ui/hatchery.css';
+import './ui/rarity.css';
+import './ui/home.css';
 
 const params = new URLSearchParams(location.search);
 if (params.has('gallery')) {

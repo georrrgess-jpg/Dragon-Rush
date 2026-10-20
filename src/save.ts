@@ -196,12 +196,17 @@ export interface AscentRecord {
   /** Best distance with the assist option on (kept separate). */
   bestAssist: number;
   runs: number;
-  /** Furthest region reached (standard rules). */
+  /** Region of the standard best distance (regions rotate every 1000 m). */
   bestRegion: RegionId | null;
+  /** Best score (distance + capped bonuses), standard and assist, kept separately. */
+  bestScore: number;
+  bestScoreAssist: number;
+  /** The player's assist choice for the next run (+1 ward, gentler speed ramp). */
+  assist: boolean;
 }
 
 export function defaultAscent(): AscentRecord {
-  return { best: 0, bestAssist: 0, runs: 0, bestRegion: null };
+  return { best: 0, bestAssist: 0, runs: 0, bestRegion: null, bestScore: 0, bestScoreAssist: 0, assist: false };
 }
 
 // --- defaults -------------------------------------------------------------------------------------
@@ -511,7 +516,15 @@ export function sanitize(raw: unknown): SaveData {
     tutorials: strList(pf.tutorials, 60).map((t) => t.slice(0, 40)),
   };
   const asc = r.ascent ?? {};
-  d.ascent = { best: int(asc.best), bestAssist: int(asc.bestAssist), runs: int(asc.runs), bestRegion: regionId(asc.bestRegion) ?? null };
+  d.ascent = {
+    best: int(asc.best),
+    bestAssist: int(asc.bestAssist),
+    runs: int(asc.runs),
+    bestRegion: regionId(asc.bestRegion) ?? null,
+    bestScore: int(asc.bestScore),
+    bestScoreAssist: int(asc.bestScoreAssist),
+    assist: bool(asc.assist, false),
+  };
   return d;
 }
 

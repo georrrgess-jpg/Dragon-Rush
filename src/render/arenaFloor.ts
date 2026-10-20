@@ -2,8 +2,8 @@
 // offscreen canvas (world plus a margin of out-of-bounds scenery on every side);
 // draw() only blits the visible rectangle. The walkable area reads as a raised plateau
 // with a soft rim ~40 px inside the world edge; beyond it the scenery drops away (sky,
-// canyon floor, sea, icy chasm or storm void). Contrast is kept moderate so creatures
-// and orange/yellow projectiles stay readable.
+// canyon floor, sea, icy chasm or storm void). Contrast is kept moderate and the result is
+// partly desaturated so creatures, orange/red telegraphs and pickups stay readable.
 import { VIEW } from '../config';
 import type { RegionId } from '../content/types';
 import { createRng, type Rng } from '../sim/rng';
@@ -1157,8 +1157,18 @@ function buildFloor(region: RegionId): HTMLCanvasElement {
   ctx.stroke(edge);
   const rim = wobblyRect(rng, RIM_IN, RIM_IN, ARENA_W - RIM_IN, ARENA_H - RIM_IN, 92, 4);
   style.rim(ctx, rng, rim);
+  // Decoration recedes: the whole floor is partly desaturated so enemies, red/orange telegraphs,
+  // element-coloured player effects and outlined pickups (all saturated) always stand out.
+  ctx.save();
+  ctx.globalCompositeOperation = 'saturation';
+  ctx.fillStyle = `rgba(128,128,128,${DESATURATE[region]})`;
+  ctx.fillRect(-M, -M, ARENA_W + 2 * M, ARENA_H + 2 * M);
+  ctx.restore();
   return c;
 }
+
+/** How much of each floor's colour saturation is removed (warm floors more: danger is warm). */
+const DESATURATE: Record<RegionId, number> = { isles: 0.25, canyon: 0.35, coast: 0.2, frost: 0.1, storm: 0.15 };
 
 const floors = new Map<RegionId, HTMLCanvasElement>();
 

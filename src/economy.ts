@@ -479,6 +479,8 @@ export interface RunReport {
   rockHits?: number;
   arena?: { wave: number; victory: boolean; endlessSeconds: number; kills: number; elites: number; bosses: number };
   trial?: { course: string; finished: boolean; rings: number; collisions: number; medal: number; durationSeconds: number };
+  /** Aether Ascent (Update 5): cumulative for the run. */
+  ascent?: { distance: number; score: number; assist: boolean; region: RegionId };
 }
 
 export interface Settlement {
@@ -501,6 +503,8 @@ export interface Settlement {
   newBest: boolean;
   trial?: { medal: number; previousBest: number; newRecord: boolean; firstRewards: string[]; practice: boolean };
   arena?: { wave: number; victory: boolean; endlessSeconds: number; kills: number };
+  /** Aether Ascent: the record this run was compared with (standard or assist) and whether it rose. */
+  ascent?: { distance: number; assist: boolean; best: number; newBest: boolean };
   events: ProgressEvents;
   /** True if this was an Arena checkpoint and the run continues. */
   checkpoint: boolean;
@@ -514,6 +518,34 @@ export const TRIAL_FIRST_REWARDS: Record<1 | 2 | 3, Reward> = {
 };
 /** Arena victory bonus (paid once per victory, not per checkpoint repeat). */
 export const ARENA_VICTORY_BONUS: Reward = { gold: 60, fruit: 20 };
+
+// --- Aether Ascent (Update 5) ----------------------------------------------------------------------
+// Currency in Ascent comes from active progress: coins and Emberfruit collected along the routes,
+// aether caches, and 1 gold per 30 m flown through hazard stretches while playing (never in calm
+// air or at shrines; time only counts with recent input, like every mode). Bots measure ≈ 86 gold
+// and ≈ 40 Emberfruit per active minute for every pilot (Rush reasonable pilot: ≈ 89 / 40; Arena
+// ≈ 80 / 27), so Ascent pays like the other modes. Hard caps per qualified minute keep it there.
+// XP and key progress use the shared qualified-time rules below. Score and upgrades never touch
+// currency.
+export const ASCENT_REWARDS = { goldPerMinute: 100, fruitPerMinute: 45 } as const;
+
+/** Applies the per-qualified-minute caps to a cumulative Ascent report (idempotent). */
+export function capAscentReport(r: RunReport): RunReport {
+  const minutes = Math.max(0, r.qualifiedSeconds) / 60;
+  return {
+    ...r,
+    gold: Math.min(Math.max(0, Math.floor(r.gold)), Math.ceil(ASCENT_REWARDS.goldPerMinute * minutes)),
+    fruit: Math.min(Math.max(0, Math.floor(r.fruit)), Math.ceil(ASCENT_REWARDS.fruitPerMinute * minutes)),
+  };
+}
+
+/** Remembers the Ascent assist choice (it decides which personal best a run counts toward). */
+export function setAscentAssist(save: SaveData, on: boolean): SaveData {
+  if (save.ascent.assist === on) return save;
+  const s = clone(save);
+  s.ascent.assist = on;
+  return s;
+}
 
 function deltaReport(r: RunReport, banked: ActiveRun['banked']): RunReport {
   if (!banked) return r;
@@ -550,6 +582,8 @@ function runCounts(report: RunReport): Record<string, number> {
 export function settleRun(save: SaveData, runId: string, report: RunReport, opts: { final: boolean } = { final: true }): { save: SaveData; settlement: Settlement | null } {
   const marker = save.activeRun;
   if (!marker || marker.id !== runId || save.settled.includes(runId)) return { save, settlement: null };
+  // Aether Ascent: rewards are capped per qualified minute before anything is banked.
+  if (marker.mode === 'ascent') report = capAscentReport(report);
   const s = clone(save);
   const r = deltaReport(report, marker.banked);
   const practice = marker.practice;
@@ -613,6 +647,7 @@ export function settleRun(save: SaveData, runId: string, report: RunReport, opts
   let newBest = false;
   let trialOut: Settlement['trial'];
   let arenaOut: Settlement['arena'];
+  let ascentOut: Settlement['ascent'];
   if (marker.mode === 'rush') {
     if (report.completed) {
       lt.flights += 1;
@@ -703,6 +738,29 @@ export function settleRun(save: SaveData, runId: string, report: RunReport, opts
       }
     }
     arenaOut = { wave: a.wave, victory: a.victory, endlessSeconds: a.endlessSeconds, kills: a.kills };
+  } else if (marker.mode === 'ascent' && report.ascent) {
+    // Aether Ascent records: standard and assist bests are kept separately; shrine checkpoints
+    // update them too, so a reload never loses a distance that was already banked.
+    const a = report.ascent;
+    const rec = s.ascent;
+    if (!marker.banked) rec.runs += 1;
+    const dist = Math.max(0, Math.floor(a.distance));
+    const score = Math.max(0, Math.floor(a.score));
+    if (a.assist) {
+      if (dist > rec.bestAssist) {
+        rec.bestAssist = dist;
+        newBest = true;
+      }
+      if (score > rec.bestScoreAssist) rec.bestScoreAssist = score;
+    } else {
+      if (dist > rec.best) {
+        rec.best = dist;
+        rec.bestRegion = a.region;
+        newBest = true;
+      }
+      if (score > rec.bestScore) rec.bestScore = score;
+    }
+    ascentOut = { distance: dist, assist: a.assist, best: a.assist ? rec.bestAssist : rec.best, newBest };
   }
 
   const level_ = practice ? grantXp(s, marker.dragon, 0) : grantXp(s, marker.dragon, xp);
@@ -749,6 +807,7 @@ export function settleRun(save: SaveData, runId: string, report: RunReport, opts
       newBest,
       trial: trialOut,
       arena: arenaOut,
+      ascent: ascentOut,
       events,
       checkpoint,
     },

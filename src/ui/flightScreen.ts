@@ -2,12 +2,13 @@
 // overlay for one run. Input: mouse height (or W/S) steers, click/Space dashes, E fires the
 // active ability, Esc pauses.
 import { sfx } from '../audio';
+import * as rushSfx from '../audio/rushSfx';
 import { DASH, FLIGHT, RUSH } from '../config';
 import { SPECIES } from '../content/species';
 import { medalFor, type TrialDef } from '../content/trials';
 import type { RegionId } from '../content/types';
 import { FlightRenderer, type FlightLook } from '../render/flightRenderer';
-import { FlightSim, type FlightEvent, type RunSummary, type TrialCourseData } from '../sim/flight';
+import { FlightSim, rushTip, type FlightEvent, type RunSummary, type TrialCourseData } from '../sim/flight';
 import type { FlightStats } from '../stats';
 import { $, el, icon } from './dom';
 
@@ -19,7 +20,18 @@ export interface FlightHost {
   onEnd(summary: RunSummary, early: boolean): void;
   /** Trials: restart the same course immediately. */
   onRestart?(): void;
+  /**
+   * A short tutorial tip (id 'rush.steer' | 'rush.dash' | 'rush.ability') was shown. The app
+   * should add the id to save.prefs.tutorials so it is not shown again (Settings can reset it).
+   */
+  onTutorialSeen?(id: string): void;
 }
+
+export { rushTip };
+
+/** Tutorial tip ids used by Dragon Rush (stored in save.prefs.tutorials once shown). */
+export const RUSH_TUTORIALS = ['rush.steer', 'rush.dash', 'rush.ability'] as const;
+type TipId = (typeof RUSH_TUTORIALS)[number];
 
 export interface FlightSetup {
   mode: 'rush' | 'trials';
@@ -35,6 +47,10 @@ export interface FlightSetup {
   reducedMotion: boolean;
   lowEffects: boolean;
   showHitboxes: boolean;
+  /** Settings → screen shake (default true). Reduced motion and low effects also turn it off. */
+  screenShake?: boolean;
+  /** Tutorial ids already seen (save.prefs.tutorials). Absent = show every tip. */
+  tutorialsSeen?: readonly string[];
 }
 
 type PauseReason = 'manual' | 'focus';
@@ -57,6 +73,13 @@ export class FlightScreen {
   /** Missed rings that have already been cleaned up off-screen. */
   private missedGone = 0;
   private seenRings = new Set<number>();
+  /** Tutorial tips: queue, the one showing, and how long it has shown. */
+  private tipQueue: TipId[] = [];
+  private tip: TipId | null = null;
+  private tipT = 0;
+  private tipsDone = new Set<TipId>();
+  private steerTime = 0;
+  private firstSteer = -1;
 
   constructor(
     private host: FlightHost,
@@ -69,8 +92,10 @@ export class FlightScreen {
     this.renderer.reducedMotion = setup.reducedMotion;
     this.renderer.lowEffects = setup.lowEffects;
     this.renderer.showHitboxes = setup.showHitboxes;
+    this.renderer.screenShake = setup.screenShake ?? true;
     const trials = setup.mode === 'trials';
     const ab = setup.stats.ability;
+    injectRushStyle();
     this.hud = el(`
       <div class="hud ${trials ? 'trials' : ''}">
         <div class="hud-top">
@@ -84,12 +109,17 @@ export class FlightScreen {
               : `<div class="haul" aria-label="This flight's haul (banked when the flight ends)">
                   <span class="haul-label">This flight</span>
                   <span class="haul-items">${icon('gold')}<b data-k="gold">0</b>${icon('fruit')}<b data-k="fruit">0</b></span>
+                </div>
+                <div class="rush-score" aria-label="Score (does not change gold or Emberfruit)" title="Score: trails, chains and treasure. It never changes your gold or Emberfruit.">
+                  <span class="haul-label">Score</span>
+                  <b data-k="score">0</b>
+                  <span class="rush-chain" data-k="chain"><span data-k="chainTxt">Chain 0</span><i><i data-k="chainFill"></i></i></span>
                 </div>`
           }
           <button class="pause-btn" data-k="pause" aria-label="Pause (Esc)" title="Pause (Esc)"><i></i><i></i></button>
         </div>
         <div class="hint" data-k="hint" role="status"></div>
-        <div class="tutorial" data-k="tutorial">Move the mouse <b>up/down</b> to steer · <b>Click</b> to dash · <b>E</b> for ${ab.name} <span>(or W/S, Space, E)</span></div>
+        <div class="rush-tip" data-k="tutorial" role="status" aria-live="polite"></div>
         <div class="hud-bottom">
           <div class="dash-ind ready" data-k="dash" aria-label="Dash">
             <svg viewBox="0 0 40 24" aria-hidden="true"><path d="M3 3 L15 12 L3 21 M17 3 L29 12 L17 21" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -97,7 +127,7 @@ export class FlightScreen {
           </div>
           <div class="ability-ind" data-k="ability" aria-label="${ab.name} (E)" title="${ab.text[setup.mode]}">
             <kbd>E</kbd>
-            <div class="ab-body"><span class="ab-name">${ab.name}</span><div class="bar"><i data-k="abFill"></i></div></div>
+            <div class="ab-body"><span class="ab-name">${ab.name}${setup.autoAbility ? ' <span class="ab-auto" title="Auto-activate is on (Settings): the ability fires by itself when full">AUTO</span>' : ''}</span><div class="bar"><i data-k="abFill"></i></div></div>
             <span class="ab-state" data-k="abTxt"></span>
           </div>
           ${
@@ -113,6 +143,11 @@ export class FlightScreen {
     this.hud.querySelectorAll<HTMLElement>('[data-k]').forEach((n) => (this.els[n.dataset.k!] = n));
     this.els.pause.addEventListener('click', () => this.pause('manual'));
     if (trials) this.els.cps.innerHTML = this.sim.checkpoints.map(() => '<i></i>').join('');
+    else {
+      const seen = new Set(setup.tutorialsSeen ?? []);
+      if (!seen.has('rush.steer')) this.tipQueue.push('rush.steer');
+      for (const id of RUSH_TUTORIALS) if (seen.has(id)) this.tipsDone.add(id);
+    }
     host.root.appendChild(this.hud);
     host.canvas.classList.add('active');
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -126,7 +161,14 @@ export class FlightScreen {
 
   pointerMove(y: number): void {
     this.keyboardMode = false;
-    if (!this.paused) this.sim.setTarget(y);
+    if (!this.paused) {
+      if (Math.abs(y - this.sim.targetY) > 6) this.noteSteer();
+      this.sim.setTarget(y);
+    }
+  }
+
+  private noteSteer() {
+    if (this.firstSteer < 0) this.firstSteer = this.sim.time;
   }
 
   pointerDash(): void {
@@ -165,6 +207,7 @@ export class FlightScreen {
 
   focusLost(): void {
     this.keys.up = this.keys.down = false;
+    this.sim.setSteerKeys(0);
     if (!this.ended && this.paused !== 'focus') this.pause('focus');
   }
 
@@ -186,7 +229,7 @@ export class FlightScreen {
           <p>${reason === 'focus' ? 'The game paused because the window lost focus. No time was lost.' : trials ? 'The course is frozen.' : 'The timer, dash, ability and Rush are frozen.'}</p>
           <div class="stack">
             <button class="btn gold big" data-a="resume">Resume</button>
-            ${trials ? '<button class="btn" data-a="restart">Restart course</button>' : ''}
+            ${trials ? '<button class="btn" data-a="restart">Restart course</button>' : '<button class="btn" data-a="controls">Show the controls again</button>'}
             <button class="btn ghost" data-a="home">${trials ? 'Leave course (no medal this attempt)' : `End flight and bank ${gold} ${icon('gold', 'icon sm')} ${fruit} ${icon('fruit', 'icon sm')}`}</button>
           </div>
         </div>
@@ -194,6 +237,12 @@ export class FlightScreen {
     $(this.overlay, '[data-a=resume]').addEventListener('click', (e) => {
       e.stopPropagation();
       sfx.click();
+      this.resume();
+    });
+    this.overlay.querySelector('[data-a=controls]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.click();
+      this.replayTutorial();
       this.resume();
     });
     this.overlay.querySelector('[data-a=restart]')?.addEventListener(
@@ -237,9 +286,10 @@ export class FlightScreen {
     const dt = Math.min(realDt, FLIGHT.maxFrameDt);
     if (!this.paused && !this.ended) {
       this.inputGuard = Math.max(0, this.inputGuard - dt);
-      if (this.keyboardMode && this.keys.up !== this.keys.down) {
-        const dir = this.keys.up ? -1 : 1;
-        this.sim.setTarget(this.sim.targetY + dir * FLIGHT.keyboardSteerSpeed * dt);
+      if (this.keyboardMode) {
+        const dir = this.keys.up === this.keys.down ? 0 : this.keys.up ? -1 : 1;
+        this.sim.setSteerKeys(dir);
+        if (dir) this.noteSteer();
       }
       if (this.setup.autoAbility && this.sim.abilityReady && this.sim.abilityCharge >= this.sim.maxCharge - 1e-6) this.sim.requestAbility();
       this.trackMissed();
@@ -250,6 +300,7 @@ export class FlightScreen {
       this.renderer.update(dt, this.sim);
       this.hintTimer = Math.max(0, this.hintTimer - dt);
       if (this.hintTimer <= 0) this.els.hint.classList.remove('show');
+      if (this.setup.mode === 'rush') this.updateTips(dt);
     }
     this.renderer.draw(this.host.ctx, this.sim);
     this.updateHud();
@@ -261,8 +312,32 @@ export class FlightScreen {
     for (const e of events) {
       switch (e.type) {
         case 'pickup':
-          sfx.pickup(e.kind, e.rush);
+          if (e.trailIndex && e.trailTotal) rushSfx.trailPickup(e.kind, e.trailIndex, e.trailTotal, e.rush);
+          else sfx.pickup(e.kind, e.rush);
           if (this.els.gold) this.bump(e.kind === 'gold' ? this.els.gold : this.els.fruit);
+          break;
+        case 'trailComplete':
+          rushSfx.trailComplete(e.count, e.treasure);
+          this.bump(this.els.score);
+          break;
+        case 'trailBroken':
+          rushSfx.trailBroken();
+          break;
+        case 'chain':
+          rushSfx.chainUp(e.mult);
+          this.bump(this.els.chain);
+          break;
+        case 'treasureAhead':
+          rushSfx.treasureAhead();
+          this.showHint(`Treasure route along the ${e.top ? 'top' : 'bottom'} edge: narrow, but rich!`, 3);
+          break;
+        case 'treasure':
+          rushSfx.treasure();
+          this.bump(this.els.score);
+          break;
+        case 'finalStretch':
+          rushSfx.finalStretch();
+          this.showHint('Final stretch: fly through the finish line!', 2.2);
           break;
         case 'break':
           sfx.crack(e.kind);
@@ -289,10 +364,12 @@ export class FlightScreen {
           break;
         case 'rockHit':
           sfx.thud();
+          if (this.setup.mode === 'rush') rushSfx.slowed();
           if (this.els.coll) this.bump(this.els.coll);
           break;
         case 'boltHit':
           sfx.zap();
+          if (this.setup.mode === 'rush') rushSfx.slowed();
           if (this.els.coll) this.bump(this.els.coll);
           break;
         case 'shieldBlock':
@@ -409,6 +486,15 @@ export class FlightScreen {
         this.els.rushTxt.textContent = rush ? 'DRAGON RUSH!' : fill >= 0.8 ? 'Dragon Rush: almost!' : 'Dragon Rush';
         this.els.rushNum.textContent = rush ? `${Math.ceil(s.rushT)}s` : `${s.charge}/${RUSH.threshold}`;
       }
+      if (this.set('score', s.score)) this.els.score.textContent = s.score.toLocaleString('en-US');
+      const chainOn = s.chainLeft > 0 ? s.chain : 0;
+      if (this.set('chain', chainOn) || this.set('mult', s.chainMult)) {
+        const mult = s.chainMult;
+        this.els.chainTxt.textContent = chainOn ? `Chain ${chainOn}${mult > 1 ? ` ×${mult}` : ''}` : 'Chain 0';
+        this.els.chain.classList.toggle('hot', chainOn > 0 && mult > 1);
+        this.els.chain.classList.toggle('off', !chainOn);
+      }
+      if (this.set('chainLeft', Math.round(s.chainLeft * 40))) this.els.chainFill.style.width = `${(s.chainLeft * 100).toFixed(0)}%`;
     }
 
     const ready = s.dashReady;
@@ -428,8 +514,74 @@ export class FlightScreen {
       this.els.abTxt.textContent = ch >= 1 ? (over ? `${Math.round(ch * 100)}%` : 'READY') : `${Math.floor(ch * 100)}%`;
     }
 
-    if (s.time > 8) this.els.tutorial.classList.add('hide');
   }
+
+  // --- tutorial tips ---------------------------------------------------------------------------
+
+  /** Pause menu → "Show the controls again": queues every tip for this flight. */
+  replayTutorial(): void {
+    this.tipsDone.clear();
+    this.tipQueue = [...RUSH_TUTORIALS];
+    this.tip = null;
+    this.firstSteer = -1;
+    this.steerTime = 0;
+  }
+
+  private tipHtml(id: TipId): string {
+    const ab = this.setup.stats.ability;
+    switch (id) {
+      case 'rush.steer':
+        return this.keyboardMode
+          ? 'Steer: hold <b>W</b>/<b>S</b> or <b>↑</b>/<b>↓</b> <span>· or move the mouse up and down</span>'
+          : 'Steer with the <b>mouse</b>: move it up and down <span>· or hold <b>W</b>/<b>S</b> or <b>↑</b>/<b>↓</b></span>';
+      case 'rush.dash':
+        return 'Glowing cracks? <b>Click</b> or press <b>Space</b> to dash through <span>· the ring turns white when you are in reach</span>';
+      case 'rush.ability':
+        return this.setup.autoAbility
+          ? `<b>${ab.name}</b> is ready and fires by itself <span>(auto-activate is on in Settings) · ${ab.text.rush}</span>`
+          : `<b>${ab.name}</b> is ready: press <b>E</b> <span>· ${ab.text.rush}</span>`;
+    }
+  }
+
+  private updateTips(dt: number) {
+    const s = this.sim;
+    if (this.keyboardMode && (this.keys.up || this.keys.down)) this.steerTime += dt;
+    else if (this.firstSteer >= 0 && Math.abs(s.vy) > 120) this.steerTime += dt;
+    // Contextual triggers: dash when the first container approaches, ability when first ready.
+    const want = (id: TipId) => !this.tipsDone.has(id) && this.tip !== id && !this.tipQueue.includes(id);
+    if (want('rush.dash') && s.containers.some((c) => c.x - s.dragonWorldX < 820 && c.x > s.dragonWorldX)) this.tipQueue.push('rush.dash');
+    if (want('rush.ability') && s.abilityReady && !s.rushActive) this.tipQueue.push('rush.ability');
+    // Show the controls again when needed: no steering at all in the first 5 s of a flight.
+    if (this.firstSteer < 0 && s.time > 5 && this.tip === null && !this.tipQueue.includes('rush.steer') && !this.shownLate) {
+      this.shownLate = true;
+      this.tipQueue.unshift('rush.steer');
+      this.tipsDone.delete('rush.steer');
+    }
+    if (this.tip) {
+      this.tipT += dt;
+      const done =
+        this.tip === 'rush.steer'
+          ? (this.tipT > 2.5 && this.steerTime > 1) || this.tipT > 7 || (this.tipT > 2 && this.tipQueue.length > 0)
+          : this.tip === 'rush.dash'
+            ? (this.tipT > 1.5 && (s.dashActive || s.dashCd > 0)) || this.tipT > 5
+            : (this.tipT > 1.5 && s.abilityCharge < 1) || this.tipT > 6;
+      if (done) {
+        this.tip = null;
+        this.els.tutorial.classList.remove('show');
+      }
+    }
+    if (!this.tip && this.tipQueue.length) {
+      const id = this.tipQueue.shift()!;
+      if (this.tipsDone.has(id)) return;
+      this.tip = id;
+      this.tipT = 0;
+      this.tipsDone.add(id);
+      this.els.tutorial.innerHTML = this.tipHtml(id);
+      this.els.tutorial.classList.add('show');
+      this.host.onTutorialSeen?.(id);
+    }
+  }
+  private shownLate = false;
 
   /** Summary for settlement; Trials include the medal. */
   medal(summary: RunSummary): number {
@@ -444,6 +596,7 @@ export class FlightScreen {
   }
 
   destroy(): void {
+    this.sim.setSteerKeys(0);
     this.hud.remove();
     this.overlay?.remove();
     this.host.canvas.classList.remove('active');
@@ -452,4 +605,28 @@ export class FlightScreen {
   debug() {
     return { time: this.sim.time, paused: this.paused, dragon: this.sim.dragonId, particles: this.renderer.particleCount };
   }
+}
+
+/** HUD styles for Update 5 Rush additions (score/chain, tips, auto-ability label). Injected once. */
+function injectRushStyle() {
+  if (document.getElementById('rush-hud-style')) return;
+  const st = document.createElement('style');
+  st.id = 'rush-hud-style';
+  st.textContent = `
+.rush-score{display:flex;flex-direction:column;align-items:center;background:var(--hud);border-radius:18px;padding:2px 16px 6px;color:#fff;min-width:150px;margin-right:auto}
+.hud-top:has(.rush-score) .haul{margin:0 0 0 auto}
+.rush-score b{font-size:26px;line-height:1.1;font-weight:800;letter-spacing:.5px}
+.rush-chain{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:13px;font-weight:800;color:#ffe27a;min-width:110px}
+.rush-chain>i{display:block;width:100%;height:4px;border-radius:2px;background:rgba(255,255,255,.18);overflow:hidden}
+.rush-chain>i>i{display:block;height:100%;width:0;background:#ffe27a}
+.rush-chain.off{color:#9fc9c4}
+.rush-chain.hot{color:#fff2b0;text-shadow:0 0 8px rgba(255,200,80,.9)}
+.rush-tip{position:absolute;left:50%;bottom:118px;transform:translateX(-50%);max-width:760px;width:max-content;background:var(--hud);color:#fff;font-weight:700;font-size:20px;line-height:1.3;padding:8px 20px;border-radius:18px;text-align:center;opacity:0;transition:opacity .35s;box-shadow:0 0 0 2px rgba(255,226,122,.5)}
+.rush-tip.show{opacity:1}
+.rush-tip b{color:var(--gold-500)}
+.rush-tip span{font-size:15px;color:#cfeeea;font-weight:600}
+.ab-auto{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;background:#ffe27a;color:#3a2a08;font-size:11px;font-weight:800;letter-spacing:1px;vertical-align:2px}
+@media (prefers-reduced-motion: reduce){.rush-tip{transition:none}}
+`;
+  document.head.appendChild(st);
 }
