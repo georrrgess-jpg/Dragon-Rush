@@ -11,6 +11,8 @@ import type { SaveData } from '../save';
 import type { RunSummary } from '../sim/flight';
 import type { ArenaReport } from './arenaScreen';
 import { bar, el, esc, fmtTime, icon, sizeCanvas } from './dom';
+import { rarityBadge } from './rarity';
+import { ASCENT_UNLOCK_FLIGHTS } from '../content/modes';
 import type { UI } from './types';
 
 export interface ResultsData {
@@ -220,6 +222,11 @@ export class ResultsScreen {
     for (const m of ev.mastery) lines.push(`Mastery: ${esc(m.title)} → ${esc(m.rewardText)}`);
     for (const id of ev.newSpecies) lines.push(`<b>${SPECIES[id].name} joined your roster!</b>`);
     for (const r of ev.regions) lines.push(`New region unlocked: <b>${REGIONS[r].name}</b>`);
+    if (d.kind === 'rush' && !d.early) {
+      const f = s.lifetime.flights;
+      if (f === ASCENT_UNLOCK_FLIGHTS) lines.push('<b>Aether Ascent unlocked!</b> Choose it above the Play button on Home.');
+      else if (f < ASCENT_UNLOCK_FLIGHTS) lines.push(`${f}/${ASCENT_UNLOCK_FLIGHTS} full flights toward Aether Ascent`);
+    }
     // Evolution: one combined moment, even when a run crosses several stage milestones.
     const stageIdx = (x: Stage) => STAGES.findIndex((q) => q.id === x);
     const crossed = lc.to > lc.from ? stageIdx(lc.stageTo) - stageIdx(lc.stageFrom) : 0;
@@ -248,7 +255,7 @@ export class ResultsScreen {
           <p class="muted">${sub}</p>
           ${haul}
           <div class="xp-block">
-            <div class="row spread"><b>${esc(dragonName(s, st.dragon))}</b><span>+${st.xp} XP</span></div>
+            <div class="row spread"><span class="row"><b>${esc(dragonName(s, st.dragon))}</b> ${rarityBadge(SPECIES[st.dragon].rarity)}</span><span>+${st.xp} XP</span></div>
             ${dr.level >= 30 ? '<span class="muted">Maximum level</span>' : bar(dr.xp, xpToNext(dr.level), 'teal')}
             ${levelLine}
           </div>
@@ -265,10 +272,10 @@ export class ResultsScreen {
           </div>
           ${evoNote}
           <div class="stack">
-            <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Retry'}</button>
+            <button class="btn gold big" data-a="again" aria-keyshortcuts="R">${d.kind === 'trials' ? 'Retry course' : 'Retry'} <kbd>R</kbd></button>
             ${showNext ? `<button class="btn" data-a="next">Next course: ${esc(nextCourse!.name)}</button>` : ''}
             <button class="btn" data-a="dragons">${d.save.wallet.fruit >= 20 && dr.level < 30 ? `Feed ${esc(dragonName(s, st.dragon))}` : 'Dragons'}</button>
-            <button class="btn" data-a="play">${d.kind === 'trials' ? 'Course list' : 'Change mode'}</button>
+            <button class="btn" data-a="play" aria-keyshortcuts="Escape">${d.kind === 'trials' ? 'Course list' : 'Change mode'}</button>
             <button class="btn ghost" data-a="home">Home</button>
           </div>
         </div>
@@ -302,11 +309,21 @@ export class ResultsScreen {
     this.el.querySelector<HTMLButtonElement>('[data-a=again]')?.focus({ preventScroll: true });
   }
 
+  /** R retries, Escape changes mode (the same keys as the Ascent end screen). */
+  key(code: string): boolean {
+    if (code === 'KeyR') this.el.querySelector<HTMLButtonElement>('[data-a=again]')?.click();
+    else if (code === 'Escape') this.el.querySelector<HTMLButtonElement>('[data-a=play]')?.click();
+    else return false;
+    return true;
+  }
+
   update(dt: number): void {
     const s = this.d.save;
     const id = this.d.settlement.dragon;
     const dr = s.dragons[id];
-    const st = { species: id, stage: stageOf(dr.level), marking: dr.marking, region: this.d.settlement.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false };
+    // long serpents are framed further right and a little smaller so the whole tail fits
+    const serpent = SPECIES[id].family === 'serpent';
+    const st = { species: id, stage: stageOf(dr.level), marking: dr.marking, region: this.d.settlement.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false, aura: true, focusX: serpent ? 0.66 : 0.5, zoom: serpent ? 0.78 : 1 };
     if (this.evo) {
       if (this.evo.frame(this.ctx, dt, st)) return;
       this.endEvolution();

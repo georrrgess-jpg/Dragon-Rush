@@ -618,7 +618,8 @@ img.nt-icon {
   font-size: 28px;
   line-height: 1.05;
   margin-right: 2px;
-  max-width: 190px;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -723,4 +724,12 @@ img.nt-icon {
 .hero-bubble.show {
   opacity: 1;
   transform: translate(-12%, -100%) scale(1);
+}
+
+/* names get the whole first row; tags sit on their own row (long nicknames fit) */
+.np-tags {
+  margin-top: 4px;
+}
+.np-row + .np-tags + .np-row {
+  margin-top: 6px;
 }

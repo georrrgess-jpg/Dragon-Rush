@@ -1856,3 +1856,46 @@ table.compare thead img {
   gap: 8px;
   margin-top: 4px;
 }
+
+/* Update 5: filter chips explain themselves on hover and keyboard focus */
+.coll-head .chip-btn[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: #062a30;
+  color: #fff8ec;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 40;
+  transition: opacity 0.12s;
+}
+.coll-head .chip-btn[data-tip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.35s;
+}
+.coll-head .chip-btn[data-tip]:focus-visible::after {
+  opacity: 1;
+}
+.coll-head .chip-btn svg {
+  vertical-align: middle;
+}
+/* toasts sit low over the scene, clear of the top controls and search; at most two show */
+#toast-root {
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: 84px;
+  width: 520px;
+  transform: translateX(-50%);
+  flex-direction: column-reverse;
+}
+#toast-root .toast:nth-last-child(n + 3) {
+  display: none;
+}

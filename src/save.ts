@@ -182,10 +182,12 @@ export interface Prefs {
   dismissedGoal: string | null;
   /** Update 5: contextual tutorial steps already shown (ids like "rush.steer"). */
   tutorials: string[];
+  /** Update 5: keys the player had when last visiting the Hatchery (the badge shows only new ones). */
+  keysSeen: number;
 }
 
 export function defaultPrefs(): Prefs {
-  return { collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false, lastMode: 'rush', dismissedGoal: null, tutorials: [] };
+  return { collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false, lastMode: 'rush', dismissedGoal: null, tutorials: [], keysSeen: 0 };
 }
 
 // --- Aether Ascent records (Update 5) -------------------------------------------------------------
@@ -514,6 +516,7 @@ export function sanitize(raw: unknown): SaveData {
     lastMode: ['rush', 'trials', 'arena', 'ascent'].includes(pf.lastMode) ? pf.lastMode : 'rush',
     dismissedGoal: typeof pf.dismissedGoal === 'string' ? pf.dismissedGoal.slice(0, 80) : null,
     tutorials: strList(pf.tutorials, 60).map((t) => t.slice(0, 40)),
+    keysSeen: int(pf.keysSeen),
   };
   const asc = r.ascent ?? {};
   d.ascent = {

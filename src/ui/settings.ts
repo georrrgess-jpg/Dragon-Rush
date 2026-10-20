@@ -140,7 +140,7 @@ export class SettingsPanel {
         <section>
           <h3 id="set-perf">Performance</h3>
           ${tog('lowEffects', 'Low effects', 'Fewer particles, simpler dragon detail and lighter backgrounds for slower computers.')}
-          <p class="muted small">Measured here: frame time over the last ${ft.length} frames, average ${avg.toFixed(1)} ms, worst ${worst.toFixed(1)} ms${mem ? ` · script memory ${(mem.usedJSHeapSize / 1048576).toFixed(0)} MB` : ''}.</p>
+          <p class="muted small">${ft.length >= 120 ? `Measured here: frame time over the last ${ft.length} frames, average ${avg.toFixed(1)} ms, worst ${worst.toFixed(1)} ms${mem ? ` · script memory ${(mem.usedJSHeapSize / 1048576).toFixed(0)} MB` : ''}.` : 'Frame time is measured after a few seconds of play; reopen Settings to see it.'}</p>
           <h3>Save data</h3>
           <p class="muted small">Progress is saved in this browser automatically. Export a copy to move it or keep it safe. ${this.app.readOnly ? '<b>This save is from a newer version and is not being overwritten.</b>' : ''}</p>
           <div class="row wrap"><button class="btn small" data-a="export" data-fk="export">Export save</button><button class="btn small ghost" data-a="import" data-fk="import">Import save…</button>${this.app.recovery || recoveryCopies(this.app.storeRef as never).length ? `<button class="btn small ghost" data-a="recovery" data-fk="recovery">Download unreadable save copy${recoveryCopies(this.app.storeRef as never).length > 1 ? ` (newest of ${recoveryCopies(this.app.storeRef as never).length})` : ''}</button>` : ''}</div>

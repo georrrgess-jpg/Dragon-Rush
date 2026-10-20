@@ -131,18 +131,18 @@ export class PlayScreen implements Screen {
           <button class="btn gold big" data-a="rush" data-fk="go-rush">Fly</button>
         </article>
         ${this.ascentCard()}
-        <article class="panel mode-card mode-trials">
-          <h3>Sky Trials</h3>
-          <p>12 designed courses. Pass checkpoints, collect rings and avoid collisions for Bronze, Silver and Gold. Stats are standardized: levels and talents never change a medal.</p>
-          <div class="stat-line"><span>Medals ${medals}/36</span><span>${nextTrial ? `Next: ${nextTrial.name}` : 'All courses finished!'}</span></div>
-          <button class="btn gold big" data-a="trials" data-fk="go-trials">Choose a course</button>
-        </article>
         <article class="panel mode-card mode-arena">
           <h3>Dragon Arena</h3>
           <p>Top-down survival: <kbd>WASD</kbd> to move, attacks are automatic, <kbd>Space</kbd> dash, <kbd>E</kbd> ability. Four waves, an elite and a boss in about four minutes. Health matters here.</p>
           <div class="chips">${this.regionChips('arena')}</div>
           <div class="stat-line"><span>Best wave ${s.arena.bestWave || '—'}</span><span>Wins ${s.arena.wins}</span><span>Endless ${s.arena.bestEndless ? fmtTime(s.arena.bestEndless) : '—'}</span></div>
           <button class="btn gold big" data-a="arena" data-fk="go-arena">Enter the Arena</button>
+        </article>
+        <article class="panel mode-card mode-trials">
+          <h3>Sky Trials</h3>
+          <p>12 designed courses. Pass checkpoints, collect rings and avoid collisions for Bronze, Silver and Gold. Stats are standardized: levels and talents never change a medal.</p>
+          <div class="stat-line"><span>Medals ${medals}/36</span><span>${nextTrial ? `Next: ${nextTrial.name}` : 'All courses finished!'}</span></div>
+          <button class="btn gold big" data-a="trials" data-fk="go-trials">Choose a course</button>
         </article>
       </div>`;
   }

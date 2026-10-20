@@ -71,7 +71,8 @@ export class Shell {
     const w = (this.ui as UI & { walletView?: typeof s.wallet | null }).walletView ?? s.wallet;
     const tabBtn = (t: { id: Tab; label: string }) => {
       // the only notification: keys that can be spent right now (nothing else is claimable by hand)
-      const badge = t.id === 'hatchery' && w.keys > 0 ? `<span class="dot" aria-hidden="true">${w.keys}</span><span class="sr">, ${w.keys} Aether Key${w.keys === 1 ? '' : 's'} ready</span>` : '';
+      // only keys earned since the last Hatchery visit count as new
+      const badge = t.id === 'hatchery' && w.keys > s.prefs.keysSeen ? `<span class="dot" aria-hidden="true">${w.keys}</span><span class="sr">, ${w.keys} Aether Key${w.keys === 1 ? '' : 's'} ready</span>` : '';
       return `<button data-tab="${t.id}" data-fk="tab-${t.id}" ${t.id === this.tab ? 'aria-current="page" class="on"' : ''}>${t.label}${badge}</button>`;
     };
     const navFk = active0(this.nav);

@@ -916,7 +916,7 @@ export const RARITIES: Record<Rarity, { name: string; symbol: string; color: str
   common: { name: 'Common', symbol: '◆', color: '#8a9aa8', order: 0 },
   rare: { name: 'Rare', symbol: '◆◆', color: '#3a8fd8', order: 1 },
   epic: { name: 'Epic', symbol: '◆◆◆', color: '#9a5ad8', order: 2 },
-  legendary: { name: 'Legendary', symbol: '★', color: '#e0a020', order: 3 },
+  legendary: { name: 'Legendary', symbol: '♛', color: '#e0a020', order: 3 },
 };
 
 export const FAMILIES: Record<Family, string> = {

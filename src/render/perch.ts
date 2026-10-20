@@ -56,6 +56,8 @@ export interface HeroState {
    * birds, a calm crossfade when the region changes, and the rarity aura behind the dragon.
    */
   overlook?: boolean;
+  /** Draw the rarity aura behind the dragon (inspection/results views; Home overlook always does). */
+  aura?: boolean;
 }
 
 /** Screen-space box around the perched dragon (for hit targets and speech bubbles). */
@@ -342,7 +344,7 @@ export class HeroView {
     }
 
     // Epic / Legendary menu aura behind the dragon (rarity art module; Home only)
-    if (s.overlook) drawRarityAura(ctx, s.species, ox, oy, scale, this.t, still);
+    if (s.overlook || s.aura) drawRarityAura(ctx, s.species, ox, oy, scale, this.t, still);
 
     const pose = this.pose(s);
     if (this.evo) {

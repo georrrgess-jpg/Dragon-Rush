@@ -279,7 +279,7 @@ export class HomeScreen implements Screen {
         </section>
         <nav class="home-nav" aria-label="Sections">
           <button class="nav-tile" data-a="dragons" data-fk="nav-dragons">${glyph('dragons', 'g nt-icon')}<span><b>Dragons</b><small>${owned} of ${SPECIES_IDS.length} hatched</small></span></button>
-          <button class="nav-tile ${s.wallet.keys ? 'ready' : ''}" data-a="hatchery" data-fk="nav-hatchery">${icon('egg', 'nt-icon')}<span><b>Hatchery</b><small>${s.wallet.keys ? `${s.wallet.keys} key${s.wallet.keys === 1 ? '' : 's'} ready` : `Next key ${keyPct}%`}</small></span>${s.wallet.keys ? `<span class="nt-dot" aria-hidden="true">${s.wallet.keys}</span>` : `<i class="nt-meter" aria-hidden="true" style="--p:${keyPct / 100}"></i>`}</button>
+          <button class="nav-tile ${s.wallet.keys ? 'ready' : ''}" data-a="hatchery" data-fk="nav-hatchery">${icon('egg', 'nt-icon')}<span><b>Hatchery</b><small>${s.wallet.keys ? `${s.wallet.keys} key${s.wallet.keys === 1 ? '' : 's'} ready` : `Next key ${keyPct}%`}</small></span>${s.wallet.keys > s.prefs.keysSeen ? `<span class="nt-dot" aria-hidden="true">${s.wallet.keys}</span>` : s.wallet.keys ? '' : `<i class="nt-meter" aria-hidden="true" style="--p:${keyPct / 100}"></i>`}</button>
           <button class="nav-tile" data-a="journal" data-fk="nav-journal">${glyph('journal', 'g nt-icon')}<span><b>Journal</b><small>Contracts ${done}/${contracts.length}</small></span></button>
           <button class="nav-tile" data-a="settings" data-fk="nav-settings">${svg('gear').replace('<svg ', '<svg class="g nt-icon" ')}<span><b>Settings</b><small>Sound · access</small></span></button>
         </nav>
@@ -287,10 +287,10 @@ export class HomeScreen implements Screen {
       </aside>
       <section class="nameplate" aria-label="Your dragon" style="--x:${Math.round(VIEW_W * this.focusX())}px">
         <div class="np-row">
-          <h1>${esc(name)}</h1>
-          ${rarityTag(id)}${elementTag(id)}
+          <h1 title="${esc(name)}">${esc(name)}</h1>
           <span class="np-lvl">Level ${d.level} · ${esc(stage)}</span>
         </div>
+        <div class="np-row np-tags">${rarityTag(id)}${elementTag(id)}</div>
         <div class="np-row">
           <div class="np-xp">${d.level >= MAX_LEVEL ? '<small>Maximum level</small>' : `${bar(d.xp, need, 'teal thin')}<small>${d.xp}/${need} XP to level ${d.level + 1}</small>`}</div>
           <button class="btn small np-change" data-a="dragons" data-fk="change">Change dragon</button>

@@ -112,7 +112,7 @@ describe('view preferences in the save', () => {
     const old = JSON.parse(JSON.stringify(defaultSave()));
     delete old.prefs;
     const a = sanitize(old);
-    expect(a.prefs).toEqual({ collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false, lastMode: 'rush', dismissedGoal: null, tutorials: [] });
+    expect(a.prefs).toEqual({ collectionSort: 'favorites', observatoryPose: 'idle', quickReveal: false, lastMode: 'rush', dismissedGoal: null, tutorials: [], keysSeen: 0 });
     expect(sanitize({ ...old, prefs: { collectionSort: '<img>', observatoryPose: 7 } }).prefs).toEqual(a.prefs);
     const b = sanitize({ ...old, prefs: { collectionSort: 'rarity', observatoryPose: 'fly' } });
     expect(sanitize(JSON.parse(JSON.stringify(b)))).toEqual(b);

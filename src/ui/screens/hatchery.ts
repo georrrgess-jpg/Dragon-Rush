@@ -248,6 +248,8 @@ export class HatcheryScreen implements Screen {
     const r = { next: () => rng.next() };
     this.idleReel = buildReel('ember', r, REEL.length, WIN_INDEX).map((id, i) => (i === WIN_INDEX ? buildReel('tide', r, 3, 1)[0] : id));
     this.reel = this.idleReel;
+    // visiting resolves the "new keys" badge
+    if (ui.save.prefs.keysSeen !== ui.save.wallet.keys) ui.commit({ ...ui.save, prefs: { ...ui.save.prefs, keysSeen: ui.save.wallet.keys } });
     this.el = el(`<section class="screen hatchery"><div class="reel-wrap"><div class="reel-view"><canvas class="reel" aria-hidden="true"></canvas></div><div class="reel-ui" aria-live="polite"></div></div><div class="hatch-lower"></div><div class="goal-wrap"></div></section>`);
     this.canvas = this.el.querySelector('canvas')!;
     this.view = this.el.querySelector<HTMLElement>('.reel-view')!;

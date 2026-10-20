@@ -12,7 +12,7 @@ import { HeroView } from '../../render/perch';
 import { arenaStats, flightStats } from '../../stats';
 import { bar, el, esc, icon, rerender, sizeCanvas, svg } from '../dom';
 import { Observatory, eggCodexHtml } from '../observatory';
-import { rarityBadge, rarityCardClass } from '../rarity';
+import { rarityBadge, rarityCardClass, raritySymbolSvg } from '../rarity';
 import type { Screen, UI } from '../types';
 import { bindGoal, eggUrl, elementTag, goalStrip, portraitUrl } from './common';
 
@@ -22,6 +22,7 @@ const VIEW_H = 230;
 
 /** The last collection filters, kept while the game is open. */
 let lastQuery: CollectionQuery | null = null;
+let lastFocus: SpeciesId | null = null;
 
 export class DragonsScreen implements Screen {
   el: HTMLElement;
@@ -41,7 +42,8 @@ export class DragonsScreen implements Screen {
     private ui: UI,
     arg?: string,
   ) {
-    this.focus = arg && arg in SPECIES ? (arg as SpeciesId) : ui.save.selected;
+    // an explicit target wins; otherwise come back to the dragon viewed last (this session)
+    this.focus = arg && arg in SPECIES ? (arg as SpeciesId) : (lastFocus ?? ui.save.selected);
     // filters persist for the session (the sort is also remembered in the save)
     this.q = { ...(lastQuery ?? DEFAULT_QUERY), sort: ui.save.prefs.collectionSort };
     this.el = el(`<section class="screen dragons"></section>`);
@@ -233,6 +235,7 @@ export class DragonsScreen implements Screen {
 
   render(): void {
     lastQuery = { ...this.q };
+    lastFocus = this.focus;
     const right = this.view === 'eggs' ? this.eggPanelHtml() : this.inspectHtml();
     rerender(this.el, `<div class="dragons-layout">${this.collectionHtml()}${right}</div><div class="goal-wrap">${goalStrip(this.ui, 'dragons')}</div>`);
     this.canvas = this.el.querySelector('.inspect-canvas');
@@ -269,10 +272,10 @@ export class DragonsScreen implements Screen {
     const owned = SPECIES_IDS.filter((id) => s.dragons[id].owned).length;
     const q = this.q;
     const els = (['any', 'fire', 'water', 'nature', 'air', 'frost', 'storm'] as const)
-      .map((e) => `<button class="chip-btn ${q.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${q.element === e}" title="${e === 'any' ? 'All elements' : ELEMENTS[e].name}" aria-label="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
+      .map((e) => `<button class="chip-btn ${q.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${q.element === e}" data-tip="${e === 'any' ? 'All elements' : ELEMENTS[e].name}" aria-label="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
       .join('');
     const rars = (['any', 'common', 'rare', 'epic', 'legendary'] as const)
-      .map((r) => `<button class="chip-btn ${q.rarity === r ? 'on' : ''}" data-a="rarity" data-v="${r}" data-fk="r-${r}" aria-pressed="${q.rarity === r}" title="${r === 'any' ? 'All rarities' : RARITIES[r].name}" aria-label="${r === 'any' ? 'All rarities' : RARITIES[r].name}">${r === 'any' ? 'All' : RARITIES[r].symbol}</button>`)
+      .map((r) => `<button class="chip-btn ${q.rarity === r ? 'on' : ''}" data-a="rarity" data-v="${r}" data-fk="r-${r}" aria-pressed="${q.rarity === r}" data-tip="${r === 'any' ? 'All rarities' : RARITIES[r].name}" aria-label="${r === 'any' ? 'All rarities' : RARITIES[r].name}">${r === 'any' ? 'All' : raritySymbolSvg(r, 16)}</button>`)
       .join('');
     return `
       <div class="collection">
@@ -609,7 +612,7 @@ export class DragonsScreen implements Screen {
     if (!this.ctx) return;
     const s = this.ui.save;
     const d = s.dragons[this.focus];
-    const st = { species: this.focus, stage: d.owned ? stageOf(d.level) : ('adult' as const), marking: d.owned ? d.marking : ('default' as const), region: s.rush.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false, focusX: 0.7, zoom: d.owned && d.level < 5 ? 1.35 : d.owned && d.level < 15 ? 1.1 : 0.9 };
+    const st = { species: this.focus, stage: d.owned ? stageOf(d.level) : ('adult' as const), marking: d.owned ? d.marking : ('default' as const), region: s.rush.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false, aura: true, focusX: 0.7, zoom: d.owned && d.level < 5 ? 1.35 : d.owned && d.level < 15 ? 1.1 : 0.9 };
     this.hero.update(dt, st);
     this.hero.draw(this.ctx, st);
   }

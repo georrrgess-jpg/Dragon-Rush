@@ -19,7 +19,7 @@ import { createScreen } from './ui/screens';
 import { SettingsPanel } from './ui/settings';
 import { Shell } from './ui/shell';
 import type { Overlay, Screen, Tab, UI } from './ui/types';
-import { MODES } from './content/modes';
+import { ASCENT_UNLOCK_FLIGHTS, MODES } from './content/modes';
 import { rushTip } from './sim/flight';
 import { arenaTip } from './sim/arena';
 // Update 5: Aether Ascent
@@ -226,11 +226,11 @@ export class App implements UI {
       if (this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
       else if (this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
       else if (this.ascent && this.ascent.key(e.code, true, e.repeat)) e.preventDefault();
-      else if (e.code === 'Escape') {
+      else if (e.code === 'Escape' && (this.modal || this.overlay || this.settings)) {
         if (this.modal) this.closeModal(false);
         else if (this.overlay) this.closeOverlay();
         else if (this.settings) this.closeSettings();
-      }
+      } else if (this.results && !this.dialogOpen && this.results.key(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
       if (this.flight && this.flight.key(e.code, false, false)) e.preventDefault();
@@ -390,7 +390,8 @@ export class App implements UI {
       this.modal = m;
       this.stage.appendChild(m);
       this.updateInert();
-      ($(m, '[data-a=yes]') as HTMLButtonElement).focus({ preventScroll: true });
+      // the safe choice has focus, so a double Enter never confirms by accident
+      ($(m, '[data-a=no]') as HTMLButtonElement).focus({ preventScroll: true });
     });
   }
 
@@ -716,10 +717,13 @@ export class App implements UI {
     if (!runId) return;
     const def = this.lastTrial ? TRIAL_BY_ID.get(this.lastTrial.id) : undefined;
     const medal = def ? medalFor(def, sum.completed && !early, sum.rings, sum.collisions) : 0;
+    const flightsBefore = this.save.lifetime.flights;
     const { save, settlement } = eco.settleRun(this.save, runId, this.flightReport(sum, early, medal));
     if (settlement) {
       this.commit(save);
       this.lastSettlement = settlement;
+      // Aether Ascent opens after a number of full Rush flights: announce it once
+      if (flightsBefore < ASCENT_UNLOCK_FLIGHTS && save.lifetime.flights >= ASCENT_UNLOCK_FLIGHTS) this.toast('Aether Ascent unlocked! Choose it above the Play button on Home.', 6000);
     }
     if (!settlement) return this.go('home');
     if (sum.mode === 'trials' && early) {
