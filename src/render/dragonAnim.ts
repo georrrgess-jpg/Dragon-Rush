@@ -44,6 +44,9 @@ export class DragonAnimator {
   private t = 0;
   private phase: number;
   private freq = 2.2;
+  /** Evolution stage character: hatchlings flap fast and bouncy, elders slow and gliding. */
+  private stageFreq = 1;
+  private stageBob = 1;
   private bank = 0;
   private vy1 = 0;
   private vy2 = 0;
@@ -57,6 +60,7 @@ export class DragonAnimator {
   private happyT = 0;
   private chompT = 0;
   private celebrateT = 0;
+  private abilityT = 0;
   private blinkT = 2 + Math.random() * 2;
   private breath = 0;
 
@@ -74,6 +78,16 @@ export class DragonAnimator {
   feed(): void {
     this.chompT = 0.55;
     this.happyT = 1.8;
+  }
+
+  setStage(stage: 'hatchling' | 'juvenile' | 'adult' | 'elder'): void {
+    this.stageFreq = { hatchling: 1.28, juvenile: 1.1, adult: 1, elder: 0.84 }[stage];
+    this.stageBob = { hatchling: 1.5, juvenile: 1.15, adult: 1, elder: 0.8 }[stage];
+  }
+
+  /** Active ability: a bright flash of the markings and a wing flare. */
+  ability(): void {
+    this.abilityT = 0.6;
   }
 
   /** Level up or hatch: raised wings and bright markings. */
@@ -94,7 +108,7 @@ export class DragonAnimator {
     if (inp.rush) target += 0.6;
     if (this.celebrateT > 0) target = 3.2;
     this.freq = approach(this.freq, target, 4, dt);
-    this.phase += this.freq * dt * (1 - this.perchW * 0.85);
+    this.phase += this.freq * this.stageFreq * dt * (1 - this.perchW * 0.85);
 
     // Banking and the delayed tail follow vertical speed at different rates.
     const bankTarget = Math.max(-0.36, Math.min(0.36, (inp.vy / inp.maxVy) * 0.4));
@@ -114,6 +128,7 @@ export class DragonAnimator {
     this.happyT = Math.max(0, this.happyT - dt);
     this.chompT = Math.max(0, this.chompT - dt);
     this.celebrateT = Math.max(0, this.celebrateT - dt);
+    this.abilityT = Math.max(0, this.abilityT - dt);
     this.blinkT -= dt;
     if (this.blinkT < -0.13) this.blinkT = 2.2 + Math.random() * 3;
   }
@@ -149,7 +164,7 @@ export class DragonAnimator {
     return {
       wing,
       fold,
-      bob: cyc.bob * (1 - perch) * (1 - dash) + this.breath * 1.2 * perch,
+      bob: cyc.bob * this.stageBob * (1 - perch) * (1 - dash) + this.breath * 1.2 * perch,
       bank: this.bank - 0.32 * recoil - 0.05 * this.windup,
       headTurn: -this.bank * 0.45 + 0.28 * recoil - 0.06 * this.rushW,
       tailBend1: -(this.vy1 / 950) * 22 * maxBend,
@@ -165,6 +180,8 @@ export class DragonAnimator {
       mouth: this.chompT > 0 ? Math.abs(Math.sin(this.chompT * Math.PI * 3.6)) : this.happyT > 0 ? 0.25 : 0,
       breath: this.breath,
       perch,
+      ability: this.abilityT > 0 ? Math.sin((this.abilityT / 0.6) * Math.PI) : 0,
+      time: this.t,
     };
   }
 }

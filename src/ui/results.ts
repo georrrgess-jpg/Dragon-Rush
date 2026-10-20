@@ -1,165 +1,146 @@
-// Results: base haul, level bonus and banked total (with a skippable count-up — the
-// payout is already saved before this screen appears), objectives, and unlock news.
-import { DRAGONS, ENVIRONMENTS, LEVELS } from '../config';
-import { nextUnlock, requirementProgress, unlockStatus, type Settlement } from '../economy';
-import { activeObjectives } from '../objectives';
-import { drawDragon } from '../render/dragonArt';
-import { DragonAnimator } from '../render/dragonAnim';
+// Results for every mode: what was banked, XP and level changes, key progress, mode rewards,
+// completed goals, and a quick Play Again.
+import { sfx } from '../audio';
+import { MILESTONE_LEVELS, stageOf, xpToNext } from '../content/progression';
+import { SPECIES } from '../content/species';
+import { TRIALS, TRIAL_BY_ID, nextMedalText, trialUnlocked } from '../content/trials';
+import { HATCHERY } from '../content/world';
+import { dragonName, rewardText, type Settlement } from '../economy';
+import { HeroView } from '../render/perch';
 import type { SaveData } from '../save';
 import type { RunSummary } from '../sim/flight';
-import { $, el, icon, sizeCanvas } from './dom';
-import { progressBar } from './home';
+import type { ArenaReport } from './arenaScreen';
+import { bar, el, esc, fmtTime, icon, sizeCanvas } from './dom';
+import type { UI } from './types';
 
-const COUNT_TIME = 1.1;
+export interface ResultsData {
+  kind: 'rush' | 'trials' | 'arena';
+  settlement: Settlement;
+  save: SaveData;
+  summary?: RunSummary;
+  early?: boolean;
+  trialId?: string;
+  practice?: boolean;
+  arena?: ArenaReport;
+  reason?: 'defeat' | 'quit' | 'victory' | 'endless' | 'bossLeft';
+}
+
+export interface ResultsActions {
+  again(): void;
+  next(id: string): void;
+  home(): void;
+  play(): void;
+  dragons(): void;
+}
+
+const MEDALS = ['No medal', 'Bronze', 'Silver', 'Gold'];
 
 export class ResultsScreen {
-  readonly el: HTMLElement;
-  private acted = false;
-  private t = 0;
-  private skipped: boolean;
-  private nums: { el: HTMLElement; value: number; prefix: string; delay: number }[] = [];
-  private portrait: CanvasRenderingContext2D;
-  private anim = new DragonAnimator();
+  el: HTMLElement;
+  private hero = new HeroView(300, 220);
+  private ctx: CanvasRenderingContext2D;
 
   constructor(
-    summary: RunSummary,
-    private st: Settlement,
-    save: SaveData,
-    stageScale: number,
-    reducedMotion: boolean,
-    actions: { again(): void; home(): void },
+    private d: ResultsData,
+    ui: UI,
+    actions: ResultsActions,
   ) {
-    this.skipped = reducedMotion;
-    const name = DRAGONS[st.dragon].name;
-    const chips = [
-      `<span class="chip">${icon('chest', 'icon sm')} ${summary.containersBroken} container${summary.containersBroken === 1 ? '' : 's'}</span>`,
-      `<span class="chip">Dragon Rush ×${summary.rushCount}</span>`,
-      st.env === 'canyon' ? `<span class="chip">${icon('ring', 'icon sm')} ${summary.rings} wind ring${summary.rings === 1 ? '' : 's'}</span>` : '',
-      st.newBest ? '<span class="chip best">★ New best haul!</span>' : '',
-    ].join('');
+    const st = d.settlement;
+    const s = d.save;
+    const dr = s.dragons[st.dragon];
+    const lc = st.level_;
+    let title = 'Flight complete!';
+    let sub = '';
+    if (d.kind === 'rush') {
+      title = d.early ? 'Flight ended early' : st.newBest ? 'New best haul!' : 'Flight complete!';
+      sub = `${d.summary?.rushCount ?? 0} Dragon Rush${d.summary?.rushCount === 1 ? '' : 'es'} · ${d.summary?.containersBroken ?? 0} containers · ${d.summary?.rockHits ?? 0} rock hits`;
+    } else if (d.kind === 'trials') {
+      const m = st.trial?.medal ?? 0;
+      title = d.practice ? 'Practice run finished' : m ? `${MEDALS[m]} medal!` : 'Course finished';
+      sub = `${d.summary?.rings ?? 0} rings · ${d.summary?.collisions ?? 0} collision${d.summary?.collisions === 1 ? '' : 's'}`;
+    } else {
+      const a = d.arena!;
+      title = a.victory ? (a.endlessSeconds > 0 ? `Victory + ${fmtTime(a.endlessSeconds)} endless` : 'Victory!') : d.reason === 'bossLeft' ? 'The boss escaped' : d.reason === 'quit' ? 'You left the Arena' : `Defeated in wave ${a.wave}`;
+      sub = `${a.kills} enemies · ${a.elites} elite${a.elites === 1 ? '' : 's'} · ${fmtTime(a.activeSeconds)} active`;
+    }
+    const trial = d.trialId ? TRIAL_BY_ID.get(d.trialId) : undefined;
+    const nextCourse = trial ? TRIALS[TRIALS.indexOf(trial) + 1] : undefined;
+    const showNext = nextCourse && trialUnlocked(nextCourse.id, s.trials);
+    const ev = st.events;
+    const lines: string[] = [];
+    for (const r of st.modeRewards) lines.push(`${esc(r.source)}: ${rewardText(r.reward, r.convertedEssence)}`);
+    for (const c of ev.contracts) lines.push(`Contract complete: ${esc(c.title)} (+${rewardText(c.reward)})`);
+    for (const m of ev.milestones) lines.push(`Milestone: ${esc(m.title)}`);
+    for (const m of ev.mastery) lines.push(`Mastery: ${esc(m.title)} → ${esc(m.rewardText)}`);
+    for (const id of ev.newSpecies) lines.push(`<b>${SPECIES[id].name} joined your roster!</b>`);
+    for (const r of ev.regions) lines.push(`New region unlocked: ${r}`);
+    const levelLine =
+      lc.to > lc.from
+        ? `<div class="levelup">Level ${lc.from} → <b>${lc.to}</b>${lc.stageTo !== lc.stageFrom ? ` · evolved into its <b>${lc.stageTo}</b> form!` : ''}${lc.milestones.map((l) => `<br><small>Level ${l}: ${MILESTONE_LEVELS[l]}</small>`).join('')}</div>`
+        : '';
+    const haul =
+      d.kind === 'trials'
+        ? `<div class="haul-row">${icon('gold')}<b>${st.total.gold}</b> <span class="muted">collected on course${st.modeRewards.length ? ' (+ rewards below)' : ''}</span></div>`
+        : `<table class="haul-table2">
+            <tr><th></th><th>${icon('gold', 'icon sm')}</th><th>${icon('fruit', 'icon sm')}</th></tr>
+            <tr><td>Collected</td><td>${st.base.gold}</td><td>${st.base.fruit}</td></tr>
+            ${st.bonusPercent ? `<tr><td>Level bonus +${st.bonusPercent}%</td><td>+${st.bonus.gold}</td><td>+${st.bonus.fruit}</td></tr>` : ''}
+            <tr class="total"><td>Banked</td><td>${st.total.gold}</td><td>${st.total.fruit}</td></tr>
+          </table>${d.kind === 'arena' && d.arena?.victory ? '<small class="muted">Arena totals include everything banked at the victory checkpoint.</small>' : ''}`;
     this.el = el(`
-      <div class="results screen-enter">
-        <div class="panel results-panel">
-          <header class="results-head">
-            <h2>Flight complete!</h2>
-            <span class="muted">${name} · Level ${st.level} · ${ENVIRONMENTS[st.env].name}</span>
-            <button class="btn ghost small skip" data-a="skip">Skip</button>
-          </header>
-          <div class="results-main">
-            <table class="haul-table">
-              <thead><tr><th></th><th>${icon('gold')}<span class="sr">Gold</span></th><th>${icon('fruit')}<span class="sr">Emberfruit</span></th></tr></thead>
-              <tbody>
-                <tr><td>Collected this flight</td><td data-n="${st.base.gold}" data-d="0"></td><td data-n="${st.base.fruit}" data-d="0"></td></tr>
-                <tr><td>Level ${st.level} bonus (+${st.bonusPercent}%)</td><td data-n="${st.bonus.gold}" data-p="+" data-d="0.35"></td><td data-n="${st.bonus.fruit}" data-p="+" data-d="0.35"></td></tr>
-                <tr class="total"><td>Banked to wallet</td><td data-n="${st.total.gold}" data-d="0.6"></td><td data-n="${st.total.fruit}" data-d="0.6"></td></tr>
-              </tbody>
-            </table>
-            <div class="run-stats">${chips}</div>
-            ${this.objectivesHtml(save)}
+      <div class="results2 screen-enter" role="dialog" aria-label="Results">
+        <div class="panel res-main">
+          <h1>${title}</h1>
+          <p class="muted">${sub}</p>
+          ${haul}
+          <div class="xp-block">
+            <div class="row spread"><b>${esc(dragonName(s, st.dragon))}</b><span>+${st.xp} XP</span></div>
+            ${dr.level >= 30 ? '<span class="muted">Maximum level</span>' : bar(dr.xp, xpToNext(dr.level), 'teal')}
+            ${levelLine}
           </div>
-          <aside class="results-side">
-            <canvas aria-hidden="true"></canvas>
-            ${this.newsHtml(save)}
-            <div class="wallet-line">Wallet: ${icon('gold', 'icon sm')} ${save.wallet.gold} · ${icon('fruit', 'icon sm')} ${save.wallet.fruit}</div>
-          </aside>
-          <footer class="results-actions">
-            <button class="btn ghost big" data-a="home">Home</button>
-            <button class="btn gold big" data-a="again">Play Again</button>
-          </footer>
+          <div class="key-block"><span class="row">${icon('key', 'icon sm')} ${st.keysEarned ? `<b>+${st.keysEarned} Aether Key${st.keysEarned > 1 ? 's' : ''} from play!</b>` : 'Key progress'}</span> ${bar(st.keyProgress, HATCHERY.secondsPerKey, 'teal thin')}<small class="muted">${d.practice ? 'Practice runs do not earn XP or key progress.' : `Next key in about ${fmtTime(HATCHERY.secondsPerKey - st.keyProgress)} of active play.`}</small></div>
+          ${trial && !d.practice ? `<p class="next-medal">${esc(nextMedalText(trial, s.trials[trial.id]?.bestMedal ?? 0))}</p>` : ''}
+          ${lines.length ? `<ul class="news2">${lines.map((l) => `<li>${l}</li>`).join('')}</ul>` : ''}
+        </div>
+        <div class="res-side">
+          <canvas aria-hidden="true"></canvas>
+          <div class="stack">
+            <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Play again'}</button>
+            ${showNext ? `<button class="btn" data-a="next">Next course: ${esc(nextCourse!.name)}</button>` : ''}
+            <button class="btn" data-a="play">${d.kind === 'trials' ? 'Course list' : 'Modes'}</button>
+            <button class="btn ghost" data-a="home">Home</button>
+          </div>
         </div>
       </div>`);
-    this.el.querySelectorAll<HTMLElement>('[data-n]').forEach((n) =>
-      this.nums.push({ el: n, value: Number(n.dataset.n), prefix: n.dataset.p ?? '', delay: Number(n.dataset.d) }),
-    );
-    this.portrait = sizeCanvas(this.el.querySelector('canvas')!, 300, 150, stageScale);
-    this.anim.celebrate(1.2);
-    this.paint();
-
-    const once = (fn: () => void) => (e: Event) => {
-      e.stopPropagation();
-      if (this.acted) return;
-      this.acted = true;
-      this.el.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = true));
-      fn();
-    };
-    $(this.el, '[data-a=again]').addEventListener('click', once(actions.again));
-    $(this.el, '[data-a=home]').addEventListener('click', once(actions.home));
-    $(this.el, '[data-a=skip]').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.skip();
+    const c = this.el.querySelector('canvas')!;
+    c.style.width = '300px';
+    c.style.height = '220px';
+    this.ctx = sizeCanvas(c, 300, 220, ui.scale);
+    this.el.addEventListener('click', (e) => {
+      const b = (e.target as Element).closest<HTMLElement>('[data-a]');
+      if (!b) return;
+      sfx.click();
+      const a = b.dataset.a as keyof ResultsActions;
+      if (a === 'next' && nextCourse) actions.next(nextCourse.id);
+      else if (a !== 'next') actions[a]();
     });
-    // Clicking anywhere else on the results panel skips the count-up (never the payout).
-    this.el.addEventListener('click', () => this.skip());
+    if (lc.to > lc.from || (st.trial?.medal ?? 0) >= 2 || d.arena?.victory) this.hero.cheer();
   }
 
-  skip(): void {
-    this.skipped = true;
-    this.paint();
-  }
-
-  private paint() {
-    for (const n of this.nums) {
-      const started = this.skipped || this.t >= n.delay;
-      const k = this.skipped ? 1 : Math.max(0, Math.min(1, (this.t - n.delay) / (COUNT_TIME - n.delay * 0.5)));
-      const v = Math.round(n.value * (1 - Math.pow(1 - k, 3)));
-      // rows that haven't started counting stay blank rather than showing a misleading 0
-      n.el.textContent = started ? `${n.prefix}${v}` : '';
-    }
-    const done = this.skipped || this.t > COUNT_TIME + 0.4;
-    this.el.querySelector('.skip')?.classList.toggle('hidden', done);
+  focus(): void {
+    this.el.querySelector<HTMLButtonElement>('[data-a=again]')?.focus({ preventScroll: true });
   }
 
   update(dt: number): void {
-    this.t += dt;
-    this.paint();
-    this.anim.update(dt, { vy: 0, maxVy: 1000, dashing: false, rush: false, perch: false });
-    const ctx = this.portrait;
-    ctx.clearRect(0, 0, 300, 150);
-    drawDragon(ctx, this.st.dragon, 150, 92, 0.7, this.anim.pose());
+    const s = this.d.save;
+    const id = this.d.settlement.dragon;
+    const dr = s.dragons[id];
+    const st = { species: id, stage: stageOf(dr.level), marking: dr.marking, region: this.d.settlement.region, perch: s.cosmetics.perch, banner: 'banner.none', reducedMotion: s.settings.reducedMotion, backdrop: false };
+    this.hero.update(dt, st);
+    this.hero.draw(this.ctx, st);
   }
 
-  private objectivesHtml(s: SaveData): string {
-    const reward = (g: number, f: number) => `${g ? `+${g} ${icon('gold', 'icon sm')}` : ''}${f ? ` +${f} ${icon('fruit', 'icon sm')}` : ''}`;
-    const done = this.st.objectives
-      .map((o) => `<li class="obj-done"><span class="tick" aria-hidden="true">✓</span><span class="obj-title">${o.title}</span><span class="obj-reward">${reward(o.reward.gold, o.reward.fruit)}</span></li>`)
-      .join('');
-    const active = activeObjectives(s)
-      .map(
-        (v) => `<li><span class="obj-title">${v.def.title}</span><span class="obj-bar">${progressBar(v.progress, v.def.target, 'teal')}<span>${v.progress}/${v.def.target}</span></span></li>`,
-      )
-      .join('');
-    return `
-      <div class="results-objectives">
-        <h3>Objectives</h3>
-        <ul class="obj-list compact">${done}${active}</ul>
-      </div>`;
-  }
-
-  /** Unlock eligibility and next-unlock progress. */
-  private newsHtml(s: SaveData): string {
-    const news: string[] = [];
-    for (const id of this.st.newlyEligible) news.push(`<div class="news ready">${DRAGONS[id].name}'s egg is ready to hatch at Home!</div>`);
-    if (this.st.canyonUnlocked) news.push('<div class="news ready">Sunset Canyon unlocked! Choose it on the Home screen.</div>');
-    if (news.length) return news.join('');
-    const next = nextUnlock(s);
-    if (next?.kind === 'dragon') {
-      const u = DRAGONS[next.id].unlock!;
-      const st = unlockStatus(s, next.id);
-      const req = u.requirement ? requirementProgress(s, u.requirement) : null;
-      return `
-        <div class="next-box">
-          <b>Next: ${DRAGONS[next.id].name}</b>
-          ${req ? `<div class="mini-row"><span>${u.requirement!.text}</span>${progressBar(req.value, req.target, 'teal')}</div>` : ''}
-          ${u.cost.gold ? `<div class="mini-row"><span>${Math.min(s.wallet.gold, u.cost.gold)}/${u.cost.gold} gold</span>${progressBar(s.wallet.gold, u.cost.gold)}</div>` : ''}
-          ${u.cost.fruit ? `<div class="mini-row"><span>${Math.min(s.wallet.fruit, u.cost.fruit)}/${u.cost.fruit} Emberfruit</span>${progressBar(s.wallet.fruit, u.cost.fruit, 'fruit')}</div>` : ''}
-          ${st.ready ? '<div class="news ready">Ready to hatch!</div>' : ''}
-        </div>`;
-    }
-    if (next?.kind === 'env') {
-      const p = requirementProgress(s, ENVIRONMENTS.canyon.unlock);
-      return `<div class="next-box"><b>Next: Sunset Canyon</b><div class="mini-row"><span>${p.value}/${p.target} full flights</span>${progressBar(p.value, p.target, 'teal')}</div></div>`;
-    }
-    const lvls = Object.values(s.dragons).filter((d) => d.owned && d.level < LEVELS.max).length;
-    return `<div class="next-box"><b>${lvls ? `${lvls} dragon${lvls > 1 ? 's' : ''} can still be fed` : 'Every dragon is fully fed'}</b><span>Best haul: ${s.stats.bestHaul}</span></div>`;
+  destroy(): void {
+    this.el.remove();
   }
 }

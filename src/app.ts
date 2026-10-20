@@ -1,68 +1,113 @@
-// App controller: screens, input routing, saving and run settlement.
+// App controller: navigation, input routing, saving, mode launching and run settlement.
 import { sfx } from './audio';
-import { DRAGONS, VIEW, type DragonId, type EnvId } from './config';
+import { VIEW } from './config';
+import { ensureContracts } from './contracts';
+import { stageOf } from './content/progression';
+import { SPECIES } from './content/species';
+import { TRIAL_BY_ID, medalFor, trialCourse, trialUnlocked } from './content/trials';
 import * as eco from './economy';
-import { ensureObjectives } from './objectives';
+import { rewardText } from './economy';
+import { unrevealed } from './hatchery';
 import { browserStore, loadSaveDetailed, writeSave, type KeyValueStore, type SaveData } from './save';
 import type { RunSummary } from './sim/flight';
-import { $, sizeCanvas } from './ui/dom';
+import { arenaStats, flightStats } from './stats';
+import { ArenaScreen, type ArenaReport } from './ui/arenaScreen';
+import { $, el, esc, sizeCanvas } from './ui/dom';
 import { FlightScreen } from './ui/flightScreen';
-import { HatchReveal } from './ui/hatch';
-import { HomeScreen, type HomeActions } from './ui/home';
-import { ResultsScreen } from './ui/results';
+import { ResultsScreen, type ResultsData } from './ui/results';
+import { createScreen } from './ui/screens';
+import { SettingsPanel } from './ui/settings';
+import { Shell } from './ui/shell';
+import type { Screen, Tab, UI } from './ui/types';
 
-export class App {
+export class App implements UI {
   save: SaveData;
+  readOnly: boolean;
+  recovery: string | null;
   private store: KeyValueStore | null;
   private stage = $(document, '#stage');
   private root = $(document, '#screen-root');
   private toastRoot = $(document, '#toast-root');
   private canvas = $(document, '#flight-canvas') as HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private scale = 1;
-  private home: HomeScreen | null = null;
-  private results: ResultsScreen | null = null;
+  scale = 1;
+  private shell: Shell | null = null;
+  private screen: Screen | null = null;
+  private tab: Tab = 'home';
   flight: FlightScreen | null = null;
-  private hatch: HatchReveal | null = null;
+  arena: ArenaScreen | null = null;
+  private results: ResultsScreen | null = null;
+  private settings: SettingsPanel | null = null;
+  private modal: HTMLElement | null = null;
   private runId: string | null = null;
+  private lastTrial: { id: string; practice: boolean } | null = null;
   /** Most recent settlement (read by automated checks; not used by gameplay). */
   lastSettlement: eco.Settlement | null = null;
   private last = performance.now();
+  /** Frame time samples for the performance readout in Settings. */
+  frameTimes: number[] = [];
 
   constructor() {
     this.store = browserStore();
     const loaded = loadSaveDetailed(this.store);
     let save = loaded.save;
-    if (loaded.fresh) {
-      save.settings.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    }
+    this.readOnly = loaded.readOnly;
+    this.recovery = loaded.recovery;
+    if (loaded.fresh) save.settings.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const stale = eco.abandonStaleRun(save);
-    save = ensureObjectives(stale.save);
+    save = ensureContracts(stale.save);
+    // Regions/milestones that became due under new rules (e.g. after migration) are granted once.
+    const settled = structuredClone(save);
+    const ev = eco.postProgress(settled);
+    save = settled;
     this.save = save;
-    writeSave(this.store, save);
-    sfx.muted = save.settings.muted;
-    this.applyMotionClass();
-    if (loaded.notice) this.toast(loaded.notice, 6000);
-    if (!this.store) this.toast('Saving is unavailable in this browser window; progress will reset on reload.');
-
+    if (!this.readOnly) writeSave(this.store, save);
+    this.applySettings();
     this.ctx = sizeCanvas(this.canvas, VIEW.width, VIEW.height, 1);
     this.resize();
     this.bindInput();
-    this.goHome();
+    this.go('home');
+    if (loaded.notice) this.toast(loaded.notice, 7000);
+    if (!this.store) this.toast('Saving is unavailable in this browser window; progress will reset on reload.', 6000);
     if (stale.abandoned) {
-      this.toast('Your last flight was interrupted by a reload, so its unbanked haul was lost.', 6000);
+      const what = stale.mode === 'arena' ? 'Your Arena session was interrupted; anything already banked at a checkpoint is kept.' : stale.mode === 'trials' ? 'Your last Sky Trial attempt was interrupted, so it did not count.' : 'Your last flight was interrupted by a reload, so its unbanked haul was lost.';
+      this.toast(what, 6000);
     }
+    if (unrevealed(save).length) this.toast('An egg you opened is waiting to be revealed in the Hatchery.', 5000);
+    this.announce(ev);
     requestAnimationFrame(this.frame);
   }
 
-  private persist(next: SaveData): void {
+  // --- persistence and settings ----------------------------------------------------------------
+
+  commit(next: SaveData): void {
+    const settingsChanged = next.settings !== this.save.settings;
     this.save = next;
-    writeSave(this.store, next);
+    if (!this.readOnly) {
+      if (!writeSave(this.store, next) && this.store) this.toast('Saving failed (storage may be full). Export your save from Settings.', 5000);
+    }
+    if (settingsChanged) this.applySettings();
+    this.shell?.render();
   }
 
-  /** Reduced motion also stills interface animation (pulses, bumps, slide-ins). */
-  private applyMotionClass() {
-    document.body.classList.toggle('reduced-motion', this.save.settings.reducedMotion);
+  private applySettings() {
+    const s = this.save.settings;
+    sfx.setVolumes({ master: s.master, music: s.music, sfx: s.sfx, muted: s.muted });
+    document.body.classList.toggle('reduced-motion', s.reducedMotion);
+    document.body.classList.toggle('low-effects', s.lowEffects);
+  }
+
+  /** Replaces the whole save (import): backed up first, then persisted in one write. */
+  replaceSave(next: SaveData): void {
+    this.readOnly = false;
+    this.save = ensureContracts(next);
+    writeSave(this.store, this.save);
+    this.applySettings();
+    this.go('home');
+  }
+
+  get storeRef(): KeyValueStore | null {
+    return this.store;
   }
 
   toggleFullscreen(): void {
@@ -74,7 +119,7 @@ export class App {
     }
   }
 
-  // --- layout ----------------------------------------------------------------
+  // --- layout ----------------------------------------------------------------------------------
 
   private resize = () => {
     const w = window.innerWidth;
@@ -84,10 +129,8 @@ export class App {
     const y = (h - VIEW.height * this.scale) / 2;
     this.stage.style.transform = `translate(${x}px, ${y}px) scale(${this.scale})`;
     this.ctx = sizeCanvas(this.canvas, VIEW.width, VIEW.height, this.scale);
-    this.home?.resize(this.scale);
   };
 
-  /** True within a padded zone around in-flight HUD buttons (e.g. Pause). */
   private nearHudButton(x: number, y: number): boolean {
     const pad = 44 * this.scale;
     for (const b of this.root.querySelectorAll('.hud button')) {
@@ -97,7 +140,6 @@ export class App {
     return false;
   }
 
-  /** Maps a client-space pointer to logical playfield coordinates (accounts for scaling/letterboxing). */
   toLogical(clientX: number, clientY: number): { x: number; y: number; inside: boolean } {
     const r = this.canvas.getBoundingClientRect();
     const x = ((clientX - r.left) / r.width) * VIEW.width;
@@ -107,223 +149,397 @@ export class App {
 
   private bindInput() {
     window.addEventListener('resize', this.resize);
-    document.addEventListener('fullscreenchange', () => {
-      this.resize();
-      this.home?.render(this.save);
-    });
+    document.addEventListener('fullscreenchange', this.resize);
     window.addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
     window.addEventListener('pointermove', (e) => {
       if (!this.flight) return;
-      // Reaching for a HUD button or a menu must not steer the dragon.
       if ((e.target as Element | null)?.closest?.('button, .overlay')) return;
       if (this.nearHudButton(e.clientX, e.clientY)) return;
       const p = this.toLogical(e.clientX, e.clientY);
-      // Only movement inside the playfield steers; leaving keeps the last target.
       if (p.inside && (e.movementX !== 0 || e.movementY !== 0 || e.pointerType !== 'mouse')) this.flight.pointerMove(p.y);
     });
     this.canvas.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || !this.flight) return;
-      e.preventDefault();
-      const p = this.toLogical(e.clientX, e.clientY);
-      if (p.inside) this.flight.pointerMove(p.y);
-      this.flight.pointerDash();
+      if (e.button !== 0) return;
+      if (this.flight) {
+        e.preventDefault();
+        const p = this.toLogical(e.clientX, e.clientY);
+        if (p.inside) this.flight.pointerMove(p.y);
+        this.flight.pointerDash();
+      } else if (this.arena) {
+        e.preventDefault();
+        this.arena.pointerDash();
+      }
     });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('keydown', (e) => {
       sfx.unlock();
+      const typing = (e.target as Element | null)?.closest?.('input, textarea, select');
+      if (typing) return;
       if (e.code === 'KeyF' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         this.toggleFullscreen();
         return;
       }
       if (this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
-      else if (this.hatch && (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space')) {
-        e.preventDefault();
-        this.hatch.finish();
+      else if (this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
+      else if (e.code === 'Escape') {
+        if (this.modal) this.closeModal(false);
+        else if (this.settings) this.closeSettings();
       }
     });
     window.addEventListener('keyup', (e) => {
       if (this.flight && this.flight.key(e.code, false, false)) e.preventDefault();
+      else if (this.arena && this.arena.key(e.code, false, false)) e.preventDefault();
     });
-    window.addEventListener('blur', () => this.flight?.focusLost());
+    window.addEventListener('blur', () => {
+      this.flight?.focusLost();
+      this.arena?.focusLost();
+    });
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.flight?.focusLost();
+      if (document.hidden) {
+        this.flight?.focusLost();
+        this.arena?.focusLost();
+      }
     });
   }
 
-  // --- loop --------------------------------------------------------------------
+  // --- loop ------------------------------------------------------------------------------------
 
   private frame = (now: number) => {
-    // Clamp frame time so a tab switch never produces a big jump.
-    const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
+    const raw = Math.max(0, (now - this.last) / 1000);
+    const dt = Math.min(0.1, raw);
     this.last = now;
+    this.frameTimes.push(raw * 1000);
+    if (this.frameTimes.length > 240) this.frameTimes.shift();
     if (this.flight) this.flight.update(dt);
-    else this.home?.update(dt);
+    else if (this.arena) this.arena.update(dt);
+    else this.screen?.update?.(dt);
     this.results?.update(dt);
-    this.hatch?.update(dt);
     requestAnimationFrame(this.frame);
   };
 
-  // --- screens -----------------------------------------------------------------
+  // --- screens ---------------------------------------------------------------------------------
 
-  private clearScreens() {
-    this.home?.el.remove();
-    this.home = null;
-    this.results?.el.remove();
+  private clearAll() {
+    this.screen?.destroy?.();
+    this.screen?.el.remove();
+    this.screen = null;
+    this.shell?.el.remove();
+    this.shell = null;
+    this.results?.destroy();
     this.results = null;
     this.flight?.destroy();
     this.flight = null;
+    this.arena?.destroy();
+    this.arena = null;
   }
 
-  goHome(): void {
-    this.clearScreens();
-    this.home = new HomeScreen(this.save, this.homeActions, this.scale);
-    this.root.appendChild(this.home.el);
-  }
-
-  startRun(): void {
-    if (this.flight) return;
-    sfx.unlock();
-    const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    // Persist the run marker before play begins.
-    this.persist(eco.startRun(this.save, runId, Date.now()));
-    const run = this.save.activeRun!;
-    this.runId = runId;
-    this.clearScreens();
-    const app = this;
-    this.flight = new FlightScreen(
-      {
-        canvas: this.canvas,
-        get ctx() {
-          return app.ctx; // re-created on resize
-        },
-        root: this.root,
-        reducedMotion: this.save.settings.reducedMotion,
-        onEnd: (summary, early) => this.endRun(summary, early),
-      },
-      run.dragon,
-      run.level,
-      (Math.random() * 2 ** 31) >>> 0,
-      run.env,
-    );
-  }
-
-  private endRun(summary: RunSummary, early: boolean) {
-    const runId = this.runId;
-    this.runId = null;
-    if (!runId) return;
-    const { save, settlement } = eco.settleRun(this.save, runId, summary);
-    if (settlement) {
-      this.persist(save);
-      this.lastSettlement = settlement;
+  go(tab: Tab, arg?: string): void {
+    const sameShell = !!this.shell && !this.flight && !this.arena && !this.results;
+    if (!sameShell) {
+      this.clearAll();
+      this.shell = new Shell(this);
+      this.root.appendChild(this.shell.el);
+    } else {
+      this.screen?.destroy?.();
+      this.screen?.el.remove();
     }
-    if (early || !settlement) {
-      this.goHome();
-      if (settlement) {
-        const bonus = settlement.bonusPercent ? ` (incl. +${settlement.bonusPercent}% bonus)` : '';
-        this.toast(`Flight ended early. Banked ${settlement.total.gold} gold and ${settlement.total.fruit} Emberfruit${bonus}.`);
-        this.announce(settlement.objectives);
-        for (const id of settlement.newlyEligible) this.toast(`${DRAGONS[id].name}'s egg is ready to hatch!`);
-      }
-      return;
-    }
-    sfx.finish();
-    this.clearScreens();
-    this.results = new ResultsScreen(summary, settlement, this.save, this.scale, this.save.settings.reducedMotion, {
-      again: () => this.startRun(),
-      home: () => this.goHome(),
+    this.tab = tab;
+    this.shell!.setTab(tab);
+    this.screen = createScreen(tab, this, arg);
+    this.shell!.content.appendChild(this.screen.el);
+    this.screen.render();
+    sfx.music('home');
+  }
+
+  refresh(): void {
+    this.screen?.render();
+    this.shell?.render();
+  }
+
+  get currentTab(): Tab {
+    return this.tab;
+  }
+
+  openSettings(): void {
+    if (this.settings) return;
+    this.settings = new SettingsPanel(this, () => this.closeSettings());
+    this.stage.appendChild(this.settings.el);
+    this.settings.focus();
+  }
+
+  closeSettings(): void {
+    this.settings?.el.remove();
+    this.settings = null;
+    this.refresh();
+  }
+
+  confirm(title: string, body: string, ok: string, cancel = 'Cancel'): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.closeModal(false);
+      const m = el(`
+        <div class="overlay modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+          <div class="panel">
+            <h2>${esc(title)}</h2>
+            <p>${body}</p>
+            <div class="row center"><button class="btn ghost" data-a="no">${esc(cancel)}</button><button class="btn gold" data-a="yes">${esc(ok)}</button></div>
+          </div>
+        </div>`);
+      (m as HTMLElement & { resolve?: (v: boolean) => void }).resolve = resolve;
+      $(m, '[data-a=yes]').addEventListener('click', () => this.closeModal(true));
+      $(m, '[data-a=no]').addEventListener('click', () => this.closeModal(false));
+      this.modal = m;
+      this.stage.appendChild(m);
+      ($(m, '[data-a=yes]') as HTMLButtonElement).focus({ preventScroll: true });
     });
-    this.root.appendChild(this.results.el);
-    (this.results.el.querySelector('[data-a=again]') as HTMLButtonElement | null)?.focus({ preventScroll: true });
+  }
+
+  private closeModal(v: boolean) {
+    const m = this.modal as (HTMLElement & { resolve?: (v: boolean) => void }) | null;
+    if (!m) return;
+    this.modal = null;
+    m.remove();
+    m.resolve?.(v);
   }
 
   toast(text: string, ms = 3800): void {
     const t = document.createElement('div');
     t.className = 'toast';
+    t.setAttribute('role', 'status');
     t.textContent = text;
     this.toastRoot.appendChild(t);
+    while (this.toastRoot.children.length > 4) this.toastRoot.firstElementChild?.remove();
     setTimeout(() => t.classList.add('out'), ms);
     setTimeout(() => t.remove(), ms + 450);
   }
 
-  // --- home actions ------------------------------------------------------------
-
-  private refreshHome() {
-    this.home?.render(this.save);
+  announce(ev: eco.ProgressEvents): void {
+    for (const c of ev.contracts) this.toast(`Contract complete: ${c.title} (+${rewardText(c.reward)})`);
+    for (const m of ev.milestones) {
+      const g = ev.rewards.find((r) => r.source === `Milestone: ${m.title}`);
+      this.toast(`Milestone: ${m.title}. ${rewardText(m.reward, g?.convertedEssence)}`, 5000);
+    }
+    for (const m of ev.mastery) this.toast(`Mastery: ${m.title} → ${m.rewardText}`, 4500);
+    for (const r of ev.regions) this.toast(`New region unlocked: ${r === 'canyon' ? 'Sunset Canyon' : r === 'coast' ? 'Prism Coast' : r === 'frost' ? 'Frostglass Reach' : 'Stormspire'}!`, 5000);
+    if (ev.contracts.length || ev.milestones.length || ev.mastery.length) sfx.levelUp();
   }
 
-  private announce(done: { title: string; reward: { gold: number; fruit: number } }[]) {
-    for (const o of done) {
-      const parts = [o.reward.gold ? `${o.reward.gold} gold` : '', o.reward.fruit ? `${o.reward.fruit} Emberfruit` : ''].filter(Boolean).join(' + ');
-      this.toast(`Objective complete: ${o.title} (+${parts})`);
+  // --- modes -----------------------------------------------------------------------------------
+
+  private beginRun(opts: eco.StartOptions): string {
+    sfx.unlock();
+    const runId = eco.newRunId();
+    this.commit(eco.startRun(this.save, runId, Date.now(), opts));
+    this.runId = runId;
+    this.clearAll();
+    return runId;
+  }
+
+  private canvasHost() {
+    const app = this;
+    return {
+      canvas: this.canvas,
+      get ctx() {
+        return app.ctx;
+      },
+      root: this.root,
+    };
+  }
+
+  startRush(): void {
+    if (this.flight || this.arena) return;
+    this.lastTrial = null;
+    this.beginRun({ mode: 'rush' });
+    const run = this.save.activeRun!;
+    const d = this.save.dragons[run.dragon];
+    const s = this.save.settings;
+    sfx.music('flight');
+    this.flight = new FlightScreen(
+      { ...this.canvasHost(), onEnd: (sum, early) => this.endFlight(sum, early) },
+      {
+        mode: 'rush',
+        stats: flightStats({ species: run.dragon, level: run.level, talents: d.talents }, 'rush'),
+        look: { species: run.dragon, stage: stageOf(run.level), marking: d.marking, trail: this.save.cosmetics.trail, abilityVariant: d.abilityVariant },
+        seed: (Math.random() * 2 ** 31) >>> 0,
+        region: run.region,
+        runSeconds: this.save.rush.expedition ? eco.EXPEDITION_SECONDS : undefined,
+        autoAbility: s.autoAbility,
+        reducedMotion: s.reducedMotion,
+        lowEffects: s.lowEffects,
+        showHitboxes: s.showHitboxes,
+      },
+    );
+  }
+
+  startTrial(id: string, practice: boolean): void {
+    if (this.flight || this.arena) return;
+    const def = TRIAL_BY_ID.get(id);
+    if (!def || !trialUnlocked(id, this.save.trials)) return this.toast('Finish the previous course to unlock this one.');
+    this.lastTrial = { id, practice };
+    this.beginRun({ mode: 'trials', region: def.region, course: id, practice });
+    const run = this.save.activeRun!;
+    const d = this.save.dragons[run.dragon];
+    const s = this.save.settings;
+    const course = trialCourse(id);
+    sfx.music('flight');
+    this.flight = new FlightScreen(
+      {
+        ...this.canvasHost(),
+        onEnd: (sum, early) => this.endFlight(sum, early),
+        onRestart: () => {
+          // abandon this attempt (no medal) and start again
+          this.commit(eco.abandonStaleRun(this.save).save);
+          this.flight?.destroy();
+          this.flight = null;
+          this.startTrial(id, practice);
+        },
+      },
+      {
+        mode: 'trials',
+        stats: flightStats({ species: run.dragon, level: run.level, talents: d.talents }, 'trials'),
+        look: { species: run.dragon, stage: stageOf(run.level), marking: d.marking, trail: this.save.cosmetics.trail, abilityVariant: d.abilityVariant },
+        seed: 7,
+        region: def.region,
+        course,
+        trial: def,
+        practice,
+        autoAbility: s.autoAbility,
+        reducedMotion: s.reducedMotion,
+        lowEffects: s.lowEffects,
+        showHitboxes: s.showHitboxes,
+      },
+    );
+  }
+
+  startArena(): void {
+    if (this.flight || this.arena) return;
+    this.lastTrial = null;
+    this.beginRun({ mode: 'arena' });
+    const run = this.save.activeRun!;
+    const d = this.save.dragons[run.dragon];
+    const s = this.save.settings;
+    sfx.music('arena');
+    this.arena = new ArenaScreen(
+      {
+        ...this.canvasHost(),
+        onCheckpoint: (r) => this.arenaCheckpoint(r),
+        onEnd: (r, reason) => this.endArena(r, reason),
+      },
+      {
+        stats: arenaStats({ species: run.dragon, level: run.level, talents: d.talents }),
+        look: { species: run.dragon, stage: stageOf(run.level), marking: d.marking, abilityVariant: d.abilityVariant },
+        region: run.region,
+        seed: (Math.random() * 2 ** 31) >>> 0,
+        autoAbility: s.autoAbility,
+        reducedMotion: s.reducedMotion,
+        lowEffects: s.lowEffects,
+        showHitboxes: s.showHitboxes,
+      },
+    );
+  }
+
+  private flightReport(sum: RunSummary, early: boolean, medal: number): eco.RunReport {
+    return {
+      completed: sum.completed && !early,
+      activeSeconds: sum.seconds,
+      qualifiedSeconds: sum.qualifiedSeconds,
+      gold: sum.gold,
+      fruit: sum.fruit,
+      chests: sum.chests,
+      pods: sum.pods,
+      dashBreaks: sum.dashBreaks,
+      containers: sum.containersBroken,
+      rings: sum.rings,
+      rushes: sum.rushCount,
+      pickups: sum.pickups,
+      abilityUses: sum.abilityUses,
+      rockHits: sum.rockHits,
+      trial:
+        sum.mode === 'trials' && this.lastTrial
+          ? { course: this.lastTrial.id, finished: sum.completed && !early, rings: sum.rings, collisions: sum.collisions, medal, durationSeconds: this.flight?.sim.runSeconds ?? sum.seconds }
+          : undefined,
+    };
+  }
+
+  private endFlight(sum: RunSummary, early: boolean) {
+    const runId = this.runId;
+    this.runId = null;
+    if (!runId) return;
+    const def = this.lastTrial ? TRIAL_BY_ID.get(this.lastTrial.id) : undefined;
+    const medal = def ? medalFor(def, sum.completed && !early, sum.rings, sum.collisions) : 0;
+    const { save, settlement } = eco.settleRun(this.save, runId, this.flightReport(sum, early, medal));
+    if (settlement) {
+      this.commit(save);
+      this.lastSettlement = settlement;
+    }
+    if (!settlement) return this.go('home');
+    if (sum.mode === 'trials' && early) {
+      this.go('play', 'trials');
+      this.toast('You left the course. No medal for this attempt.');
+      return;
+    }
+    if (medal) sfx.medal(medal);
+    else sfx.finish();
+    this.showResults({ kind: sum.mode === 'trials' ? 'trials' : 'rush', settlement, summary: sum, early, trialId: this.lastTrial?.id, practice: this.lastTrial?.practice });
+  }
+
+  private arenaReport(r: ArenaReport): eco.RunReport {
+    return {
+      completed: r.victory,
+      activeSeconds: r.activeSeconds,
+      qualifiedSeconds: r.qualifiedSeconds,
+      gold: r.gold,
+      fruit: r.fruit,
+      pickups: r.pickups,
+      abilityUses: r.abilityUses,
+      arena: { wave: r.wave, victory: r.victory, endlessSeconds: r.endlessSeconds, kills: r.kills, elites: r.elites, bosses: r.bosses },
+    };
+  }
+
+  private arenaCheckpoint(r: ArenaReport) {
+    if (!this.runId) return;
+    const { save, settlement } = eco.settleRun(this.save, this.runId, this.arenaReport(r), { final: false });
+    if (settlement) {
+      this.commit(save);
+      this.lastSettlement = settlement;
+      this.announce(settlement.events);
     }
   }
 
-  private homeActions: HomeActions = {
-    play: () => {
-      sfx.click();
-      this.startRun();
-    },
-    feed: (id: DragonId) => {
-      const r = eco.feed(this.save, id);
-      if (!r.ok) return this.toast(r.reason);
-      this.persist(r.save);
-      sfx.feed();
-      this.home?.onFed(r.level);
-      this.refreshHome();
-      this.announce(r.objectives);
-    },
-    select: (id: DragonId) => {
-      sfx.click();
-      this.persist(eco.selectDragon(this.save, id));
-      this.refreshHome();
-    },
-    hatch: (id: DragonId) => {
-      if (this.hatch) return;
-      const r = eco.unlockDragon(this.save, id);
-      if (!r.ok) return this.toast(r.reason);
-      this.persist(r.save); // paid and unlocked before the reveal plays
-      this.home?.onHatched(id);
-      this.refreshHome();
-      sfx.hatch();
-      this.hatch = new HatchReveal(id, this.scale, this.save.settings.reducedMotion, () => {
-        this.hatch = null;
-        this.toast(`${DRAGONS[id].name} joined your nest and is selected for your next flight.`);
-      });
-      this.stage.appendChild(this.hatch.el);
-    },
-    environment: (env: EnvId) => {
-      sfx.click();
-      this.persist(eco.selectEnvironment(this.save, env));
-      this.refreshHome();
-    },
-    buyDecoration: () => {
-      const r = eco.buyDecoration(this.save);
-      if (!r.ok) return this.toast(r.reason);
-      this.persist(r.save);
-      sfx.feed();
-      this.refreshHome();
-    },
-    toggleDecoration: () => {
-      sfx.click();
-      this.persist(eco.toggleDecoration(this.save));
-      this.refreshHome();
-    },
-    toggleMute: () => {
-      const s = structuredClone(this.save);
-      s.settings.muted = !s.settings.muted;
-      sfx.muted = s.settings.muted;
-      this.persist(s);
-      sfx.click();
-      this.refreshHome();
-    },
-    toggleReducedMotion: () => {
-      sfx.click();
-      const s = structuredClone(this.save);
-      s.settings.reducedMotion = !s.settings.reducedMotion;
-      this.persist(s);
-      this.applyMotionClass();
-      this.refreshHome();
-    },
-    toggleFullscreen: () => this.toggleFullscreen(),
-  };
+  private endArena(r: ArenaReport, reason: 'defeat' | 'quit' | 'victory' | 'endless' | 'bossLeft') {
+    const runId = this.runId;
+    this.runId = null;
+    if (!runId) return;
+    const { save, settlement } = eco.settleRun(this.save, runId, this.arenaReport(r), { final: true });
+    if (settlement) {
+      this.commit(save);
+      this.lastSettlement = settlement;
+    }
+    if (!settlement) return this.go('home');
+    sfx.music(null);
+    this.showResults({ kind: 'arena', settlement, arena: r, reason });
+  }
+
+  private showResults(data: Omit<ResultsData, 'save'>) {
+    this.clearAll();
+    this.results = new ResultsScreen({ ...data, save: this.save } as ResultsData, this, {
+      again: () => {
+        if (data.kind === 'rush') this.startRush();
+        else if (data.kind === 'arena') this.startArena();
+        else if (data.trialId) this.startTrial(data.trialId, !!data.practice);
+      },
+      next: (id: string) => this.startTrial(id, false),
+      home: () => this.go('home'),
+      play: () => this.go('play', data.kind === 'trials' ? 'trials' : undefined),
+      dragons: () => this.go('dragons'),
+    });
+    this.root.appendChild(this.results.el);
+    this.results.focus();
+  }
+
+  /** Visible for diagnostics: e.g. window.__emberwild.debugSpecies(). */
+  debugSpecies(): string[] {
+    return Object.values(SPECIES)
+      .filter((s) => this.save.dragons[s.id].owned)
+      .map((s) => s.name);
+  }
 }

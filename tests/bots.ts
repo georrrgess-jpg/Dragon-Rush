@@ -13,15 +13,19 @@ export interface BotOptions {
   /** Whether the bot looks at the course at all. */
   attentive: boolean;
   seed: number;
+  /** How much the pilot values wind rings (Trials pilots chase them). */
+  ringWeight?: number;
 }
 
 export const SKILLED: Omit<BotOptions, 'seed'> = { reaction: 0.08, noise: 10, dashSkill: 1, attentive: true };
 export const REASONABLE: Omit<BotOptions, 'seed'> = { reaction: 0.25, noise: 45, dashSkill: 0.7, attentive: true };
+/** A casual player: slow to react and imprecise, but paying attention. */
+export const CASUAL: Omit<BotOptions, 'seed'> = { reaction: 0.38, noise: 75, dashSkill: 0.4, attentive: true };
 export const CARELESS: Omit<BotOptions, 'seed'> = { reaction: 0.4, noise: 90, dashSkill: 0, attentive: false };
 export const NO_DASH: Omit<BotOptions, 'seed'> = { reaction: 0.12, noise: 20, dashSkill: 0, attentive: true };
 
 /** Chooses a lane that collects value and avoids rocks. */
-function chooseLane(sim: FlightSim, willDash: Set<number>): number {
+function chooseLane(sim: FlightSim, willDash: Set<number>, ringWeight: number): number {
   const wx = sim.dragonWorldX;
   let bestY = sim.y;
   let best = -Infinity;
@@ -45,7 +49,7 @@ function chooseLane(sim: FlightSim, willDash: Set<number>): number {
     for (const r of sim.rings) {
       const dx = r.x - wx;
       if (r.passed || dx < 0 || dx > 600) continue;
-      v += 1.5 * Math.exp(-Math.abs(lane - r.y) / 30) * Math.exp(-(dx / FLIGHT.scrollSpeed) * 0.8);
+      v += ringWeight * Math.exp(-Math.abs(lane - r.y) / 30) * Math.exp(-(dx / FLIGHT.scrollSpeed) * 0.8);
     }
     for (const b of sim.bolts) {
       const dx = b.x - wx;
@@ -56,6 +60,13 @@ function chooseLane(sim: FlightSim, willDash: Set<number>): number {
       const dx = r.x - wx;
       if (dx < -r.r - 40 || dx > 600) continue;
       if (Math.abs(lane - r.y) < r.r + FLIGHT.bodyRadius + 30) v -= 100;
+      // Don't cut corners: moving to this lane must not sweep through a rock that is close.
+      if (dx < 260) {
+        const lo = Math.min(sim.y, lane);
+        const hi = Math.max(sim.y, lane);
+        const band = r.r + FLIGHT.bodyRadius + 18;
+        if (r.y + band > lo && r.y - band < hi) v -= 60;
+      }
     }
     if (v > best) {
       best = v;
@@ -82,7 +93,7 @@ export function playRun(sim: FlightSim, opts: BotOptions, frameDt = 1 / 60): voi
         if (rng.chance(opts.dashSkill)) willDash.add(c.id);
       }
       if (opts.attentive) {
-        sim.setTarget(chooseLane(sim, willDash) + rng.range(-opts.noise, opts.noise));
+        sim.setTarget(chooseLane(sim, willDash, opts.ringWeight ?? 1.5) + rng.range(-opts.noise, opts.noise));
       } else {
         wander += opts.reaction * 0.9;
         sim.setTarget(VIEW.height / 2 + Math.sin(wander) * 230 + rng.range(-opts.noise, opts.noise));

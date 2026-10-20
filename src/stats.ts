@@ -92,7 +92,7 @@ export interface ArenaStats {
   levelBonusText: string;
 }
 
-export const ARENA_BASE_HP = 5;
+export const ARENA_BASE_HP = 6;
 
 export function arenaStats(l: Loadout): ArenaStats {
   const sp = SPECIES[l.species];

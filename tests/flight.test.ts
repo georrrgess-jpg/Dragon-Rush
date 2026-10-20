@@ -250,7 +250,7 @@ describe('rocks', () => {
             .map((r) => [r.y - (r.r ?? 58) - FLIGHT.bodyRadius, r.y + (r.r ?? 58) + FLIGHT.bodyRadius] as [number, number])
             .sort((a, b) => a[0] - b[0]);
           const free: number[] = [];
-          let cursor = FLIGHT.minY;
+          let cursor: number = FLIGHT.minY;
           for (const [a, b] of blocked) {
             if (a > cursor) free.push(Math.min(a, FLIGHT.maxY) - cursor);
             cursor = Math.max(cursor, b);

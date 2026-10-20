@@ -304,6 +304,8 @@ export function selectRegion(save: SaveData, mode: 'rush' | 'arena', region: Reg
 }
 
 export const EXPEDITION_FLIGHTS = 10;
+/** Length of an Expedition flight (seconds); ordinary flights are 60 s. */
+export const EXPEDITION_SECONDS = 120;
 
 export function setExpedition(save: SaveData, on: boolean): SaveData {
   if (on && save.lifetime.flights < EXPEDITION_FLIGHTS) return save;
@@ -442,7 +444,8 @@ export interface StartOptions {
 export function startRun(save: SaveData, runId: string, now: number, opts: StartOptions): SaveData {
   const s = clone(save);
   const dragon = s.dragons[s.selected].owned ? s.selected : 'ember';
-  const region = opts.region && s.unlockedRegions.includes(opts.region) ? opts.region : opts.mode === 'arena' ? s.arena.region : s.rush.region;
+  // Trials courses unlock by completion, not by Rush region progress, so their region is used as given.
+  const region = opts.mode === 'trials' && opts.region ? opts.region : opts.region && s.unlockedRegions.includes(opts.region) ? opts.region : opts.mode === 'arena' ? s.arena.region : s.rush.region;
   s.activeRun = {
     id: runId,
     mode: opts.mode,
