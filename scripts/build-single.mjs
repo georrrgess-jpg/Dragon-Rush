@@ -12,5 +12,5 @@ html = html.replace(/<script type="module" crossorigin src="[^"]*"><\/script>/, 
 html = html.replace('</body>', () => `<script type="module">\n${js}\n</script>\n</body>`);
 if (html.includes('assets/')) throw new Error('Unresolved asset reference in single-file build');
 
-writeFileSync('emberwild-dragon-rush.html', html);
-console.log(`Wrote emberwild-dragon-rush.html (${Math.round(html.length / 1024)} KB)`);
+writeFileSync('emberwild-dragon-rush4.html', html);
+console.log(`Wrote emberwild-dragon-rush4.html (${Math.round(html.length / 1024)} KB)`);
