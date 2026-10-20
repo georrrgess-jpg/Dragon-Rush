@@ -22,7 +22,8 @@ npm test              # all tests (Vitest): sims, economy, saves, hatchery, Tria
 npm run balance       # Rush balance table from scripted pilots
 npm run typecheck     # TypeScript, no emit
 npm run build         # typecheck + production build into dist/
-npm run build:single  # rebuild emberwild-dragon-rush4.html
+npm run build:single  # rebuild emberwild-dragon-rush4.html (minified)
+npm run build:single-full  # readable, unminified single file: emberwild-dragon-rush4-full.html
 ```
 
 Development pages: `?gallery` (every species × evolution stage from the side and above, eggs at three detail tiers; markings, pose, detail tier, light/dark background, frozen time, reduced-motion and low-effects previews, collision and attachment-point overlays; URL params `&species=ember,tide&pose=dash&t=1.2&bg=dark`) and `?backgrounds` (the five regions and Arena floors).

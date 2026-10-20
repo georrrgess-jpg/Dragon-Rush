@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "balance": "vitest run tests/balance.test.ts --reporter=verbose",
-    "build:single": "npm run build && node scripts/build-single.mjs"
+    "build:single": "npm run build && node scripts/build-single.mjs",
+    "build:single-full": "tsc --noEmit && vite build --minify false --outDir dist-full && node scripts/build-single.mjs dist-full emberwild-dragon-rush4-full.html"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
