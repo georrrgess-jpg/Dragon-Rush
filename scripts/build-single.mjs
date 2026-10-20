@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 
 const dist = process.argv[2] ?? 'dist';
-const outFile = process.argv[3] ?? 'emberwild-dragon-rush4.html';
+const outFile = process.argv[3] ?? 'emberwild-dragon-rush5.html';
 const assets = readdirSync(`${dist}/assets`);
 const css = readFileSync(`${dist}/assets/${assets.find((f) => f.endsWith('.css'))}`, 'utf8');
 const js = readFileSync(`${dist}/assets/${assets.find((f) => f.endsWith('.js'))}`, 'utf8').replaceAll('</script', '<\\/script');

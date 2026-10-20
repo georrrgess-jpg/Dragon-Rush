@@ -92,7 +92,8 @@ An endless flight that opens after 2 full Rush flights. Same controls as Rush.
 - **Bad-luck protection**: the 10th egg in a row without an Epic or better is guaranteed Epic or Legendary (14 : 3); the 40th egg in a row without a Legendary is guaranteed Legendary.
 - A dragon you already own becomes Essence: Common 10, Rare 25, Epic 60, Legendary 150.
 - The result is decided and saved before the reel starts; the animation only shows it. **Skip** reveals it at once; if the page closes mid-reel, the Hatchery shows the same result next time without charging again.
-- **Quick reveal** (checkbox in the Hatchery) shortens the hatching animation; with reduced motion it is a short fade.
+- The hatch grows with rarity (Common hops, Rare beams of element light, Epic a shaft of light, and each Legendary its own scene). **Reveal now** skips it; **Quick reveal** (checkbox in the Hatchery) shortens it; with reduced motion it is a short fade. **Open 5** reveals the rarest egg last and ends with a summary.
+- The other eggs on the reel are decoration drawn at the normal odds; they never hint at what you were close to.
 
 ## Contracts and the Journal
 
@@ -100,4 +101,4 @@ Three contracts are active at a time (from any mode). Each pays once; one free r
 
 ## Accessibility
 
-Settings: separate volumes, mute, **reduced motion** (still menus and portraits, no screen shake, a short calm reveal instead of the egg reel and hatching), **low effects** (fewer particles, simpler dragon detail, no glows), **screen shake** on/off, **auto-activate ability** (shown as an assist in the HUD), collision outlines, a control reference and **Show the short tutorials again**. All menus work with the keyboard; resource chips explain themselves on hover and on keyboard focus. Rarity is always shown with its own symbol shape (one gem, two gems, three gems, a crowned star) and its name, never colour alone; hazard warnings stay visible with reduced motion.
+Settings: separate volumes, mute, **reduced motion** (still menus and portraits, no screen shake, a short calm reveal instead of the egg reel and hatching), **low effects** (fewer particles, simpler dragon detail, no glows), **screen shake** on/off, **auto-activate ability** (shown as an assist in the HUD), collision outlines, a control reference and **Show the short tutorials again**. All menus work with the keyboard; resource chips explain themselves on hover and on keyboard focus. Rarity is always shown with its own symbol shape (one gem, two gems, three gems, a crown) and its name, never colour alone; hazard warnings stay visible with reduced motion.

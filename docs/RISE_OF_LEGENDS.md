@@ -17,16 +17,138 @@ Verified in the code (not assumed from earlier briefs):
 - **Rendering**: fixed 1280×720 stage scaled to the window; Canvas 2D renderers; cached backgrounds; bounded caches keyed by art revision.
 - **Update 4 items present**: richer species art and eggs, Observatory, Egg Codex, collection tools, rendering/UI polish — all exist and are kept.
 
-## 2. Save safety for Update 5
-Save stays **v3**; new fields are optional and default when absent (sanitize is idempotent): `prefs.lastMode`, `prefs.dismissedGoal`, `prefs.tutorials`, `settings.screenShake`, `ascent` records (best / bestAssist / runs / bestRegion). Existing dragons, levels, mastery, favorites, unlocks, resources, settings and hatch history are untouched. Odds, pity, costs and duplicate conversion are unchanged.
+## 2. Save migration notes
+- The save stays **version 3**; there is no migration step and no data is rewritten. Update 4 saves load as they are.
+- New optional fields, filled with defaults by the (idempotent) sanitize when absent or invalid:
+  - `prefs.lastMode` (`'rush'`; only a known mode id is accepted, and a locked mode falls back to Rush on the menu),
+  - `prefs.dismissedGoal` (`null`; at most 80 characters),
+  - `prefs.tutorials` (`[]`; deduplicated, at most 60 ids of 40 characters),
+  - `prefs.keysSeen` (`0`; clamped to the keys you hold whenever the game saves — an existing save that already holds keys shows the Hatchery dot once, until the Hatchery is visited),
+  - `settings.screenShake` (`true`),
+  - `ascent` record: `best`, `bestAssist`, `runs`, `bestRegion`, `bestScore`, `bestScoreAssist`, `assist` (all zero / null / false).
+  - `activeRun.mode` now also accepts `'ascent'` so a reload mid-Ascent is recognised.
+- Counters are clamped to 10¹² to keep a hand-edited save from overflowing.
+- Art caches are keyed by `ART_REV` 6 (was 4) and `EGG_ART_REV` 2 (was 1); these are render-cache keys only and are not stored in the save.
+- Unchanged: dragons, levels, XP, talents, mastery, favorites, nicknames, markings, unlocks, resources, contracts, milestones already paid, records, hatch history, pity counters, odds (55/28/14/3), pity thresholds (10 / 40), duplicate Essence (10/25/60/150), Essence unlock costs and the key rate.
+- New milestones are evaluated against existing data (for example a save that already owns two Legendaries is paid `legend-2` once when the game loads); each pays exactly once like every other milestone.
+- Tests: `tests/collection.test.ts` and the save tests check defaults, idempotent sanitize and round-trips including the new fields; `tests/milestones5.test.ts` checks the new milestones.
 
-## 3. Checklist (filled in as work lands)
-- [x] Shared scaffolding: mode registry (`src/content/modes.ts`), `startMode`, save fields, public audio building blocks
-- [ ] Main menu
-- [ ] Rarity language + roster polish
-- [ ] Dragon Rush improvements
-- [ ] Dragon Arena improvements
-- [ ] Aether Ascent
-- [ ] Hatchery reel and rarity-scaled reveals
-- [ ] Collection / UI / settings / sound / personal bests / milestones
-- [ ] Performance, critics, verification, package `emberwild-dragon-rush5.html`
+## 3. Checklist
+
+`[x]` = implemented and verified by a test or a real (headless Chromium) browser check; `[~]` = implemented, partly verified; `[ ]` = not done.
+
+### Phase 2 — main menu
+- [x] Panoramic overlook scene with the active dragon on a region-themed ledge; cached layers, 55–60 fps at 1920×1080 (headless, see §6)
+- [x] Dominant Play button with the mode's objective and duration beside it
+- [x] One-click mode choice; remembers the last mode; first time is Dragon Rush; locked modes say why
+- [x] Nameplate with name, rarity badge, level and **Change dragon**
+- [x] Resource strip with hover and keyboard-focus labels
+- [x] Grouped navigation; one dismissible, actionable next goal
+- [x] Notification dots that clear on visit (Hatchery: new keys only)
+- [x] Hero click reaction (per-species personality)
+- [x] Hover / focus / pressed / selected / disabled / loading states
+- [~] "Understandable in 5 seconds" — judged by the UX critic, not by a real first-time player
+
+### Phase 3 — rarity language
+- [x] Symbol shape + word for each tier (◆, ◆◆, ◆◆◆, ♛), never colour alone
+- [x] Rarity anatomy per tier and a signature motif per Legendary, side and top views
+- [x] Same language on hero, cards, Observatory, eggs, reel, hatch, results, Ascent end screen
+- [x] Rarity independent of stage and element; markings (Radiant) no longer impersonate Legendary gold
+- [x] Kept under reduced motion and low effects (static frames/symbols)
+- [x] No hitbox or balance change (collision tests unchanged)
+
+### Phase 4 — every dragon
+- [x] 24 species × 4 stages × side and top (coverage sheet §4)
+- [x] Faces, horns, wings, feet, markings, elder ornaments from above
+- [x] Personality gestures, react, arrive, level-up, hit recovery with priorities (30 animation tests)
+- [~] Tiny Common charms are not drawn from above (too small to read)
+
+### Phase 5 — Dragon Rush
+- [x] Steering responsiveness at 60/144/240 Hz (keyboard and mouse)
+- [x] Trails with guide, fair pickup radius, trail score bonus (never changes currency)
+- [x] Bounded Rush charge that can't recharge during Rush
+- [x] Safe route vs TREASURE edge route; checkered finish
+- [x] Forgiving, explained hits; glanceable HUD; replayable tutorial; keyboard steering
+- [x] Results: awarded resources, score, tip, goal progress, Retry (R), Change mode
+- [~] Rush score is shown but not stored as a record (best haul is the record)
+
+### Phase 6 — Dragon Arena (the newest existing mode)
+- [x] Contextual tutorial; roles introduced one at a time with edge arrows; new Thorn Sower
+- [x] Wind-up "!" and dazed recovery on every attack; fair spawns; sticky targeting with reticle; pickup attraction
+- [x] Three-phase boss with announced transitions and a safe roar
+- [x] Paused upgrade breaks with Attack / Defense / Utility and exact numbers; held Space/Enter can't pick
+- [x] ≈ 4 minutes; endless continuation kept; Sky Trials unchanged and tested
+- [~] Win rates calibrated with scripted pilots only (casual 49–78 % across species), not human players
+
+### Phase 7 — Aether Ascent
+- [x] 3 wards, post-hit protection, six hazard families introduced gradually with banners
+- [x] 29 seeded chunks, reachability-validated, route flyable without dashing, speed cap, recovery stretches
+- [x] Optional challenge routes and caches; capped shrine upgrades; every ability participates
+- [x] Assist with separate records; rewards under the shared caps; 100 m minimum; no idle farming (input-qualified time); settles once; pauses on focus loss
+- [x] End screen: distance, best, cause, rewards, region, tip, Retry; first-run intro
+- [~] Difficulty curve calibrated with bots (`tests/ascentBot.test.ts`), not human playtests
+
+### Phase 8 — eggs and hatching
+- [x] Reel stops exactly on the committed award (400-opening agreement test); no placed near-misses
+- [x] Rarity-scaled reveals, a unique environment per Legendary, first-Legendary moment
+- [x] Reveal now (skip), Quick reveal, reduced-motion 1 s fade, Open 5 with rarest last and summary
+- [x] Transactions: one charge per double-click, reload recovery, Skip keeps the award (11/11 browser integrity checks + hatchery tests)
+- [x] Odds 55/28/14/3 and pity 10/40 unchanged (100k-draw distribution test)
+- [~] Sounds generated but never listened to (headless browser has no audio output)
+
+### Phase 9 — shared systems
+- [x] Collection search, rarity/element/ownership (incl. ★ Favorites) filters, sorts; remembered
+- [x] Personal bests per mode in the Journal
+- [x] Five permanent milestones paid in existing currencies
+- [x] Settings: reduced motion, low effects, screen shake, audio, controls reference, replay tutorials, visible focus
+- [~] Audio cues added for every mode; not listened to
+
+### Phase 10 — performance
+- [~] Measured in headless Chromium with software rendering (§6); real-GPU numbers not available
+
+### Phase 11 — critics
+- [x] Four critics (art/animation, UX, gameplay, engineering), fixes, then an independent re-review (§5)
+
+## 4. Roster and egg coverage
+
+### Dragons (side and top: all four stages H/J/A/E; elder ornament visible from above for every species)
+
+| Species | Rarity | Side (HJAE) | Top (HJAE, elder ornament) | Rarity accents | Idle / extra / signature | React | Arrive |
+|---|---|---|---|---|---|---|---|
+| Ember | Common | [x] | [x] | freckles | snort | hop | greeting |
+| Tide | Common | [x] | [x] | freckles | shake | headTilt | greeting |
+| Grove | Common | [x] | [x] | sprout | sniff | yawn | greeting |
+| Gale | Common | [x] | [x] | headTuft | preen | lookAround | greeting |
+| Rime | Common | [x] | [x] | freckles | sniff | headTilt | greeting |
+| Spark | Common | [x] | [x] | headTuft | shake | hop | greeting |
+| Cinder | Rare | [x] | [x] | hornBands, wingTipMarks, patternScales | sniff / wingStretch | tailFlick | greeting |
+| Ripple | Rare | [x] | [x] | wingTipMarks, tailBands, patternScales | shake / flutter | hop | greeting |
+| Bramble | Rare | [x] | [x] | crestSpines, patternScales, cheekSpurs | sniff / crestFlare | tailFlick | greeting |
+| Rootwarden | Rare | [x] | [x] | hornBands, patternScales, cheekSpurs | sniff / stomp | yawn | greeting |
+| Zephyr | Rare | [x] | [x] | wingTipMarks, crestSpines, tailBands | flutter / lookAround | hop | greeting |
+| Tempest | Rare | [x] | [x] | wingTipMarks, tailBands, crestSpines | wingStretch / crestFlare | lookAround | greeting |
+| Snowcap | Rare | [x] | [x] | hornBands, patternScales, cheekSpurs | shake / stomp | yawn | greeting |
+| Voltwing | Rare | [x] | [x] | crestSpines, wingTipMarks, patternScales | shake / crestFlare | lookAround | greeting |
+| Pyrelisk | Epic | [x] | [x] | armorLayer, emissiveSeams, wingBands, hornBands | sniff / crestFlare / stomp | snort | [x] |
+| Abyssfin | Epic | [x] | [x] | layeredFrill, wingEyespots, emissiveSeams, tailBands | sniff / lookAround / lureSway | headTilt | [x] |
+| Orchid | Epic | [x] | [x] | layeredFrill, wingEyespots, patternScales | sniff / wingStretch / bloom | preen | [x] |
+| Cloudtail | Epic | [x] | [x] | layeredFrill, wingBands, tailBands | shake / flutter / fluffShake | yawn | [x] |
+| Frostfang | Epic | [x] | [x] | armorLayer, wingBands, emissiveSeams, crestSpines | sniff / wingStretch / prowl | lookAround | [x] |
+| Thundercrest | Epic | [x] | [x] | armorLayer, emissiveSeams, wingBands, hornBands | sniff / wingStretch / roar | stomp | [x] |
+| Solpyre | Legendary | [x] | [x] | solarFans, gilded, patternScales | preen / wingStretch / sunSalute | headRaise | [x] long |
+| Leviara | Legendary | [x] | [x] | regalFins (head and chest fins, pearls, reflections), gilded, patternScales | preen / crestFlare / tideSway | headRaise | [x] long |
+| Glacielle | Legendary | [x] | [x] | crystalCrown, gilded, aurora wing band | preen / crestFlare / crystalChime | headRaise | [x] long |
+| Astralux | Legendary | [x] | [x] | constellation (body, arcs of light on the wings), gilded | preen / lookAround / stargaze | headTilt | [x] long |
+
+### Eggs
+All 24 species have a designed egg (Update 4) drawn at icon, card and codex tiers, with fractures along designed seams. Update 5 adds a rarity trim baked into every shell (Common one stud; Rare silver beaded collar; Epic double violet collar with a glowing inlay; Legendary gold collar with scrolls and a star gem) and redesigns Ember, Cinder, Spark, Voltwing and Thundercrest.
+
+| Reveal | Common (6 eggs) | Rare (8) | Epic (6) | Legendary (4) |
+| --- | --- | --- | --- | --- |
+| Reel card with frame, crest, plaque | [x] | [x] | [x] | [x] |
+| Hatch presentation | hops, dust | element beams, ring | light shaft, flash, two shockwaves, leap | own environment: Solpyre dawn & flare · Leviara rising water & pearl bloom · Glacielle aurora & crystals · Astralux nightfall & constellation |
+| Arrival pose | short greeting | short greeting | full (2.0 s) | long (2.4 s) + first-Legendary placard |
+| Reduced motion | 1 s fade | 1 s fade | 1 s fade | 1 s fade, static Legendary backdrop |
+| Open 5 | [x] | [x] | [x] | [x] lasting pedestal and motif, revealed last |
+| Normal / quick timing | 4.8 s / 2.2 s | 5.0 s / 2.3 s | 5.2 s / 2.4 s | 5.5 s / 2.5 s (first: 6.7 s / 3.0 s) |
+

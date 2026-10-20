@@ -1,5 +1,53 @@
 # Changelog
 
+## Update 5 — Rise of Legends
+
+### New mode: Aether Ascent
+- An **endless flight** that opens after 2 full Rush flights (a toast announces it). Same controls as Rush, **3 wards** with a moment of protection after each hit, and six hazard families introduced one at a time with a first-time banner: floating ruins, wind gates, crystal shutters, storm lanes, sky guardians (sentinels and announced hawks) and breaking bridges/debris.
+- Built from **29 hand-made chunks**, seeded and checked by a reachability test so every sequence has a route that can be flown **without dashing**; speed is capped, calm stretches follow hard sections, and optional challenge routes and caches add score.
+- **Shrines** pause for a choice of three capped upgrades (keys 1–3) and bank what you have earned. Every species' ability does something here (short ward, rubble clearing, slowing the sky).
+- **Assist** (offered on the first-run intro and in Play): one extra ward, a gentler speed-up, 15 % slower hazards with earlier warnings, one ward restored per shrine. Assisted runs keep separate records.
+- Rewards use the same per-minute caps as other modes; runs under 100 m don't count; settlement happens once; the run pauses on focus loss. The end screen shows distance, best, what ended the run, rewards, region and a tip, with **Retry**.
+
+### Main menu
+- A new **panoramic home scene** with your dragon on a region-themed overlook. The big gold **Play** button sits next to the chosen mode's objective and duration; other modes are one click away and the menu remembers the last one (Dragon Rush the first time).
+- Your dragon's name, rarity badge and level sit on a nameplate with **Change dragon**; clicking the dragon makes it react in its own personality.
+- Resource strip with labels on hover and keyboard focus, grouped navigation, one dismissible **next goal**, and notification dots that clear when you visit (the Hatchery dot only for keys you haven't seen yet).
+- Distinct hover, focus, pressed, selected, disabled and loading states throughout; the home scene is cached and holds 55–60 fps at 1920×1080 in our headless measurement.
+
+### Rarity language
+- Common, Rare, Epic and Legendary each have their own symbol (one gem, two gems, three gems, a crown ♛), materials and anatomy: charms for Common, bands/crests/patterned scales for Rare, layered frills, armour and controlled glowing seams for Epic, and a signature motif per Legendary (Solpyre's solar fans, Leviara's regal fins and pearls, Glacielle's crystal crown, Astralux's constellations).
+- Used consistently on the home hero, collection cards (frames, per-Legendary crests), Observatory (aura), eggs (rarity trim baked into each shell), the reel, the hatch, results and the Ascent end screen. Rarity is never shown by colour alone and stays visible with reduced motion and low effects. Radiant markings no longer borrow Legendary gold. Hitboxes and balance are unchanged.
+
+### Dragons
+- Polish pass on all 24 species, every stage, side and top view: faces (lids, catchlights, brows), horns seated on the head, distinct claw vs talon feet, wing joints per wing type, markings that follow the body, elder ornaments visible from above, serpents that fit cards, results and perches.
+- **Personalities**: per-species idle gestures, a click reaction, an arrival pose (long for Epic and Legendary), a level-up reaction and a recovery after hits, layered under hit > dash > ability so nothing jumps. Reduced motion keeps only facial changes.
+
+### Dragon Rush
+- More responsive steering (mouse or W/S at any refresh rate), coin and fruit **trails** with a dotted guide and a score bonus for completing them, a fair pickup radius, a **TREASURE** edge route beside a safe route, a checkered finish, forgiving hits that explain themselves and never take resources, a bounded Rush charge that can't recharge itself during Rush, a glanceable HUD and a replayable tutorial.
+- Results show what was awarded, score, best chain, trails and treasure, a tip, goal progress, **Retry** (R) and **Change mode**.
+
+### Dragon Arena
+- Contextual first-time tutorial, one role introduced at a time with an edge arrow, a new **Thorn Sower** enemy, red wind-ups with "!" and a short dazed recovery for every attack, fair spawns away from the player, sticky targeting with a reticle, pickup attraction, a three-phase boss with announced transitions and a safe roar, and upgrade breaks that pause everything with one Attack, one Defense and one Utility choice showing exact before → after numbers. About four minutes; endless continuation kept. Arena Emberfruit raised to ≈ 33–35 per minute (still within the shared cap); species effects tuned so no dragon is far ahead.
+
+### Hatchery
+- The reel accelerates from what's on screen and stops exactly under the marker (the marker card is verified against the saved award), then the egg travels to a pedestal and hatches with presentation scaled by rarity: Common hops and dust, Rare element beams, Epic light shaft and shockwaves, and a **unique environment for each Legendary**, plus a first-Legendary moment. About 4.8–5.5 s (6.7 s first Legendary), about 2.2–3.0 s with Quick reveal, 1 s with reduced motion; **Reveal now** skips.
+- **Open 5** has its own stage, reveals the rarest last with a lasting Legendary presentation, lets you inspect each and ends with a summary (new, duplicates, Essence, best pull).
+- Five eggs redesigned (Ember, Cinder, Spark, Voltwing, Thundercrest). Disabled actions explain why. Odds (55/28/14/3), pity, duplicate Essence and recovery are unchanged and covered by new tests.
+
+### Collection, records and settings
+- ★ Favorites filter, rarity filter chips with symbols and tooltips, search and focus remembered for the session.
+- Journal **personal bests** per mode (Rush best haul, Ascent best and assisted best, Arena, Trials golds) and an Ascent guide.
+- Five permanent milestones paid in existing currencies (first Ascent run, 1,000 m, 3,000 m, all four rarities, two Legendaries).
+- Settings: **screen shake** toggle, auto-ability labelled as an assist, a controls reference, **Show the short tutorials again**, frame-time readout once enough samples exist. Escape behaves consistently (dialog → overlay → settings → back); confirmation dialogs focus Cancel; toasts sit at the bottom and never stack more than two.
+- New sound cues for Rush, Arena, Ascent and the hatch, built on the existing Web Audio voices.
+
+### Performance
+- Home scene cached (no per-frame canvas creation), region and Arena floor caches capped, Low effects renders gameplay at 1× resolution, resize hooks on every canvas screen. See `docs/RISE_OF_LEGENDS.md` for measurements and their environment.
+
+### Saves
+- Still **save v3**. New optional fields default when absent: `prefs.lastMode`, `prefs.dismissedGoal`, `prefs.tutorials`, `prefs.keysSeen`, `settings.screenShake` and an `ascent` record. Nothing existing is changed or reset.
+
 ## Update 4 — The Living Collection
 
 ### Dragons
