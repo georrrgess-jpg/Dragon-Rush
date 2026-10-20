@@ -4,6 +4,13 @@
 // hazy and low-contrast through the play band (y ≈ 120–600) so coins, fruit, chests,
 // rocks, rings and lightning columns drawn on top stay readable. Detail lives in the
 // far layers and along the top/bottom edges.
+//
+// Lighting: one key light from the upper left in every region (sun or glow placed there,
+// lit left flanks, shaded right flanks, occlusion under lips). Each region has a landmark
+// that repeats sparingly (great Sunleaf tree, cliff temple, sea tower + grand falls, frost
+// citadel, the Stormspire). Time-driven motion (drifting mist/cloud bands, sea shimmer,
+// snow, rain, restrained distant lightning) is frozen on the low-effects and
+// reduced-motion paths, where layers move only with the world scroll.
 import { VIEW } from '../config';
 import type { RegionId } from '../content/types';
 import { createRng, type Rng } from '../sim/rng';
@@ -72,6 +79,11 @@ function band(factor: number, y0: number, y1: number, seed: number, draw: (ctx: 
   ctx.translate(0, -y0);
   draw(ctx, createRng(seed));
   return { canvas: c, factor, y: y0 };
+}
+
+/** A band layer that also drifts sideways at `drift` px/s (wind); frozen on the still paths. */
+function driftBand(factor: number, drift: number, y0: number, y1: number, seed: number, draw: (ctx: Ctx, rng: Rng) => void): Layer {
+  return { ...band(factor, y0, y1, seed, draw), drift };
 }
 
 /** A tile that wraps both ways, for snow / rain. */
@@ -922,15 +934,15 @@ function buildIsles(): Scene {
       haze(ctx, '226,242,232', 0.08, 0.36, 0.0, 0.14);
     }),
     // near clouds hugging the screen edges, drifting slowly with the breeze
-    { ...band(0.75, 0, 120, 41, (ctx, rng) => {
+    driftBand(0.75, 14, 0, 120, 41, (ctx, rng) => {
       for (let i = 0; i < 6; i++) {
         const x = (i / 6) * TILE_W + rng.range(-80, 80);
         const s = rng.range(0.9, 1.5);
         const y = rng.range(-30, 10);
         wrapped(x, 220 * s, (xx) => cloud(ctx, xx, y, s, 'rgba(255,255,250,0.5)', undefined, 'rgba(255,255,255,0.35)'));
       }
-    }), drift: 14 },
-    { ...band(0.75, 610, H, 43, (ctx, rng) => {
+    }),
+    driftBand(0.75, 9, 610, H, 43, (ctx, rng) => {
       for (let i = 0; i < 7; i++) {
         const x = (i / 7) * TILE_W + rng.range(-80, 80);
         const s = rng.range(1, 1.6);
@@ -939,7 +951,7 @@ function buildIsles(): Scene {
           cloud(ctx, xx, y, s, 'rgba(255,255,248,0.62)', 'rgba(190,220,215,0.25)', 'rgba(255,255,255,0.45)'),
         );
       }
-    }), drift: 9 },
+    }),
     // foreground: leafy boughs dipping in from the top edge only, fading out before the play band
     band(0.95, 0, 110, 45, (ctx, rng) => {
       for (let i = 0; i < 3; i++) {
@@ -1366,17 +1378,14 @@ function buildCanyon(): Scene {
       ctx.fillRect(0, 0, TILE_W, H);
     }),
     // drifting dust motes in the low sun
-    {
-      ...band(0.8, 60, H - 20, 89, (ctx, rng) => {
-        for (let i = 0; i < 60; i++) {
-          ctx.fillStyle = `rgba(255,230,190,${rng.range(0.15, 0.4)})`;
-          ctx.beginPath();
-          ctx.arc(rng.range(0, TILE_W), rng.range(80, H - 40), rng.range(1, 2.5), 0, TAU);
-          ctx.fill();
-        }
-      }),
-      drift: 16,
-    },
+    driftBand(0.8, 16, 60, H - 20, 89, (ctx, rng) => {
+      for (let i = 0; i < 60; i++) {
+        ctx.fillStyle = `rgba(255,230,190,${rng.range(0.15, 0.4)})`;
+        ctx.beginPath();
+        ctx.arc(rng.range(0, TILE_W), rng.range(80, H - 40), rng.range(1, 2.5), 0, TAU);
+        ctx.fill();
+      }
+    }),
   ];
   return { sky, layers };
 }
@@ -1722,19 +1731,16 @@ function buildCoast(): Scene {
       }
     }),
     // a second, sparser set of glints that drifts against the first: the sea shimmers
-    {
-      ...band(0.05, COAST_HORIZON, H, 107, (ctx, rng) => {
-        for (let i = 0; i < 120; i++) {
-          const t = Math.pow(rng.next(), 1.4);
-          const y = COAST_HORIZON + 6 + t * (H - COAST_HORIZON);
-          const len = 4 + t * 26 * rng.range(0.5, 1.2);
-          const x = rng.range(0, TILE_W);
-          ctx.fillStyle = `rgba(255,255,255,${0.16 + t * 0.2})`;
-          wrapped(x, len, (xx) => ctx.fillRect(xx - len / 2, y, len, 1 + t * 1.5));
-        }
-      }),
-      drift: -12,
-    },
+    driftBand(0.05, -12, COAST_HORIZON, H, 107, (ctx, rng) => {
+      for (let i = 0; i < 120; i++) {
+        const t = Math.pow(rng.next(), 1.4);
+        const y = COAST_HORIZON + 6 + t * (H - COAST_HORIZON);
+        const len = 4 + t * 26 * rng.range(0.5, 1.2);
+        const x = rng.range(0, TILE_W);
+        ctx.fillStyle = `rgba(255,255,255,${0.16 + t * 0.2})`;
+        wrapped(x, len, (xx) => ctx.fillRect(xx - len / 2, y, len, 1 + t * 1.5));
+      }
+    }),
     // distant headlands with waterfalls
     band(0.08, 280, COAST_HORIZON + 6, 113, (ctx, rng) => {
       // a fainter, farther row first, for depth
@@ -1852,17 +1858,14 @@ function buildCoast(): Scene {
       ctx.fillRect(0, 0, TILE_W, H);
     }),
     // near spray mist along the bottom, drifting with the sea breeze
-    {
-      ...band(0.7, 620, H, 149, (ctx, rng) => {
-        for (let i = 0; i < 8; i++) {
-          const x = (i / 8) * TILE_W + rng.range(-80, 80);
-          const s = rng.range(0.9, 1.5);
-          const y = rng.range(705, 740);
-          wrapped(x, 220 * s, (xx) => cloud(ctx, xx, y, s, 'rgba(240,252,252,0.55)', undefined, 'rgba(255,255,255,0.4)'));
-        }
-      }),
-      drift: 10,
-    },
+    driftBand(0.7, 10, 620, H, 149, (ctx, rng) => {
+      for (let i = 0; i < 8; i++) {
+        const x = (i / 8) * TILE_W + rng.range(-80, 80);
+        const s = rng.range(0.9, 1.5);
+        const y = rng.range(705, 740);
+        wrapped(x, 220 * s, (xx) => cloud(ctx, xx, y, s, 'rgba(240,252,252,0.55)', undefined, 'rgba(255,255,255,0.4)'));
+      }
+    }),
   ];
   return { sky, layers };
 }
@@ -2265,27 +2268,24 @@ function buildFrost(): Scene {
       haze(ctx, '224,234,250', 0.05, 0.34, 0, 0.12);
     }),
     // low ground mist creeping between the ruins
-    {
-      ...band(0.5, 560, H, 233, (ctx, rng) => {
-        for (let i = 0; i < 16; i++) {
-          const x = (i / 16) * TILE_W + rng.range(-40, 40);
-          const y = rng.range(640, 700);
-          const rx = rng.range(120, 220);
-          wrapped(x, rx, (xx) => {
-            ctx.save();
-            ctx.translate(xx, y);
-            ctx.scale(1, 0.28);
-            const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-            g.addColorStop(0, 'rgba(244,247,255,0.34)');
-            g.addColorStop(1, 'rgba(244,247,255,0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
-            ctx.restore();
-          });
-        }
-      }),
-      drift: 10,
-    },
+    driftBand(0.5, 10, 560, H, 233, (ctx, rng) => {
+      for (let i = 0; i < 16; i++) {
+        const x = (i / 16) * TILE_W + rng.range(-40, 40);
+        const y = rng.range(640, 700);
+        const rx = rng.range(120, 220);
+        wrapped(x, rx, (xx) => {
+          ctx.save();
+          ctx.translate(xx, y);
+          ctx.scale(1, 0.28);
+          const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+          g.addColorStop(0, 'rgba(244,247,255,0.34)');
+          g.addColorStop(1, 'rgba(244,247,255,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+          ctx.restore();
+        });
+      }
+    }),
     // near snow drifts at the very bottom
     band(0.78, 640, H, 241, (ctx, rng) => {
       for (let i = 0; i < 9; i++) {
@@ -2629,8 +2629,7 @@ function buildStorm(): Scene {
       haze(ctx, '98,88,160', 0.06, 0.3, 0, 0.08);
     }),
     // near dark cloud wisps at the edges
-    {
-      ...band(0.72, 0, 110, 341, (ctx, rng) => {
+    driftBand(0.72, 12, 0, 110, 341, (ctx, rng) => {
       for (let i = 0; i < 8; i++) {
         const x = (i / 8) * TILE_W + rng.range(-60, 60);
         const s = rng.range(0.9, 1.3);
@@ -2639,10 +2638,7 @@ function buildStorm(): Scene {
         wrapped(x, 220 * s, (xx) => puffCloud(ctx, createRng(seed), xx, y, s, 'rgba(26,24,60,0.85)', 'rgba(110,95,180,0.6)', 7));
       }
     }),
-      drift: 12,
-    },
-    {
-      ...band(0.72, 640, H, 343, (ctx, rng) => {
+    driftBand(0.72, 8, 640, H, 343, (ctx, rng) => {
       for (let i = 0; i < 8; i++) {
         const x = (i / 8) * TILE_W + rng.range(-60, 60);
         const s = rng.range(0.9, 1.3);
@@ -2651,8 +2647,6 @@ function buildStorm(): Scene {
         wrapped(x, 220 * s, (xx) => puffCloud(ctx, createRng(seed), xx, y, s, 'rgba(70,60,128,0.85)', 'rgba(30,28,66,0.9)', 7));
       }
     }),
-      drift: 8,
-    },
     // rain streaks
     fallTile(1.15, 1100, 150, 353, (ctx, rng) => {
       ctx.lineCap = 'round';
