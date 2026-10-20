@@ -152,3 +152,35 @@ All 24 species have a designed egg (Update 4) drawn at icon, card and codex tier
 | Open 5 | [x] | [x] | [x] | [x] lasting pedestal and motif, revealed last |
 | Normal / quick timing | 4.8 s / 2.2 s | 5.0 s / 2.3 s | 5.2 s / 2.4 s | 5.5 s / 2.5 s (first: 6.7 s / 3.0 s) |
 
+## 5. Critic reviews, fixes and re-review
+
+Four critic agents reviewed the integrated build (each with its own scripts and captures in a headless browser and in the simulations): art and animation (ART5), UX (UX5), gameplay and balance (GAME5), engineering and performance (ENG5). Fix agents and the coordinator resolved the findings; then a fresh agent re-reviewed every critical and major finding on the changed build (commit a1a7f76) and swept for regressions. The reviews were done by these agents; no human playtest took place.
+
+### Findings and resolutions
+| ID | Severity | Finding | Resolution | Re-review |
+| --- | --- | --- | --- | --- |
+| GAME5-1 | critical | Keyboard steering didn't count as active play at ≥ 120 Hz, so keys and rewards stalled | Held steering keys now count as input at any refresh rate | PASS: 100 % qualified at 60/120/144/240 Hz (sim) and 60 / ≈153 Hz (browser); same gold at every rate |
+| GAME5-2 | major | Ascent distance spread 1.82× between species; clearing abilities had nothing to hit early | Per-ability Ascent tuning (`POWER_TUNING`); clearing abilities find cracked rubble early | PASS: 1.23× over 24 species × 30 runs |
+| GAME5-3 | major | Arena casual win rate varied widely by species (present before Update 5) | Shield/heal tuning, Grove heals once per wave | PASS (borderline): Ember ≈ 46 %, Grove ≈ 84 %, Orchid ≈ 82 % pooled over ≈ 250 runs |
+| GAME5-4…8 | minor/major | Assist too weak; hawk unannounced; no defensive shrine offers; dash phasing; Arena fruit 22/min; late Ascent flat; idle 0 m runs counted | Assist +79 % distance; hawk banner and arrow; one defensive offer guaranteed; 0.3 s dash protection; Arena fruit ≈ 33–35/min; late growth; 100 m minimum | Fixed; covered by `ascent5`, `ascentBot`, `arenaBalance` tests |
+| ART5-1 | major | Great Current drawn as a flat box over rocks | Flowing translucent water (Rush) and a water cone (Arena) | PASS |
+| ART5-2 | major | Open 5 Legendary had no lasting presentation | Rarest revealed last; gold pedestal, motif and badge stay | PASS |
+| ART5-3 | major | Serpents clipped (results, Observatory top view, cards) | Serpent framing in results and cards; Observatory top view framed per family and stage | Re-review found the top view still clipped → fixed again after the re-review: 0 clipped of 288 views (24 species × 4 stages × 3 poses, edge-pixel check) |
+| ART5-4 | major | Results / Ascent end screen lacked dragon and rarity | Rarity badge and aura on results; dragon and rarity on the Ascent end | PARTIAL at re-review (long news lists pushed it off-screen) → fixed: the end panel scrolls and starts at the top |
+| ART5-5…10 | minor | Pale halo, serpent perch tails, Legendary card crests, nameplate, SVG rarity chips, gallery clipping | All addressed | — |
+| UX5-1 | major | A held Space/Enter picked an upgrade card | Guard window; only a card the player focused can be activated | PASS (25 ms mashing for 2.5–7 s took no upgrade) |
+| UX5-2 | major | Long dragon names truncated on the home nameplate | Nameplate layout | PASS |
+| UX5-3 | major | Hatchery dot showed whenever any key was held | `prefs.keysSeen`, cleared on visit, clamped on spend | PASS |
+| UX5-4…16 | minor | Ascent intro/assist, unlock announcement, Escape consistency, confirm focus, toasts, filter tooltips and ♛ glyph, remembered dragon, disabled reasons, tooltip overlap, Settings from pause, frame-time readout, title | All addressed | — |
+| ENG5-1/2 | major | Home scene 38–57 fps (normal) / 30–38 (low) at 1920×1080 | Cached back layer, 1:1 scene | PASS: 56–59 normal, 56–58 low, 60 reduced |
+| ENG5-3…12 | minor/major | Low effects canvas resolution, keysSeen clamp, 100 m rule, auto-ability counted as input, mode guard, cache growth (Home 140 → 65 MB, Arena floors 157 → 31 MB), shared `shakeAllowed`, resize hooks, mode id list, single-file rebuild | All addressed | — |
+
+### New findings from the re-review, all fixed afterwards
+| Severity | Finding | Fix | Verified |
+| --- | --- | --- | --- |
+| major | Space as a Rush flight ended (or as an Ascent run crashed) activated the focused **Retry**, so the results were never seen | Results and the Ascent end screen focus their heading; Tab reaches the buttons; **R** still retries | Browser: Space mashed through the last second of Rush → results stay, focus on the heading; R retries. Same for an Ascent crash |
+| major | Ascent end screen couldn't scroll with many news lines | `max-height` + `overflow-y: auto` on the panel | Browser: 12 extra lines → panel 692 px tall at top 12 px, wheel scrolls |
+| minor | Observatory top view clipped long tails | See ART5-3 | 0 / 288 clipped |
+| minor | Toasts over the Open 5 summary; Ascent banner half-hidden behind the pause panel; Arena wave hint above the upgrade dialog | Toasts move to the stage's top-right while a hatch result card is shown; Ascent hint/banner and Arena hint/coach are hidden while paused or choosing and resume afterwards | Browser captures of pause, single and Open 5 results |
+| minor | Grove/Orchid casual Arena win rate ≈ 82–84 % | **Not changed** (see limitations) | — |
+
