@@ -49,6 +49,10 @@ export const ARENA = {
   /** Sticky targeting: switch only when a rival is this much closer (px, or fraction of the current distance). */
   retargetPx: 50,
   retargetFrac: 0.15,
+  /** Chance that a Bramble Grub or Dart Wisp drops an Emberfruit (scaled by drop passives). */
+  smallFruitChance: 0.55,
+  /** An elite still standing at the wave break retreats, dropping this much. */
+  eliteRetreat: { gold: 15, fruit: 8 },
 } as const;
 
 export type EnemyKind = 'chaser' | 'flanker' | 'shooter' | 'charger' | 'sower' | 'runner' | 'elite' | 'boss';
@@ -71,12 +75,12 @@ export interface EnemyDef {
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   chaser: { name: 'Bramble Grub', role: 'pursuer', intro: 'Bramble Grubs crawl after you. Keep moving: they are slow', hp: 30, speed: 82, r: 22, armor: 1, gold: 2, fruit: 0, xpWeight: 1 },
   flanker: { name: 'Dart Wisp', role: 'flanker', intro: 'Dart Wisps curve in, flash, then dart. Sidestep the dart', hp: 14, speed: 190, r: 16, armor: 1, gold: 2, fruit: 0, xpWeight: 1 },
-  shooter: { name: 'Spore Turret', role: 'ranged', intro: 'Spore Turrets aim a red line, then fire. Step off the line', hp: 42, speed: 70, r: 24, armor: 1, gold: 4, fruit: 2, xpWeight: 2 },
-  charger: { name: 'Plated Ram', role: 'charger', intro: 'Plated Rams show a red lane before charging. Leave the lane', hp: 95, speed: 70, r: 30, armor: 0.6, gold: 6, fruit: 2, xpWeight: 3 },
-  sower: { name: 'Thorn Sower', role: 'area controller', intro: 'Thorn Sowers mark a red circle under you. Leave before it fills', hp: 40, speed: 60, r: 24, armor: 1, gold: 4, fruit: 2, xpWeight: 2 },
-  runner: { name: 'Treasure Imp', role: 'treasure runner', intro: 'A Treasure Imp! It flees and escapes soon: catch it for loot', hp: 36, speed: 150, r: 20, armor: 1, gold: 12, fruit: 5, xpWeight: 2 },
-  elite: { name: 'Elder Thornback', role: 'elite', intro: 'Elder Thornback: slams rings and fires thorns. Watch the ground', hp: 520, speed: 75, r: 46, armor: 0.75, gold: 40, fruit: 15, xpWeight: 10 },
-  boss: { name: 'Stormcrown Wyrm', role: 'boss', intro: 'The Stormcrown Wyrm arrives! Learn its three phases', hp: 1100, speed: 90, r: 64, armor: 0.85, gold: 80, fruit: 30, xpWeight: 30 },
+  shooter: { name: 'Spore Turret', role: 'ranged', intro: 'Spore Turrets aim a red line, then fire. Step off the line', hp: 42, speed: 70, r: 24, armor: 1, gold: 4, fruit: 3, xpWeight: 2 },
+  charger: { name: 'Plated Ram', role: 'charger', intro: 'Plated Rams show a red lane before charging. Leave the lane', hp: 95, speed: 70, r: 30, armor: 0.6, gold: 6, fruit: 4, xpWeight: 3 },
+  sower: { name: 'Thorn Sower', role: 'area controller', intro: 'Thorn Sowers mark a red circle under you. Leave before it fills', hp: 40, speed: 60, r: 24, armor: 1, gold: 4, fruit: 3, xpWeight: 2 },
+  runner: { name: 'Treasure Imp', role: 'treasure runner', intro: 'A Treasure Imp! It flees and escapes soon: catch it for loot', hp: 36, speed: 150, r: 20, armor: 1, gold: 12, fruit: 6, xpWeight: 2 },
+  elite: { name: 'Elder Thornback', role: 'elite', intro: 'Elder Thornback: slams rings and fires thorns. Watch the ground', hp: 520, speed: 75, r: 46, armor: 0.75, gold: 40, fruit: 20, xpWeight: 10 },
+  boss: { name: 'Stormcrown Wyrm', role: 'boss', intro: 'The Stormcrown Wyrm arrives! Learn its three phases', hp: 1100, speed: 90, r: 64, armor: 0.85, gold: 80, fruit: 40, xpWeight: 30 },
 };
 
 export type EnemyPhase = 'move' | 'aim' | 'charge' | 'rest' | 'flee' | 'roar';
@@ -228,7 +232,8 @@ export type ArenaEvent =
   | { type: 'shieldBlock'; x: number; y: number }
   | { type: 'dash' }
   | { type: 'dashDenied' }
-  | { type: 'ability'; effect: ArenaEffect; power: number; x: number; y: number; dir: number; targets: { x: number; y: number }[] }
+  /** `healed`: health restored by a heal ability (0 when it was already used this wave). */
+  | { type: 'ability'; effect: ArenaEffect; power: number; x: number; y: number; dir: number; targets: { x: number; y: number }[]; healed?: number }
   | { type: 'abilityReady' }
   | { type: 'abilityDenied' }
   | { type: 'waveStart'; wave: number; text: string }
@@ -299,6 +304,13 @@ export class ArenaSim {
   private inputY = 0;
   private dashRequested = false;
   private abilityRequested = false;
+  /** The pending ability request came from auto-activate (not player input). */
+  private abilityAuto = false;
+  /** The pending dash was started by an ability (Zephyr), not by the player. */
+  private dashFromAbility = false;
+  /** Wave key of the last heal from a heal ability (heals work once per wave). */
+  private healKey = -1;
+  private healHinted = false;
   abilityCharge = 0;
   readonly maxCharge: number;
   shieldHits = 0;
@@ -465,11 +477,18 @@ export class ArenaSim {
   }
   requestDash(): void {
     this.dashRequested = true;
+    this.dashFromAbility = false;
     this.engage();
   }
-  requestAbility(): void {
+  /**
+   * Asks for the active ability. `auto` marks the Settings auto-activate path: it is not player
+   * input, so it never refreshes the engagement window that qualified time depends on.
+   */
+  requestAbility(auto = false): void {
+    // a manual press wins over a pending automatic one
+    this.abilityAuto = this.abilityRequested ? this.abilityAuto && auto : auto;
     this.abilityRequested = true;
-    this.engage();
+    if (!auto) this.engage();
   }
   drainEvents(): ArenaEvent[] {
     const e = this.events;
@@ -678,6 +697,7 @@ export class ArenaSim {
   private updatePlayer(dt: number) {
     if (this.dashRequested) {
       this.dashRequested = false;
+      const fromAbility = this.dashFromAbility;
       if (this.dashCd > 0 || this.dashT > 0) this.events.push({ type: 'dashDenied' });
       else {
         const l = Math.hypot(this.inputX, this.inputY);
@@ -695,11 +715,12 @@ export class ArenaSim {
         } else this.dashCd = this.dashCooldown;
         this.dashHit.clear();
         this.dashes += 1;
-        this.engage();
+        if (!fromAbility) this.engage();
         this.events.push({ type: 'dash' });
         const refund = this.stats.passive.dashChargeRefund;
         if (refund) this.addCharge(refund * this.chargeSeconds);
       }
+      this.dashFromAbility = false;
     }
     if (this.dashT > 0) {
       this.dashT -= dt;
@@ -764,6 +785,8 @@ export class ArenaSim {
     this.addCharge(dt * (safe ? this.stats.passive.safeChargeMult ?? 1 : 1));
     if (!this.abilityRequested) return;
     this.abilityRequested = false;
+    const auto = this.abilityAuto;
+    this.abilityAuto = false;
     if (this.abilityCharge < 1) {
       this.events.push({ type: 'abilityDenied' });
       return;
@@ -771,8 +794,8 @@ export class ArenaSim {
     const power = this.abilityScale * this.stats.abilityPower;
     this.abilityCharge = this.abilityCharge >= 2 - 1e-9 ? 0.35 : 0;
     this.abilityUses += 1;
-    this.engage();
-    this.fireAbility(this.stats.ability.arena, power);
+    if (!auto) this.engage();
+    this.fireAbility(this.stats.ability.arena, power, auto);
   }
 
   private nearest(maxRange = Infinity, from = { x: this.x, y: this.y }, exclude?: Set<number>): Enemy | null {
@@ -813,7 +836,13 @@ export class ArenaSim {
     return cur;
   }
 
-  private fireAbility(f: ArenaEffect, power: number) {
+  /** Heals from a heal ability work once per wave (endless: once per 40 s toughening step). */
+  private get healWaveKey(): number {
+    return this.endless ? 100 + Math.floor(this.endlessSeconds / 40) : this.wave;
+  }
+
+  private fireAbility(f: ArenaEffect, power: number, auto = false) {
+    let healed = 0;
     const targets: { x: number; y: number }[] = [];
     const tgt = this.target ?? this.nearest(900);
     const dir = tgt ? Math.atan2(tgt.y - this.y, tgt.x - this.x) : Math.atan2(this.faceY, this.faceX);
@@ -905,17 +934,26 @@ export class ArenaSim {
         this.dashCd = 0;
         this.strikeDashes = 2;
         this.dashRequested = true;
+        this.dashFromAbility = auto;
         break;
       case 'trail':
         this.trailT = f.duration * Math.min(1.5, power);
         this.trailDrop = 0;
         break;
       case 'heal':
-        this.hp = Math.min(this.maxHp, this.hp + f.amount);
+        // Heals once per wave; using it at full health does not spend that wave's heal.
+        if (this.hp < this.maxHp && this.healKey !== this.healWaveKey) {
+          healed = Math.min(this.maxHp, this.hp + f.amount) - this.hp;
+          this.hp += healed;
+          this.healKey = this.healWaveKey;
+        } else if (this.hp < this.maxHp && !this.healHinted) {
+          this.healHinted = true;
+          this.events.push({ type: 'hint', text: 'Healing works once per wave; the pull still gathers pickups' });
+        }
         for (const p of this.pickups) if (Math.hypot(p.x - this.x, p.y - this.y) <= f.pullRadius * power) p.pulled = true;
         break;
     }
-    this.events.push({ type: 'ability', effect: f, power, x: this.x, y: this.y, dir, targets });
+    this.events.push({ type: 'ability', effect: f, power, x: this.x, y: this.y, dir, targets, healed });
   }
 
   private knock(e: Enemy, strength: number, d: number) {
@@ -1136,9 +1174,9 @@ export class ArenaSim {
     for (const e of this.enemies) {
       this.events.push({ type: 'telegraph', x: e.x, y: e.y });
       if (e.kind === 'elite') {
-        this.gold += 15;
-        this.fruit += 5;
-        this.events.push({ type: 'hint', text: 'The elite retreats, dropping 15 gold and 5 Emberfruit' });
+        this.gold += ARENA.eliteRetreat.gold;
+        this.fruit += ARENA.eliteRetreat.fruit;
+        this.events.push({ type: 'hint', text: `The elite retreats, dropping ${ARENA.eliteRetreat.gold} gold and ${ARENA.eliteRetreat.fruit} Emberfruit` });
       }
     }
     this.enemies = [];
@@ -1570,7 +1608,7 @@ export class ArenaSim {
     const runner = e.kind === 'runner' ? this.stats.passive.runnerBonus : undefined;
     const base = e.kind === 'runner' ? e.loot : def.gold;
     const goldN = Math.round(base * (e.kind === 'chaser' || e.kind === 'flanker' ? (this.rng.chance(Math.min(1, 0.75 * drop)) ? 1 : 0) : 1)) + (runner?.gold ?? 0);
-    const fruitN = (e.kind === 'chaser' || e.kind === 'flanker' ? (this.rng.chance(0.35 * drop) ? 1 : 0) : def.fruit) + (runner?.fruit ?? 0);
+    const fruitN = (e.kind === 'chaser' || e.kind === 'flanker' ? (this.rng.chance(Math.min(1, ARENA.smallFruitChance * drop)) ? 1 : 0) : def.fruit) + (runner?.fruit ?? 0);
     for (let i = 0; i < goldN; i++) this.dropPickup('gold', e.x, e.y, 1);
     for (let i = 0; i < fruitN; i++) this.dropPickup('fruit', e.x, e.y, 1);
     if (this.rng.chance(e.kind === 'elite' ? 1 : 0.025)) this.dropPickup('heart', e.x, e.y, 1);

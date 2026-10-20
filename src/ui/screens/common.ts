@@ -106,6 +106,7 @@ export function bindGoal(root: HTMLElement, ui: UI, afterDismiss?: () => HTMLEle
     else if (a === 'play-trials') ui.go('play', 'trials');
     else if (a === 'play-arena') ui.go('play', 'arena');
     else if (a === 'feed') ui.go('dragons', ui.save.selected);
+    else if (a === 'play-ascent') ui.startMode('ascent');
     else ui.go(a);
   });
 }

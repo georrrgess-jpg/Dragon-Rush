@@ -422,6 +422,61 @@ describe('Dragon Arena', () => {
     expect(sim.qualifiedSeconds).toBeLessThan(21);
   });
 
+  it('auto-activated abilities are not player input for qualified time (Zephyr dashes included)', () => {
+    for (const id of ['ember', 'zephyr', 'grove', 'rime'] as const) {
+      const sim = make(id, 1, 4);
+      let fired = 0;
+      for (let i = 0; i < 60 * 40 && sim.state === 'play'; i++) {
+        hold(sim);
+        sim.abilityCharge = sim.maxCharge;
+        sim.requestAbility(true); // ArenaScreen with Settings → auto-activate
+        sim.advance(1 / 60);
+        fired += sim.drainEvents().filter((e) => e.type === 'ability').length;
+      }
+      expect(fired, id).toBeGreaterThan(10);
+      expect(sim.qualifiedSeconds, id).toBeLessThan(21);
+    }
+    // a manual press (E) still counts
+    const sim = make('ember', 1, 4);
+    for (let i = 0; i < 60 * 25; i++) sim.advance(1 / 60);
+    const q = sim.qualifiedSeconds;
+    sim.abilityCharge = 1;
+    sim.requestAbility(true);
+    sim.requestAbility();
+    hold(sim);
+    for (let i = 0; i < 60 * 3; i++) sim.advance(1 / 60);
+    expect(sim.qualifiedSeconds).toBeGreaterThan(q + 2.9);
+  });
+
+  it('a heal ability restores health once per wave (the pull always works); full health keeps it', () => {
+    const sim = make('grove', 1, 5);
+    sim.spawnT = 1e9;
+    const heal = () => {
+      sim.abilityCharge = 1;
+      sim.requestAbility();
+      sim.advance(1 / 60);
+      return sim.drainEvents().find((e) => e.type === 'ability') as Extract<ArenaEvent, { type: 'ability' }>;
+    };
+    expect(heal().healed).toBe(0); // full health: nothing to heal, the wave's heal is kept
+    sim.hp = sim.maxHp - 2;
+    expect(heal().healed).toBe(1);
+    expect(sim.hp).toBe(sim.maxHp - 1);
+    const ev = heal();
+    expect(ev.healed).toBe(0); // already healed this wave
+    expect(sim.hp).toBe(sim.maxHp - 1);
+    // the next wave heals again
+    sim.waveT = ARENA.waveSeconds[0];
+    sim.advance(1 / 60);
+    expect(sim.state).toBe('choosing');
+    sim.chooseUpgrade(0);
+    sim.spawnT = 1e9;
+    const hp = sim.hp;
+    if (hp < sim.maxHp) {
+      expect(heal().healed).toBe(1);
+      expect(sim.hp).toBe(hp + 1);
+    }
+  });
+
   it('an elite still alive at the wave break retreats with a partial drop', () => {
     const sim = make('ember', 1, 6);
     sim.wave = 4;
@@ -432,7 +487,7 @@ describe('Dragon Arena', () => {
     for (let i = 0; i < 20 && sim.state === 'play'; i++) sim.advance(1 / 60);
     expect(sim.state).toBe('choosing');
     expect(sim.enemies.length).toBe(0);
-    expect(sim.gold).toBe(g + 15);
+    expect(sim.gold).toBe(g + ARENA.eliteRetreat.gold);
   });
 
   it('endless continuation records survival time', { timeout: 60000 }, () => {

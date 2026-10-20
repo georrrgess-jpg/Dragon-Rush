@@ -26,7 +26,7 @@ import { arenaTip } from './sim/arena';
 import { xpToNext } from './content/progression';
 import { HATCHERY, REGIONS } from './content/world';
 import type { AscentReport } from './sim/ascent';
-import { AscentScreen, type AscentEndInfo } from './ui/ascentScreen';
+import { ASCENT_INTRO, AscentScreen, type AscentEndInfo } from './ui/ascentScreen';
 import type { ModeId } from './save';
 
 export class App implements UI {
@@ -99,19 +99,37 @@ export class App implements UI {
 
   commit(next: SaveData): void {
     const settingsChanged = next.settings !== this.save.settings;
+    const lowChanged = next.settings.lowEffects !== this.save.settings.lowEffects;
+    // the Hatchery badge shows keys earned since the last visit: after spending keys the
+    // remembered count must come down too, so newly earned keys show the badge again
+    if (next.prefs.keysSeen > next.wallet.keys) next = { ...next, prefs: { ...next.prefs, keysSeen: next.wallet.keys } };
     this.save = next;
     if (!this.readOnly) {
       if (!writeSave(this.store, next) && this.store) this.toast('Saving failed (storage may be full). Export your save from Settings.', 5000);
     }
     if (settingsChanged) this.applySettings();
+    if (lowChanged) this.resize();
     this.shell?.render();
   }
 
+  /**
+   * Applies settings everywhere it is cheap: volumes and page classes always; a running mode (opened
+   * from its pause menu) also takes reduced motion, low effects, screen shake, hitboxes and
+   * auto-ability right away. Region/course choices and the Ascent assist apply to the next run.
+   */
   private applySettings() {
     const s = this.save.settings;
     sfx.setVolumes({ master: s.master, music: s.music, sfx: s.sfx, muted: s.muted });
     document.body.classList.toggle('reduced-motion', s.reducedMotion);
     document.body.classList.toggle('low-effects', s.lowEffects);
+    this.flight?.applySettings(s);
+    this.arena?.applySettings(s);
+    this.ascent?.applySettings(s);
+  }
+
+  /** A gameplay mode (Rush or Trials, Arena, Ascent) is running. Every start* guard uses this. */
+  get inMode(): boolean {
+    return !!(this.flight || this.arena || this.ascent);
   }
 
   /** Replaces the whole save (import): backed up first, then persisted in one write. */
@@ -165,7 +183,13 @@ export class App implements UI {
     const x = (w - VIEW.width * this.scale) / 2;
     const y = (h - VIEW.height * this.scale) / 2;
     this.stage.style.transform = `translate(${x}px, ${y}px) scale(${this.scale})`;
-    this.ctx = sizeCanvas(this.canvas, VIEW.width, VIEW.height, this.scale);
+    // Low effects: the gameplay canvas keeps its logical 1280×720 backing store (no stage or
+    // device-pixel scaling), which is the biggest fill-rate saving on large or high-DPI screens
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx = sizeCanvas(this.canvas, VIEW.width, VIEW.height, this.save?.settings.lowEffects ? 1 / dpr : this.scale);
+    this.screen?.resize?.();
+    this.overlay?.resize?.();
+    (this.results as { resize?(): void } | null)?.resize?.();
   };
 
   private nearHudButton(x: number, y: number): boolean {
@@ -223,9 +247,12 @@ export class App implements UI {
         this.toggleFullscreen();
         return;
       }
-      if (this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
-      else if (this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
-      else if (this.ascent && this.ascent.key(e.code, true, e.repeat)) e.preventDefault();
+      // Settings opened from a pause menu: keys belong to the panel (Escape closes it first and
+      // the run stays paused)
+      const toMode = !this.settings && !this.modal;
+      if (toMode && this.flight && this.flight.key(e.code, true, e.repeat)) e.preventDefault();
+      else if (toMode && this.arena && this.arena.key(e.code, true, e.repeat)) e.preventDefault();
+      else if (toMode && this.ascent && this.ascent.key(e.code, true, e.repeat)) e.preventDefault();
       else if (e.code === 'Escape' && (this.modal || this.overlay || this.settings)) {
         if (this.modal) this.closeModal(false);
         else if (this.overlay) this.closeOverlay();
@@ -318,8 +345,11 @@ export class App implements UI {
     return this.tab;
   }
 
+  private settingsOpener: HTMLElement | null = null;
+
   openSettings(): void {
     if (this.settings) return;
+    this.settingsOpener = document.activeElement as HTMLElement | null;
     this.settings = new SettingsPanel(this, () => this.closeSettings());
     this.stage.appendChild(this.settings.el);
     this.updateInert();
@@ -331,7 +361,11 @@ export class App implements UI {
     this.settings = null;
     this.updateInert();
     this.refresh();
-    this.root.querySelector<HTMLElement>('.gear')?.focus({ preventScroll: true });
+    // back to the pause menu's Settings button during a run, else the gear
+    const opener = this.settingsOpener;
+    this.settingsOpener = null;
+    const back = this.inMode && opener?.isConnected ? opener : this.root.querySelector<HTMLElement>('.gear');
+    back?.focus({ preventScroll: true });
   }
 
   /** While a dialog is open, everything behind it is inert (no Tab, no clicks, no key actions). */
@@ -469,7 +503,7 @@ export class App implements UI {
   // once under the same run id. The screen shows its own end screen with Retry / Change mode.
 
   startAscent(): void {
-    if (this.flight || this.arena) return;
+    if (this.inMode) return;
     if (MODES.ascent.locked(this.save)) {
       this.go('play');
       return;
@@ -487,9 +521,24 @@ export class App implements UI {
         ...this.canvasHost(),
         onCheckpoint: (r) => this.ascentCheckpoint(r),
         onEnd: (r) => this.endAscent(r),
-        onRetry: () => this.startAscent(),
+        onRetry: () => {
+          this.clearAll(); // the finished run leaves first, so inMode lets the next one start
+          this.startAscent();
+        },
         onChangeMode: () => this.go('play', 'ascent'),
         onHome: () => this.go('home'),
+        onBack: () => {
+          // Left from the intro: nothing happened, so the run is simply cancelled (like the Arena).
+          this.runId = null;
+          this.commit({ ...this.save, activeRun: null });
+          this.go('play', 'ascent');
+        },
+        onAssistChange: (on) => {
+          this.commit(eco.setAscentAssist(this.save, on));
+          return on ? this.save.ascent.bestAssist : this.save.ascent.best;
+        },
+        onTutorialSeen: (id) => this.tutorialSeen(id),
+        onOpenSettings: () => this.openSettings(),
       },
       {
         // same effective flight stats as Rush (level, talents and species passives apply)
@@ -504,6 +553,7 @@ export class App implements UI {
         screenShake: s.screenShake,
         best: assist ? this.save.ascent.bestAssist : this.save.ascent.best,
         dragonName: eco.dragonName(this.save, run.dragon),
+        showIntro: !this.save.prefs.tutorials.includes(ASCENT_INTRO),
       },
     );
   }
@@ -579,7 +629,7 @@ export class App implements UI {
   }
 
   startRush(): void {
-    if (this.flight || this.arena) return;
+    if (this.inMode) return;
     this.lastTrial = null;
     this.beginRun({ mode: 'rush' });
     const run = this.save.activeRun!;
@@ -587,7 +637,7 @@ export class App implements UI {
     const s = this.save.settings;
     sfx.music('flight');
     this.flight = new FlightScreen(
-      { ...this.canvasHost(), onEnd: (sum, early) => this.endFlight(sum, early), onTutorialSeen: (id) => this.tutorialSeen(id) },
+      { ...this.canvasHost(), onEnd: (sum, early) => this.endFlight(sum, early), onTutorialSeen: (id) => this.tutorialSeen(id), onOpenSettings: () => this.openSettings() },
       {
         mode: 'rush',
         stats: flightStats({ species: run.dragon, level: run.level, talents: d.talents }, 'rush'),
@@ -612,7 +662,7 @@ export class App implements UI {
   }
 
   startTrial(id: string, practice: boolean): void {
-    if (this.flight || this.arena) return;
+    if (this.inMode) return;
     const def = TRIAL_BY_ID.get(id);
     if (!def || !trialUnlocked(id, this.save.trials)) return this.toast('Finish the previous course to unlock this one.');
     this.lastTrial = { id, practice };
@@ -626,6 +676,7 @@ export class App implements UI {
       {
         ...this.canvasHost(),
         onEnd: (sum, early) => this.endFlight(sum, early),
+        onOpenSettings: () => this.openSettings(),
         onRestart: () => {
           // abandon this attempt (no medal) and start again
           this.commit(eco.abandonStaleRun(this.save).save);
@@ -653,7 +704,7 @@ export class App implements UI {
   }
 
   startArena(): void {
-    if (this.flight || this.arena) return;
+    if (this.inMode) return;
     this.lastTrial = null;
     this.beginRun({ mode: 'arena' });
     const run = this.save.activeRun!;
@@ -672,6 +723,7 @@ export class App implements UI {
         },
         onEnd: (r, reason) => this.endArena(r, reason),
         onTutorialSeen: (id) => this.tutorialSeen(id),
+        onOpenSettings: () => this.openSettings(),
       },
       {
         stats: arenaStats({ species: run.dragon, level: run.level, talents: d.talents }),

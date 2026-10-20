@@ -25,6 +25,12 @@ export interface FlightHost {
    * should add the id to save.prefs.tutorials so it is not shown again (Settings can reset it).
    */
   onTutorialSeen?(id: string): void;
+  /**
+   * Pause menu → Settings. The app opens Settings over the pause overlay; the flight stays
+   * paused while Settings is open and after it closes (the player resumes from the pause menu).
+   * Call `applySettings` with the new values when Settings closes.
+   */
+  onOpenSettings?(): void;
 }
 
 export { rushTip };
@@ -177,6 +183,9 @@ export class FlightScreen {
   }
 
   key(code: string, down: boolean, repeat: boolean): boolean {
+    // Settings (or another app dialog) is open over the pause menu: its keys are not ours, and
+    // Esc there closes Settings without resuming the flight.
+    if (this.paused && this.host.root.closest('[inert]')) return false;
     switch (code) {
       case 'ArrowUp':
       case 'KeyW':
@@ -197,8 +206,9 @@ export class FlightScreen {
         return true;
       case 'Escape':
         if (down && !repeat) {
-          if (this.paused === 'manual') this.resume();
-          else if (!this.paused) this.pause('manual');
+          // Esc resumes from any pause (manual or focus loss), like Arena and Ascent.
+          if (this.paused) this.resume();
+          else this.pause('manual');
         }
         return true;
     }
@@ -230,6 +240,7 @@ export class FlightScreen {
           <div class="stack">
             <button class="btn gold big" data-a="resume">Resume</button>
             ${trials ? '<button class="btn" data-a="restart">Restart course</button>' : '<button class="btn" data-a="controls">Show the controls again</button>'}
+            ${this.host.onOpenSettings ? '<button class="btn" data-a="settings">Settings</button>' : ''}
             <button class="btn ghost" data-a="home">${trials ? 'Leave course (no medal this attempt)' : `End flight and bank ${gold} ${icon('gold', 'icon sm')} ${fruit} ${icon('fruit', 'icon sm')}`}</button>
           </div>
         </div>
@@ -244,6 +255,11 @@ export class FlightScreen {
       sfx.click();
       this.replayTutorial();
       this.resume();
+    });
+    this.overlay.querySelector('[data-a=settings]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.click();
+      this.host.onOpenSettings?.(); // stays paused: only Resume (or Esc) continues the flight
     });
     this.overlay.querySelector('[data-a=restart]')?.addEventListener(
       'click',
@@ -269,6 +285,17 @@ export class FlightScreen {
     ($(this.overlay, '[data-a=resume]') as HTMLButtonElement).focus({ preventScroll: true });
   }
 
+  /** Applies display settings changed while paused (Settings opened from the pause menu). */
+  applySettings(s: { reducedMotion?: boolean; lowEffects?: boolean; showHitboxes?: boolean; screenShake?: boolean; autoAbility?: boolean }): void {
+    if (s.reducedMotion !== undefined) this.setup.reducedMotion = this.renderer.reducedMotion = s.reducedMotion;
+    if (s.lowEffects !== undefined) this.setup.lowEffects = this.renderer.lowEffects = s.lowEffects;
+    if (s.showHitboxes !== undefined) this.setup.showHitboxes = this.renderer.showHitboxes = s.showHitboxes;
+    if (s.screenShake !== undefined) this.setup.screenShake = this.renderer.screenShake = s.screenShake;
+    if (s.autoAbility !== undefined) this.setup.autoAbility = s.autoAbility;
+    // back on the pause menu: keyboard focus returns to Resume
+    this.overlay?.querySelector<HTMLButtonElement>('[data-a=resume]')?.focus({ preventScroll: true });
+  }
+
   resume(): void {
     if (!this.paused || this.ended) return;
     this.paused = null;
@@ -291,7 +318,7 @@ export class FlightScreen {
         this.sim.setSteerKeys(dir);
         if (dir) this.noteSteer();
       }
-      if (this.setup.autoAbility && this.sim.abilityReady && this.sim.abilityCharge >= this.sim.maxCharge - 1e-6) this.sim.requestAbility();
+      if (this.setup.autoAbility && this.sim.abilityReady && this.sim.abilityCharge >= this.sim.maxCharge - 1e-6) this.sim.requestAbility(true);
       this.trackMissed();
       this.sim.advance(dt);
       const events = this.sim.drainEvents();

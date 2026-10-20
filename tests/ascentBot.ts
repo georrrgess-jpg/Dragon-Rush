@@ -305,7 +305,11 @@ export class AscentPilot {
     const stepMax = Math.max((vFly / FLIGHT.followGain) * 1.15, vFly * this.o.reaction);
     y = Math.max(sim.y - stepMax, Math.min(sim.y + stepMax, y));
     if (next.n && !next.contains(y)) y = next.nearest(y);
-    this.target = y + this.rng.range(-this.o.noise, this.o.noise);
+    // aiming error: a human aims more precisely when the world is slowed down (slow-time
+    // abilities), so the error shrinks with the time scale instead of being re-rolled more often
+    // per metre of sky
+    const noise = this.o.noise * sim.timeScale;
+    this.target = y + this.rng.range(-noise, noise);
     if (this.o.useAbility && sim.abilityReady && sim.threatAhead(260)) sim.requestAbility();
     return this.target;
   }

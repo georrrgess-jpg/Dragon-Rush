@@ -144,7 +144,10 @@ class B {
     this.hazards.push(H(kind, 'rect', 'static', x, edge, w, BOT - edge));
     return this;
   }
-  /** Floating block. */
+  /**
+   * Floating block. `breakable` blocks are small cracked rubble a clear-type ability can shatter;
+   * they are always solid for the route proofs, so a route never needs them gone.
+   */
   block(x: number, y0: number, w: number, y1: number, breakable = false) {
     this.hazards.push(H('ruin', 'rect', 'static', x, y0, w, y1 - y0, 0, 0, 1, 0, 0, breakable));
     return this;
@@ -338,6 +341,8 @@ export const CHUNKS: ChunkDef[] = [
       return new B(1500)
         .bot(430, 130, 400 + d)
         .top(920, 130, 330 + d)
+        // cracked rubble (breakable from the start, never in the way of the route)
+        .block(1260, 440 + d, 80, 500 + d, true)
         .arc(330, 300 + d, 620, 300 + d, -50, 5)
         .arc(820, 470 + d, 1110, 470 + d, 50, 5)
         .done();
@@ -358,7 +363,7 @@ export const CHUNKS: ChunkDef[] = [
       return new B(1700)
         .bot(460, 140, 450 + d)
         .top(960, 140, 270 + d)
-        .block(1380, 320 + d, 120, 390 + d)
+        .block(1380, 320 + d, 120, 390 + d, true)
         .arc(420, 360 + d, 640, 360 + d, -40, 5)
         .arc(900, 400 + d, 1140, 400 + d, 40, 5)
         .line(1360, 240 + d, 1520, 240 + d, 3)
@@ -432,8 +437,8 @@ export const CHUNKS: ChunkDef[] = [
       const d = off(v, [0, 30]);
       const b = new B(1900);
       // three walls with gaps at different heights: choose a route through each
-      b.top(480, 100, 150 + d).block(480, 310 + d, 100, 410 + d).bot(480, 100, 570 + d);
-      b.top(1000, 100, 105 - d).block(1000, 265 - d, 100, 385 - d).bot(1000, 100, 545 - d);
+      b.top(480, 100, 150 + d).block(480, 310 + d, 100, 410 + d, true).bot(480, 100, 570 + d);
+      b.top(1000, 100, 105 - d).block(1000, 265 - d, 100, 385 - d, true).bot(1000, 100, 545 - d);
       b.top(1520, 100, 290).bot(1520, 100, 455);
       b.line(500, 235 + d, 560, 235 + d, 2).line(500, 490 + d, 560, 490 + d, 2);
       b.line(1020, 190 - d, 1080, 190 - d, 2).line(1020, 465 - d, 1080, 465 - d, 2);

@@ -1170,24 +1170,49 @@ function buildFloor(region: RegionId): HTMLCanvasElement {
 /** How much of each floor's colour saturation is removed (warm floors more: danger is warm). */
 const DESATURATE: Record<RegionId, number> = { isles: 0.25, canyon: 0.35, coast: 0.2, frost: 0.1, storm: 0.15 };
 
+/**
+ * Pre-rendered floors, most recently used last. Each is ~26 MB of pixels (3000 × 2200), so at most
+ * MAX_FLOORS stay cached and leaving the Arena releases them all (releaseArenaFloors).
+ */
 const floors = new Map<RegionId, HTMLCanvasElement>();
+export const MAX_FLOORS = 2;
+
+function floorCanvas(region: RegionId): HTMLCanvasElement {
+  let c = floors.get(region);
+  if (c) floors.delete(region); // re-inserted below as the most recent
+  else c = buildFloor(region);
+  floors.set(region, c);
+  // Evicted floors are only dropped from the cache (a live ArenaFloor may still draw one).
+  while (floors.size > MAX_FLOORS) floors.delete(floors.keys().next().value!);
+  return c;
+}
+
+/** Number of floors currently cached (diagnostics and tests). */
+export function cachedArenaFloors(): number {
+  return floors.size;
+}
+
+/**
+ * Frees every cached floor's pixels now (call when leaving the Arena). An ArenaFloor that is drawn
+ * again afterwards simply rebuilds its canvas.
+ */
+export function releaseArenaFloors(): void {
+  for (const c of floors.values()) c.width = c.height = 0;
+  floors.clear();
+}
 
 export class ArenaFloor {
   private canvas: HTMLCanvasElement;
   private voidColor: string;
 
-  constructor(region: RegionId) {
-    let c = floors.get(region);
-    if (!c) {
-      c = buildFloor(region);
-      floors.set(region, c);
-    }
-    this.canvas = c;
+  constructor(private region: RegionId) {
+    this.canvas = floorCanvas(region);
     this.voidColor = STYLES[region].void;
   }
 
   /** Draws the visible part of the floor; camX/camY = world coords of the screen's top-left. */
   draw(ctx: CanvasRenderingContext2D, camX: number, camY: number, _time?: number): void {
+    if (!this.canvas.width) this.canvas = floorCanvas(this.region); // released: rebuild on demand
     const vw = VIEW.width;
     const vh = VIEW.height;
     const sx = camX + M;

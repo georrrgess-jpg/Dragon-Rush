@@ -32,6 +32,8 @@ export interface Overlay {
   focus(): void;
   update?(dt: number): void;
   destroy?(): void;
+  /** The window (stage scale) changed: re-size canvases. */
+  resize?(): void;
 }
 
 export interface Screen {
@@ -39,4 +41,6 @@ export interface Screen {
   render(): void;
   update?(dt: number): void;
   destroy?(): void;
+  /** The window (stage scale) changed: re-size canvases (called from App's resize handler). */
+  resize?(): void;
 }

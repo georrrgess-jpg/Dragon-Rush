@@ -1,9 +1,10 @@
 // Aether Ascent screen: owns the simulation, renderer, HUD, pause and upgrade overlays and the
 // end screen for one run. Input matches Dragon Rush: mouse height (or W/S, arrows) steers,
 // click/Space dashes, E fires the ability, Esc pauses, 1-3 picks an upgrade at a shrine.
+// The first run opens with a short intro (pitch, wards, shrines, controls and the Assist choice).
 import { ascentSfx } from '../audio/ascentSfx';
 import { sfx } from '../audio';
-import { DASH, FLIGHT } from '../config';
+import { DASH } from '../config';
 import { SPECIES } from '../content/species';
 import { REGIONS } from '../content/world';
 import { ASCENT_REWARDS } from '../economy';
@@ -11,6 +12,13 @@ import { AscentRenderer, type AscentLook } from '../render/ascentRenderer';
 import { ASCENT, CAUSE, TIPS, UPGRADES, ascentPowerText, regionAt, type AscentEvent, type AscentReport, AscentSim } from '../sim/ascent';
 import type { FlightStats } from '../stats';
 import { $, bar, el, esc, fmtTime, icon } from './dom';
+import { rarityBadge } from './rarity';
+import { portraitUrl } from './screens/common';
+
+/** Tutorial id remembered once the intro was started (Settings → show tutorials again resets it). */
+export const ASCENT_INTRO = 'ascent.intro';
+/** Upgrade cards ignore clicks and number keys for this long after a shrine opens (ms). */
+const CHOICE_GUARD_MS = 400;
 
 export interface AscentSetup {
   stats: FlightStats;
@@ -25,6 +33,17 @@ export interface AscentSetup {
   /** Personal best (m) for this rule set (standard or assist) before the run. */
   best: number;
   dragonName: string;
+  /** Show the first-run intro before the run starts. */
+  showIntro?: boolean;
+}
+
+/** Settings that apply to a running Ascent immediately (volume is global and applies by itself). */
+export interface AscentLiveSettings {
+  reducedMotion: boolean;
+  lowEffects: boolean;
+  screenShake: boolean;
+  showHitboxes: boolean;
+  autoAbility: boolean;
 }
 
 /** What the app reports back once the run is settled (shown on the end screen). */
@@ -59,9 +78,17 @@ export interface AscentHost {
   onRetry(): void;
   onChangeMode(): void;
   onHome(): void;
+  /** Left from the intro: nothing happened, so the app cancels the run (no settlement). */
+  onBack?(): void;
+  /** The intro's Assist toggle: persist the choice; returns the personal best for that rule set. */
+  onAssistChange?(on: boolean): number;
+  /** A tutorial step was shown (ASCENT_INTRO). */
+  onTutorialSeen?(id: string): void;
+  /** Opens the Settings panel over the paused run (the run stays paused when it closes). */
+  onOpenSettings?(): void;
 }
 
-type Mode = 'play' | 'pause' | 'choose' | 'dying' | 'ended';
+type Mode = 'intro' | 'play' | 'pause' | 'choose' | 'dying' | 'ended';
 
 const STYLE_ID = 'ascent-style';
 const CSS = `
@@ -101,6 +128,21 @@ const CSS = `
 .asc-end .stack{display:flex;flex-direction:column;gap:10px;align-self:center}
 .asc-end ul{margin:4px 0;padding-left:18px}
 .asc-haul{font-size:22px;gap:8px;margin:6px 0}
+.asc-end .asc-who{display:flex;align-items:center;gap:12px;margin:0 0 4px}
+.asc-end .asc-who img{width:120px;height:90px;object-fit:contain;border-radius:12px;background:rgba(255,255,255,.55)}
+.asc-end .asc-who b{display:block;font-size:18px}
+.asc-intro{width:720px;max-width:96%;text-align:left}
+.asc-intro h2{text-align:center}
+.asc-intro .goal{font-weight:800;font-size:18px}
+.asc-intro ul{margin:6px 0;padding-left:20px}
+.asc-intro li{margin:4px 0}
+.asc-intro .controls{list-style:none;padding:0}
+.asc-intro .controls li{display:flex;gap:10px;align-items:center}
+.asc-intro .controls li>span:first-child{min-width:150px;display:inline-flex;gap:3px}
+.asc-intro .assist{display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-radius:12px;background:rgba(95,212,230,.14);margin:8px 0}
+.asc-intro .assist input{width:20px;height:20px;margin-top:3px}
+.upgrade-panel h2:focus{outline:none}
+.upgrade-card[aria-disabled=true]{opacity:.65;cursor:default}
 `;
 
 function injectStyle() {
@@ -114,9 +156,10 @@ function injectStyle() {
 let sharedRenderer: AscentRenderer | null = null;
 
 export class AscentScreen {
-  readonly sim: AscentSim;
+  /** Rebuilt (same seed) if the intro's Assist toggle changes the rules before the run starts. */
+  sim: AscentSim;
   readonly renderer: AscentRenderer;
-  private hud: HTMLElement;
+  private hud!: HTMLElement;
   private overlay: HTMLElement | null = null;
   private mode: Mode = 'play';
   private pauseReason: 'manual' | 'focus' = 'manual';
@@ -129,6 +172,8 @@ export class AscentScreen {
   private bannerT = 0;
   private dyingT = 0;
   private drawnEnded = false;
+  /** performance.now() when the shrine choice opened (cards are guarded for CHOICE_GUARD_MS). */
+  private choiceOpenedAt = 0;
 
   constructor(
     private host: AscentHost,
@@ -139,12 +184,41 @@ export class AscentScreen {
     sharedRenderer ??= new AscentRenderer();
     this.renderer = sharedRenderer;
     this.renderer.reset(setup.look, regionAt(0));
-    this.renderer.reducedMotion = setup.reducedMotion;
-    this.renderer.lowEffects = setup.lowEffects;
-    this.renderer.showHitboxes = setup.showHitboxes;
-    this.renderer.screenShake = setup.screenShake;
+    this.applySettings(setup);
+    this.buildHud();
+    host.canvas.classList.add('active');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    if (setup.showIntro) this.showIntro();
+    else this.handleEvents(this.sim.drainEvents());
+  }
+
+  /** Applies settings changed mid-run (from the pause menu's Settings): effects, shake, hitboxes, auto-ability. */
+  applySettings(s: AscentLiveSettings): void {
+    this.setup.reducedMotion = s.reducedMotion;
+    this.setup.lowEffects = s.lowEffects;
+    this.setup.screenShake = s.screenShake;
+    this.setup.showHitboxes = s.showHitboxes;
+    this.setup.autoAbility = s.autoAbility;
+    this.renderer.reducedMotion = s.reducedMotion;
+    this.renderer.lowEffects = s.lowEffects;
+    this.renderer.showHitboxes = s.showHitboxes;
+    this.renderer.screenShake = s.screenShake;
+    this.drawnEnded = false;
+    if (this.els.tags) this.els.tags.innerHTML = this.tagsHtml();
+  }
+
+  private tagsHtml(): string {
+    return `${this.setup.assist ? '<span title="+1 ward, hazards 15% slower with longer warnings, a ward restored at every shrine, a gentler speed ramp; best distances are kept separately">ASSIST: slower hazards, +1 ward, shrine refills</span>' : ''}
+      ${this.setup.autoAbility ? '<span title="Settings → Auto-activate ability">AUTO ABILITY (assist)</span>' : ''}`;
+  }
+
+  private buildHud() {
+    const setup = this.setup;
     const ab = setup.stats.ability;
     const abText = ascentPowerText(this.sim.power);
+    this.hud?.remove();
+    this.els = {};
+    this.shown = {};
     this.hud = el(`
       <div class="hud asc-hud">
         <div class="hud-top">
@@ -174,17 +248,83 @@ export class AscentScreen {
             <div class="ab-body"><span class="ab-name">${esc(ab.name)}</span><div class="bar"><i data-k="abFill"></i></div></div>
             <span class="ab-state" data-k="abTxt"></span>
           </div>
-          <div class="asc-tags">
-            ${setup.assist ? '<span title="+1 ward and a gentler speed ramp; best distances are kept separately">ASSIST: +1 ward, gentler speed</span>' : ''}
-            ${setup.autoAbility ? '<span title="Settings → Auto-activate ability">AUTO ABILITY (assist)</span>' : ''}
-          </div>
+          <div class="asc-tags" data-k="tags">${this.tagsHtml()}</div>
           <div class="upgrades-mini" data-k="ups"></div>
         </div>
       </div>`);
     this.hud.querySelectorAll<HTMLElement>('[data-k]').forEach((n) => (this.els[n.dataset.k!] = n));
     this.els.pause.addEventListener('click', () => this.pause('manual'));
-    host.root.appendChild(this.hud);
-    host.canvas.classList.add('active');
+    this.hud.inert = !!this.overlay;
+    this.host.root.insertBefore(this.hud, this.overlay && this.overlay.parentNode === this.host.root ? this.overlay : null);
+  }
+
+  /** First run: what Ascent is, how wards and shrines work, the controls and the Assist choice. */
+  private showIntro() {
+    this.mode = 'intro';
+    const ab = this.setup.stats.ability;
+    const o = this.setOverlay(`
+      <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="asc-intro-h">
+        <div class="panel asc-intro">
+          <h2 id="asc-intro-h">Aether Ascent</h2>
+          <p class="goal">An endless flight through the skyways: how far can you go?</p>
+          <ul>
+            <li><b>Wards</b>: you start with <b data-k="wardsTxt">${this.sim.maxWards}</b>. Each hit costs one; the run ends when none are left.</li>
+            <li><b>Shrines</b> every few hundred metres pause the flight: pick one upgrade for this run. Each shrine also <b>banks</b> your haul so far.</li>
+            <li>New hazards are announced with a banner and always leave a way through. Calm air follows the hard stretches.</li>
+          </ul>
+          <ul class="controls">
+            <li><span><b>Mouse</b> or <kbd>W</kbd><kbd>S</kbd></span> Steer up and down.</li>
+            <li><span><kbd>Space</kbd> or click</span> Dash: breaks glowing caches and protects you briefly.</li>
+            <li><span><kbd>E</kbd></span> ${esc(ab.name)}: ${esc(ascentPowerText(this.sim.power))}</li>
+            <li><span><kbd>Esc</kbd></span> Pause (end the run and bank from there).</li>
+          </ul>
+          <label class="assist"><input type="checkbox" data-a="assist" ${this.setup.assist ? 'checked' : ''}/><span><b>Assist</b>: hazards move 15% slower with longer warnings, +1 ward, and every shrine restores a ward. Assist distances are kept as a separate record. You can change this on the Play screen later.</span></label>
+          <div class="row center"><button class="btn ghost" data-a="back">Back</button><button class="btn gold big" data-a="go">Start</button></div>
+        </div>
+      </div>`)!;
+    const box = $(o, '[data-a=assist]') as HTMLInputElement;
+    box.addEventListener('change', () => {
+      sfx.click();
+      this.setAssist(box.checked);
+      const w = o.querySelector('[data-k=wardsTxt]');
+      if (w) w.textContent = String(this.sim.maxWards);
+    });
+    $(o, '[data-a=back]').addEventListener(
+      'click',
+      (e) => {
+        e.stopPropagation();
+        sfx.click();
+        this.mode = 'ended';
+        this.drawnEnded = true;
+        this.host.onBack?.();
+      },
+      { once: true },
+    );
+    const go = $(o, '[data-a=go]') as HTMLButtonElement;
+    go.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.click();
+      this.startFromIntro();
+    });
+    go.focus({ preventScroll: true });
+  }
+
+  /** Rebuilds the (not yet started) run with the other rule set. */
+  private setAssist(on: boolean) {
+    if (this.mode !== 'intro' || this.setup.assist === on) return;
+    const best = this.host.onAssistChange?.(on);
+    this.setup.assist = on;
+    if (best !== undefined) this.setup.best = best;
+    this.sim = new AscentSim({ stats: this.setup.stats, seed: this.setup.seed, assist: on });
+    this.buildHud();
+  }
+
+  private startFromIntro() {
+    if (this.mode !== 'intro') return;
+    this.host.onTutorialSeen?.(ASCENT_INTRO);
+    this.setOverlay(null);
+    this.mode = 'play';
+    this.inputGuard = DASH.resumeInputGuard;
     (document.activeElement as HTMLElement | null)?.blur?.();
     this.handleEvents(this.sim.drainEvents());
   }
@@ -200,15 +340,39 @@ export class AscentScreen {
     if (this.mode === 'play') this.sim.setTarget(y);
   }
 
+  /** Keyboard steering runs inside the simulation (frame-rate independent, counts as input). */
+  private syncKeys() {
+    const dir = this.mode === 'play' && this.keyboardMode && this.keys.up !== this.keys.down ? (this.keys.up ? -1 : 1) : 0;
+    this.sim.setSteerKeys(dir);
+  }
+
+  private releaseKeys() {
+    this.keys.up = this.keys.down = false;
+    this.sim.setSteerKeys(0);
+  }
+
   pointerDash(): void {
     if (this.mode !== 'play' || this.inputGuard > 0) return;
     this.sim.requestDash();
   }
 
   key(code: string, down: boolean, repeat: boolean): boolean {
-    if (this.mode === 'choose' && down && !repeat && /^Digit[1-3]$|^Numpad[1-3]$/.test(code)) {
-      this.choose(Number(code.slice(-1)) - 1);
-      return true;
+    if (this.mode === 'intro') {
+      // the intro's buttons handle Space/Enter themselves; Escape is Back
+      if (code === 'Escape' && down && !repeat) this.overlay?.querySelector<HTMLButtonElement>('[data-a=back]')?.click();
+      return code === 'Escape';
+    }
+    if (this.mode === 'choose') {
+      if (/^Digit[1-3]$|^Numpad[1-3]$/.test(code)) {
+        if (down && !repeat) this.choose(Number(code.slice(-1)) - 1);
+        return true;
+      }
+      if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') {
+        // a dash or confirm key still held from the flight must not pick a card: only a card
+        // the player moved focus to (Tab) can be activated with Space/Enter, after the guard
+        const onCard = !!(document.activeElement as HTMLElement | null)?.classList?.contains('upgrade-card');
+        return !onCard || repeat || this.choiceGuarded();
+      }
     }
     if (this.mode === 'ended') {
       if (down && !repeat && code === 'KeyR') {
@@ -226,11 +390,13 @@ export class AscentScreen {
       case 'KeyW':
         this.keys.up = down;
         if (down) this.keyboardMode = true;
+        this.syncKeys();
         return true;
       case 'ArrowDown':
       case 'KeyS':
         this.keys.down = down;
         if (down) this.keyboardMode = true;
+        this.syncKeys();
         return true;
       case 'Space':
         if (this.mode !== 'play') return false; // Space presses the focused overlay button
@@ -239,6 +405,9 @@ export class AscentScreen {
       case 'KeyE':
         if (down && !repeat && this.mode === 'play') this.sim.requestAbility();
         return true;
+      case 'Enter':
+      case 'NumpadEnter':
+        return this.mode === 'play'; // nothing to confirm mid-flight (overlays handle their own)
       case 'Escape':
         if (down && !repeat) {
           if (this.mode === 'pause') this.resume();
@@ -250,7 +419,7 @@ export class AscentScreen {
   }
 
   focusLost(): void {
-    this.keys.up = this.keys.down = false;
+    this.releaseKeys();
     if (this.mode === 'play') this.pause('focus');
     else if (this.mode === 'pause' && this.pauseReason === 'manual') this.pauseReason = 'focus';
   }
@@ -278,7 +447,7 @@ export class AscentScreen {
     if (this.mode !== 'play') return;
     this.mode = 'pause';
     this.pauseReason = reason;
-    this.keys.up = this.keys.down = false;
+    this.releaseKeys();
     const b = this.bankable();
     const o = this.setOverlay(`
       <div class="overlay" role="dialog" aria-modal="true" aria-label="Paused">
@@ -288,6 +457,7 @@ export class AscentScreen {
           <p class="muted small">Ending now banks <b>${b.gold}</b> ${icon('gold', 'icon sm')} <b>${b.fruit}</b> ${icon('fruit', 'icon sm')}, the XP and key progress of this run, and your distance (${this.sim.distance.toLocaleString()} m). If the page is closed or reloaded mid-run instead, only what an upgrade shrine already banked is kept.</p>
           <div class="stack">
             <button class="btn gold big" data-a="resume">Resume</button>
+            ${this.host.onOpenSettings ? '<button class="btn" data-a="settings">Settings</button>' : ''}
             <button class="btn ghost" data-a="end">End run and bank</button>
           </div>
         </div>
@@ -296,6 +466,11 @@ export class AscentScreen {
       e.stopPropagation();
       sfx.click();
       this.resume();
+    });
+    o.querySelector('[data-a=settings]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sfx.click();
+      this.host.onOpenSettings?.();
     });
     $(o, '[data-a=end]').addEventListener(
       'click',
@@ -317,42 +492,52 @@ export class AscentScreen {
     (document.activeElement as HTMLElement | null)?.blur?.();
   }
 
+  private choiceGuarded(): boolean {
+    return performance.now() - this.choiceOpenedAt < CHOICE_GUARD_MS;
+  }
+
   private showChoices() {
     this.mode = 'choose';
-    this.keys.up = this.keys.down = false;
+    this.releaseKeys();
+    this.choiceOpenedAt = performance.now();
     // bank progress at every shrine (a reload later keeps it)
     this.host.onCheckpoint(this.sim.report());
     // build the next region's backdrop now, while nothing moves (no hitch at the border)
     this.renderer.prewarm(regionAt(this.sim.metres + ASCENT.regionMetres));
     const s = this.sim;
-    const cards = s.offers
+    const cardsHtml = s.offers
       .map((id, i) => {
         const u = UPGRADES[id];
         const lvl = s.upgrades[id];
         const capText = u.max < 99 ? `${lvl}/${u.max} taken` : 'Always available';
-        return `<button class="upgrade-card" data-i="${i}"><kbd>${i + 1}</kbd><b>${esc(u.name)}</b><span>${esc(u.text)}</span><small>${capText} · this run only</small></button>`;
+        return `<button class="upgrade-card" data-i="${i}" aria-disabled="true"><kbd>${i + 1}</kbd><b>${esc(u.name)}</b><span>${esc(u.text)}</span><small>${capText} · this run only</small></button>`;
       })
       .join('');
     const o = this.setOverlay(`
-      <div class="overlay" role="dialog" aria-modal="true" aria-label="Choose an upgrade">
+      <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="asc-shrine-h">
         <div class="panel upgrade-panel">
-          <h2>Aether shrine · ${s.distance.toLocaleString()} m</h2>
-          <p>Choose one upgrade for this run. Everything is paused; your progress so far has been banked.</p>
-          <p class="muted small">Wards ${s.wards}/${s.maxWards}${s.shell ? ' · shell ready' : ''}</p>
-          <div class="upgrade-row">${cards}</div>
+          <h2 id="asc-shrine-h" tabindex="-1">Aether shrine · ${s.distance.toLocaleString()} m</h2>
+          <p>Choose one upgrade for this run (click, or press 1-3). Everything is paused; your progress so far has been banked.</p>
+          <p class="muted small">Wards ${s.wards}/${s.maxWards}${s.shell ? ' · shell ready' : ''}${s.assist ? ' · assist restored a ward' : ''}</p>
+          <div class="upgrade-row">${cardsHtml}</div>
         </div>
       </div>`)!;
-    o.querySelectorAll<HTMLButtonElement>('.upgrade-card').forEach((b) =>
+    const cards = Array.from(o.querySelectorAll<HTMLButtonElement>('.upgrade-card'));
+    for (const b of cards)
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         this.choose(Number(b.dataset.i));
-      }),
-    );
-    o.querySelector<HTMLButtonElement>('.upgrade-card')?.focus({ preventScroll: true });
+      });
+    // a click or dash press from the flight must not pick a card: guard briefly, then enable
+    setTimeout(() => {
+      if (this.overlay === o) for (const b of cards) b.removeAttribute('aria-disabled');
+    }, CHOICE_GUARD_MS);
+    // focus the heading (not a card), so the dash key cannot press a card
+    $(o, '#asc-shrine-h').focus({ preventScroll: true });
   }
 
   private choose(i: number) {
-    if (this.mode !== 'choose' || !this.sim.chooseUpgrade(i)) return;
+    if (this.mode !== 'choose' || this.choiceGuarded() || !this.sim.chooseUpgrade(i)) return;
     this.setOverlay(null);
     this.mode = 'play';
     this.inputGuard = DASH.resumeInputGuard;
@@ -383,10 +568,13 @@ export class AscentScreen {
     const ups = Object.entries(r.upgrades)
       .map(([id, n]) => `${esc(UPGRADES[id as keyof typeof UPGRADES].name)}${(n ?? 0) > 1 ? ` ×${n}` : ''}`)
       .join(', ');
+    const look = s.look;
+    const sp = SPECIES[look.species];
     const o = this.setOverlay(`
       <div class="overlay asc-end" role="dialog" aria-modal="true" aria-label="Aether Ascent results">
         <div class="panel">
           <div>
+            <div class="asc-who"><img src="${portraitUrl(look.species, look.stage, look.marking, 240, 180)}" alt="" width="120" height="90"/><span><b>${esc(s.dragonName)}</b>${rarityBadge(sp.rarity)}</span></div>
             <h2>${reason === 'defeat' ? 'Out of wards' : 'Run ended'}</h2>
             <div class="asc-big">${r.distance.toLocaleString()}<small> m</small>${pb}</div>
             <dl class="asc-facts">
@@ -396,6 +584,7 @@ export class AscentScreen {
               <dt>Time</dt><dd>${fmtTime(r.activeSeconds)} · ${r.hits} hit${r.hits === 1 ? '' : 's'}${ups ? ` · ${ups}` : ''}</dd>
             </dl>
             <div class="haul-row asc-haul"><b>Banked</b> ${icon('gold')}<b>${info.gold}</b> ${icon('fruit')}<b>${info.fruit}</b>${info.bonusPercent ? ` <span class="muted small">incl. +${info.bonusPercent}% level bonus</span>` : ''}</div>
+            ${r.distance < ASCENT_REWARDS.minRunMetres ? `<p class="muted small">Runs shorter than ${ASCENT_REWARDS.minRunMetres} m do not count toward your Ascent runs, records or milestones.</p>` : ''}
             ${info.readOnly ? '<p class="muted small">This tab is not saving (open in another tab): nothing from this run was kept.</p>' : ''}
             <div class="xp-block"><div class="row spread"><b>${esc(s.dragonName)}</b><span>+${info.xp} XP</span></div>${info.levelTo >= 30 ? '<span class="muted">Maximum level</span>' : bar(info.levelXp, info.levelXpNext, 'teal')}${levelLine}</div>
             <div class="key-block"><span class="row">${icon('key', 'icon sm')} ${info.keysEarned ? `<b>+${info.keysEarned} Aether Key${info.keysEarned > 1 ? 's' : ''}!</b>` : 'Key progress'}</span>${bar(info.keyProgress, info.secondsPerKey, 'teal thin')}<small class="muted">Next key in about ${fmtTime(info.secondsPerKey - info.keyProgress)} of active play.</small></div>
@@ -423,6 +612,13 @@ export class AscentScreen {
     });
     if (info.newBest) ascentSfx.newBest();
     ($(o, '[data-a=retry]') as HTMLButtonElement).focus({ preventScroll: true });
+    // start at the top: the dragon and the distance heading are what the player looks for first
+    const panel = o.querySelector<HTMLElement>('.panel');
+    if (panel) {
+      panel.scrollTop = 0;
+      requestAnimationFrame(() => (panel.scrollTop = 0));
+    }
+    o.scrollTop = 0;
   }
 
   // --- loop ----------------------------------------------------------------------------------
@@ -431,11 +627,8 @@ export class AscentScreen {
     const dt = Math.min(realDt, ASCENT.maxFrameDt);
     if (this.mode === 'play') {
       this.inputGuard = Math.max(0, this.inputGuard - dt);
-      if (this.keyboardMode && this.keys.up !== this.keys.down) {
-        const dir = this.keys.up ? -1 : 1;
-        this.sim.setTarget(this.sim.targetY + dir * FLIGHT.keyboardSteerSpeed * dt);
-      }
-      if (this.setup.autoAbility && this.sim.abilityReady && this.sim.threatAhead()) this.sim.requestAbility();
+      // the auto-ability assist is not player input (it never keeps idle time qualified)
+      if (this.setup.autoAbility && this.sim.abilityReady && this.sim.threatAhead()) this.sim.requestAbility({ auto: true });
       this.sim.advance(dt);
       const ev = this.sim.drainEvents();
       this.renderer.handle(ev, this.sim, (k) => CAUSE[k as keyof typeof CAUSE] ?? k);
@@ -504,6 +697,9 @@ export class AscentScreen {
           break;
         case 'shrine':
           ascentSfx.shrine();
+          break;
+        case 'wardRestored':
+          this.flashWards();
           break;
         case 'upgrade':
           ascentSfx.upgrade();

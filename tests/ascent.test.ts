@@ -58,7 +58,7 @@ describe('Ascent chunks', () => {
   it('routes need a real corridor: the proof ignores gaps narrower than 80 px between hazards', () => {
     // two blocks leaving a 70 px gap: the dragon (52 px) could squeeze through, but it is not a route
     const ch = placeChunk(CHUNKS.find((c) => c.id === 'recovery')!, 0, false, 0, 0, 400, 1);
-    const mk = (y: number, h: number): Hazard => ({ kind: 'ruin', shape: 'rect', motion: 'static', x: 400, y, w: 120, h, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 99, t0: 0, cleared: false });
+    const mk = (y: number, h: number): Hazard => ({ kind: 'ruin', shape: 'rect', motion: 'static', x: 400, y, w: 120, h, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 99, t0: 0, cleared: false, tg: 1.2 });
     ch.hazards.push(mk(-80, 400), mk(390, 400)); // gap 320..390 = 70 px
     const out = new Spans();
     chunkEntrySafe(ch, ASCENT.validateSpeed, VR, out);
@@ -212,7 +212,7 @@ describe('Ascent flight', () => {
       const sim = newSim(5);
       const wx = sim.dragonWorldX;
       // a 30 px column right ahead, covering the dragon's height
-      sim.course.chunks[0].hazards.push({ kind: 'shutter', shape: 'rect', motion: 'static', x: wx + 200, y: -80, w: 30, h: 900, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9001, t0: 0, cleared: false });
+      sim.course.chunks[0].hazards.push({ kind: 'shutter', shape: 'rect', motion: 'static', x: wx + 200, y: -80, w: 30, h: 900, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9001, t0: 0, cleared: false, tg: 1.2 });
       for (let t = 0; t < 2; t += 1 / fps) sim.advance(1 / fps);
       expect(sim.hits, `${fps} fps`).toBe(1);
     }
@@ -222,7 +222,7 @@ describe('Ascent flight', () => {
     const sim = newSim(9);
     const wx = sim.dragonWorldX;
     // a long slab at the dragon's height: overlapping it lasts far longer than the protection
-    sim.course.chunks[0].hazards.push({ kind: 'ruin', shape: 'rect', motion: 'static', x: wx + 40, y: 320, w: 5000, h: 80, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9002, t0: 0, cleared: false });
+    sim.course.chunks[0].hazards.push({ kind: 'ruin', shape: 'rect', motion: 'static', x: wx + 40, y: 320, w: 5000, h: 80, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9002, t0: 0, cleared: false, tg: 1.2 });
     sim.setTarget(360);
     for (let t = 0; t < 4; t += 1 / 60) sim.advance(1 / 60);
     expect(sim.hits).toBe(1);
@@ -236,7 +236,7 @@ describe('Ascent flight', () => {
     // and protection after a hit blocks a different hazard too
     const s2 = newSim(9);
     const x2 = s2.dragonWorldX;
-    for (const [k, dx] of [[9003, 40], [9004, 200]] as const) s2.course.chunks[0].hazards.push({ kind: 'debris', shape: 'circle', motion: 'static', x: x2 + dx, y: 360, w: 0, h: 0, r: 30, a: 0, b: 1, c: 0, d: 0, breakable: true, trig: 0, id: k, t0: 0, cleared: false });
+    for (const [k, dx] of [[9003, 40], [9004, 200]] as const) s2.course.chunks[0].hazards.push({ kind: 'debris', shape: 'circle', motion: 'static', x: x2 + dx, y: 360, w: 0, h: 0, r: 30, a: 0, b: 1, c: 0, d: 0, breakable: true, trig: 0, id: k, t0: 0, cleared: false, tg: 1.2 });
     s2.setTarget(360);
     for (let t = 0; t < 1; t += 1 / 60) s2.advance(1 / 60);
     expect(s2.hits).toBe(1);
@@ -245,7 +245,7 @@ describe('Ascent flight', () => {
   it('zero wards ends the run with a cause; the defeat is reported once', () => {
     const sim = newSim(4);
     const wx = sim.dragonWorldX;
-    for (let k = 0; k < 4; k++) sim.course.chunks[0].hazards.push({ kind: 'storm', shape: 'rect', motion: 'static', x: wx + 100 + k * 700, y: 300, w: 60, h: 120, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9100 + k, t0: 0, cleared: false });
+    for (let k = 0; k < 4; k++) sim.course.chunks[0].hazards.push({ kind: 'storm', shape: 'rect', motion: 'static', x: wx + 100 + k * 700, y: 300, w: 60, h: 120, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9100 + k, t0: 0, cleared: false, tg: 1.2 });
     sim.setTarget(360);
     const defeats: string[] = [];
     for (let t = 0; t < 12 && sim.state === 'play'; t += 1 / 60) {
@@ -340,7 +340,7 @@ describe('Ascent flight', () => {
     sim.requestAbility();
     sim.advance(1 / 60);
     const wx = sim.dragonWorldX;
-    sim.course.chunks[0].hazards.push({ kind: 'ruin', shape: 'rect', motion: 'static', x: wx + 100, y: 330, w: 40, h: 60, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9200, t0: 0, cleared: false });
+    sim.course.chunks[0].hazards.push({ kind: 'ruin', shape: 'rect', motion: 'static', x: wx + 100, y: 330, w: 40, h: 60, r: 0, a: 0, b: 1, c: 0, d: 0, breakable: false, trig: 0, id: 9200, t0: 0, cleared: false, tg: 1.2 });
     sim.setTarget(360);
     for (let t = 0; t < 1.5; t += 1 / 60) sim.advance(1 / 60);
     expect(sim.wards).toBe(ASCENT.wards);

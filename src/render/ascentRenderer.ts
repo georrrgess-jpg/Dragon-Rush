@@ -11,6 +11,7 @@ import { FLIGHT, VIEW } from '../config';
 import type { Stage } from '../content/progression';
 import type { RegionId, SpeciesId } from '../content/types';
 import type { MarkingId } from '../content/world';
+import { shakeAllowed } from './fx';
 import { ASCENT, SHRINE_OFFSET, hazardPos, hazardSolid, hazardWarning, type AscentEvent, type AscentSim, type Chunk, type Hazard } from '../sim/ascent';
 import { drawCoin, drawFruit, makeSprite } from './art';
 import { Background } from './background';
@@ -182,7 +183,7 @@ export class AscentRenderer {
           break;
         case 'hit':
           this.anim.recoil();
-          if (this.screenShake && !this.reducedMotion) this.shake = 10;
+          if (shakeAllowed(this)) this.shake = 10;
           this.flash = 1;
           this.flashColor = 'rgba(255,60,80,';
           this.burst(sim.dragonScreenX, sim.y, '#ff6a7a', 12, 1.3, 3.5);
@@ -281,8 +282,9 @@ export class AscentRenderer {
     ctx.fillStyle = 'rgba(18,22,40,0.24)';
     ctx.fillRect(0, 0, VIEW.width, VIEW.height);
 
-    const sx = this.shake > 0 ? jitter(this.time, 1) * this.shake : 0;
-    const sy = this.shake > 0 ? jitter(this.time, 2) * this.shake : 0;
+    const shaking = this.shake > 0 && shakeAllowed(this);
+    const sx = shaking ? jitter(this.time, 1) * this.shake : 0;
+    const sy = shaking ? jitter(this.time, 2) * this.shake : 0;
     ctx.save();
     ctx.translate(sx, sy);
     const left = sim.dist - 140;
@@ -391,7 +393,11 @@ export class AscentRenderer {
     const y = pos.y;
     switch (h.kind) {
       case 'ruin':
-        this.drawStone(ctx, x, y, h.w, h.h, '#a99f8b', '#7d7464', true);
+        if (h.breakable) {
+          // cracked rubble: lighter stone with cracks, so clear-type abilities have a clear target
+          this.drawStone(ctx, x, y, h.w, h.h, '#c9b796', '#9a8668', false);
+          this.drawCracks(ctx, x, y, h.w, h.h, 1);
+        } else this.drawStone(ctx, x, y, h.w, h.h, '#a99f8b', '#7d7464', true);
         break;
       case 'bridge':
         this.drawStone(ctx, x + (warn > 0 && !this.reducedMotion ? jitter(this.time, h.id) * 4 : 0), y, h.w, h.h, '#b9936a', '#8a6a48', false);

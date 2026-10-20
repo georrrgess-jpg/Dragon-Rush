@@ -1,6 +1,7 @@
 // Pure progression rules for Age of Wings. Every action returns a new save (or the same one
 // when nothing changes) so callers persist exactly once per action — one logical transaction.
 import { settleContracts, type CompletedContract } from './contracts';
+import { ASCENT_UNLOCK_FLIGHTS } from './content/modes';
 import { MASTERY, MASTERY_BY_SPECIES, MASTERY_COMPLETE_KEYS, type MasteryDef } from './content/mastery';
 import { MAX_LEVEL, TALENTS, xpToNext, TALENT_SLOTS, XP, addXp, haulBonusPercent, stageOf, type Stage, type TalentId, type TalentSlot } from './content/progression';
 import { SPECIES, SPECIES_IDS } from './content/species';
@@ -535,8 +536,9 @@ export const ARENA_VICTORY_BONUS: Reward = { gold: 60, fruit: 20 };
 // and ≈ 40 Emberfruit per active minute for every pilot (Rush reasonable pilot: ≈ 89 / 40; Arena
 // ≈ 80 / 27), so Ascent pays like the other modes. Hard caps per qualified minute keep it there.
 // XP and key progress use the shared qualified-time rules below. Score and upgrades never touch
-// currency.
-export const ASCENT_REWARDS = { goldPerMinute: 100, fruitPerMinute: 45 } as const;
+// currency. A run counts toward `ascent.runs` (and the first-run milestone) only once it reached
+// `minRunMetres`: starting and leaving at once pays nothing extra. (Bests only ever rise.)
+export const ASCENT_REWARDS = { goldPerMinute: 100, fruitPerMinute: 45, minRunMetres: 100 } as const;
 
 /** Applies the per-qualified-minute caps to a cumulative Ascent report (idempotent). */
 export function capAscentReport(r: RunReport): RunReport {
@@ -752,8 +754,10 @@ export function settleRun(save: SaveData, runId: string, report: RunReport, opts
     // update them too, so a reload never loses a distance that was already banked.
     const a = report.ascent;
     const rec = s.ascent;
-    if (!marker.banked) rec.runs += 1;
     const dist = Math.max(0, Math.floor(a.distance));
+    // counted once: the first settlement that reaches minRunMetres (every shrine is beyond it, so a
+    // checkpoint always counts and the final settlement after one never counts again)
+    if (!marker.banked && dist >= ASCENT_REWARDS.minRunMetres) rec.runs += 1;
     const score = Math.max(0, Math.floor(a.score));
     if (a.assist) {
       if (dist > rec.bestAssist) {
@@ -838,7 +842,8 @@ export interface NextGoal {
   text: string;
   progress: number;
   target: number;
-  action: 'play-rush' | 'play-trials' | 'play-arena' | 'feed' | 'hatchery' | 'dragons' | 'journal';
+  /** 'play-ascent' starts Aether Ascent (ui.startMode('ascent')). */
+  action: 'play-rush' | 'play-trials' | 'play-arena' | 'play-ascent' | 'feed' | 'hatchery' | 'dragons' | 'journal';
   actionLabel: string;
 }
 
@@ -857,12 +862,15 @@ export function nextGoal(s: SaveData, screen: 'home' | 'play' | 'dragons' | 'hat
     .map((m) => ({ m, v: milestoneValue(s, m.metric) }))
     .sort((a, b) => b.v / b.m.target - a.v / a.m.target)[0];
   if (s.lifetime.flights < 1) return { text: 'Complete your first full Dragon Rush flight', progress: 0, target: 1, action: 'play-rush', actionLabel: 'Play Dragon Rush' };
+  // Aether Ascent just opened and was never flown (a run of at least 100 m): suggest it
+  if (s.lifetime.flights >= ASCENT_UNLOCK_FLIGHTS && s.ascent.runs === 0 && screen !== 'journal' && screen !== 'dragons')
+    return { text: 'Aether Ascent is open: fly your first endless run', progress: 0, target: 1, action: 'play-ascent', actionLabel: 'Play Aether Ascent' };
   const milestoneLvl = [5, 10, 15, 20, 30].find((l) => l > d.level);
   if (milestoneLvl && milestoneLvl <= 15 && screen !== 'journal')
     return { text: `Raise ${dragonName(s, sel)} to level ${milestoneLvl}`, progress: d.level, target: milestoneLvl, action: 'play-rush', actionLabel: 'Play' };
   if (unclaimed) {
     const m = unclaimed.m;
-    const action = m.metric.startsWith('trial') ? 'play-trials' : m.metric.startsWith('arena') ? 'play-arena' : 'play-rush';
+    const action = m.metric.startsWith('trial') ? 'play-trials' : m.metric.startsWith('arena') ? 'play-arena' : m.metric.startsWith('ascent') ? 'play-ascent' : 'play-rush';
     return { text: `${m.title} to unlock ${SPECIES[m.reward.species!].name}`, progress: Math.min(unclaimed.v, m.target), target: m.target, action, actionLabel: 'Play' };
   }
   return { text: `Collect every species (${SPECIES_IDS.filter((id) => s.dragons[id].owned).length}/24)`, progress: SPECIES_IDS.filter((id) => s.dragons[id].owned).length, target: 24, action: 'hatchery', actionLabel: 'Visit the hatchery' };

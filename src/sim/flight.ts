@@ -212,6 +212,10 @@ export class FlightSim {
   private prevY: number = FLIGHT.startY;
   private dashRequested = false;
   private abilityRequested = false;
+  /** The pending ability request came from auto-activate (not player input). */
+  private abilityAuto = false;
+  /** An auto-activated ability is firing (its free dash is not player input either). */
+  private firingAuto = false;
   private hintCd = 0;
   private penalizedRocks = new Set<number>();
   private keyDir: -1 | 0 | 1 = 0;
@@ -416,9 +420,16 @@ export class FlightSim {
     this.lastEngage = this.time;
   }
 
-  requestAbility(): void {
+  /**
+   * Asks for the active ability. `auto` marks the Settings auto-activate path: it is not player
+   * input, so neither the request nor the ability (or the dash it may start) refreshes the
+   * engagement window that qualified time depends on.
+   */
+  requestAbility(auto = false): void {
+    // a manual press wins over a pending automatic one
+    this.abilityAuto = this.abilityRequested ? this.abilityAuto && auto : auto;
     this.abilityRequested = true;
-    this.lastEngage = this.time;
+    if (!auto) this.lastEngage = this.time;
   }
 
   drainEvents(): FlightEvent[] {
@@ -536,7 +547,7 @@ export class FlightSim {
   private startDash(free: boolean) {
     this.dashT = DASH.duration;
     if (!free) this.dashCd = this.dashCooldown;
-    this.engage();
+    if (!this.firingAuto) this.engage();
     this.events.push({ type: 'dash', free });
   }
 
@@ -573,6 +584,8 @@ export class FlightSim {
     }
     if (!this.abilityRequested) return;
     this.abilityRequested = false;
+    const auto = this.abilityAuto;
+    this.abilityAuto = false;
     if (this.abilityCharge < 1) {
       this.events.push({ type: 'abilityDenied' });
       return;
@@ -581,8 +594,10 @@ export class FlightSim {
     // Saving a legendary meter all the way to 200% pays back 35% of a charge.
     this.abilityCharge = this.abilityCharge >= 2 - 1e-9 ? 0.35 : 0;
     this.abilityUses += 1;
-    this.engage();
+    if (!auto) this.engage();
+    this.firingAuto = auto;
     this.fireAbility(this.stats.ability.flight, scale);
+    this.firingAuto = false;
   }
 
   private fireAbility(f: FlightEffect, power: number) {

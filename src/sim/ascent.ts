@@ -60,8 +60,34 @@ export const ASCENT = {
    * pixel-perfect threading. A gap between two hazards must be ≥ 2·(26 + 6) + 16 = 80 px.
    */
   minCorridor: 16,
-  /** Floor for the Ascent ability meter (s) before Aether Battery. */
+  /** Floor for the Ascent ability meter (s) before Aether Battery (see POWER_TUNING for each effect). */
   minChargeSeconds: 16,
+  /** Every Ascent dash also gives this much phase (nothing can hit you), so dash upgrades matter. */
+  dashPhase: 0.3,
+  /**
+   * Assist: hazards move this much slower (periods longer, hawks and falling stone slower), every
+   * warning starts `assistTelegraph` s earlier, and each shrine restores one ward. The scroll
+   * speed ramps more gently too (SPEED.assist). Records are kept separately.
+   */
+  assistHazardSpeed: 0.85,
+  assistTelegraph: 0.4,
+} as const;
+
+/** Keyboard steering (W/S, arrows), the same feel as Dragon Rush: the aim leads the dragon while a
+ * key is held (ramping from leadMin to leadMax px over `ramp` s) and stops just ahead on release. */
+export const ASCENT_KEYS = { leadMin: 46, leadMax: 92, ramp: 0.16, stop: 0.016 } as const;
+
+/**
+ * Ability tuning per effect kind (Ascent only). The meter takes max(floor, Rush charge × mult)
+ * seconds. A ward is the most forgiving effect (it blocks any one hit, no timing needed), so it is
+ * short and charges slowest; a slow-time effect needs to be used well, so it charges fastest.
+ * A clear effect with nothing breakable in reach still gives `fallbackPhase` s of protection.
+ */
+export const POWER_TUNING = {
+  ward: { floor: 26, mult: 1.6, maxSeconds: 2.5 },
+  phase: { floor: 16, mult: 1.5 },
+  slow: { floor: 13, mult: 1.15, phase: 0.9 },
+  clear: { floor: 15, mult: 1.4, fallbackPhase: 1 },
 } as const;
 
 /** Forward speed (px/s) by distance: welcoming first minute, steady ramp, hard cap. */
@@ -77,7 +103,17 @@ export function ascentSpeed(metres: number, assist: boolean): number {
 
 /** Difficulty tier by distance (metres). Tiers gate which chunks may appear. */
 export function tierFor(m: number): number {
-  return m < 550 ? 0 : m < 1300 ? 1 : m < 2200 ? 2 : m < 3200 ? 3 : m < 4300 ? 4 : m < 6000 ? 5 : 6;
+  return m < 550 ? 0 : m < 1300 ? 1 : m < 2200 ? 2 : m < 3200 ? 3 : m < 4300 ? 4 : m < 6000 ? 5 : m < 8000 ? 6 : m < 10000 ? 7 : 8;
+}
+
+/**
+ * Gentle growth after 6 km, once the speed is capped: intense and combined chunks get more
+ * likely and calm air comes a little less often (every chunk is still proven and an intense
+ * chunk is still always followed by calm air).
+ */
+export function lateGrowth(tier: number): { intenseWeight: number; debtLimit: number } {
+  const k = Math.max(0, tier - 6);
+  return { intenseWeight: 1 + 0.4 * k, debtLimit: k >= 1 ? 5 : 4 };
 }
 
 /** Distance (m) at which each family is introduced (one at a time, each with a banner). */
@@ -96,7 +132,11 @@ export const FAMILY_INFO: Record<Family, { title: string; text: string }> = {
 const TIER_BANNERS: Record<number, { title: string; text: string }> = {
   5: { title: 'Storm front', text: 'Hazards now combine. Breathe in the calm stretches' },
   6: { title: 'Heart of the storm', text: 'The wildest skyways. Every metre counts' },
+  7: { title: 'Eye of the storm', text: 'Fewer calm stretches from here: pace yourself' },
 };
+
+/** Gale hawks are part of the guardians family but get their own announcement the first time. */
+export const HAWK_INFO = { title: 'New: Gale hawks', text: 'Watch the red arrow at the right edge: a hawk flies along that lane' } as const;
 
 export const CAUSE: Record<HazardKind, string> = {
   ruin: 'floating ruins',
@@ -124,6 +164,8 @@ export const TIPS: Record<HazardKind | 'quit' | 'none', string> = {
 
 export interface Hazard extends HazardSpec {
   id: number;
+  /** Warning seconds before this hazard turns dangerous (TELEGRAPH / HAWK_WARN, longer with assist). */
+  tg: number;
   /** Hazard-clock time when the dragon reached this hazard's chunk. */
   t0: number;
   cleared: boolean;
@@ -177,11 +219,10 @@ export function hazardWarning(h: Hazard, tau: number): number {
   const u = tau - h.t0;
   if (h.motion === 'lane') {
     const ph = frac(u / h.b + h.c) * h.b;
-    const start = h.b - h.d - TELEGRAPH;
-    return ph >= start && ph < h.b - h.d ? (ph - start) / TELEGRAPH : 0;
+    const start = h.b - h.d - h.tg;
+    return ph >= start && ph < h.b - h.d ? (ph - start) / h.tg : 0;
   }
-  if (h.motion === 'fall') return u >= h.c - TELEGRAPH && u < h.c ? (u - (h.c - TELEGRAPH)) / TELEGRAPH : 0;
-  if (h.motion === 'swoop') return u >= h.c - HAWK_WARN && u < h.c ? (u - (h.c - HAWK_WARN)) / HAWK_WARN : 0;
+  if (h.motion === 'fall' || h.motion === 'swoop') return u >= h.c - h.tg && u < h.c ? (u - (h.c - h.tg)) / h.tg : 0;
   return 0;
 }
 
@@ -360,9 +401,35 @@ export interface Chunk {
 
 export const SHRINE_OFFSET = 420;
 
-/** Builds a placed chunk. Exposed for tests (validate every chunk at any speed). */
-export function placeChunk(def: ChunkDef, variant: number, mirror: boolean, start: number, t0: number, speed: number, firstId: number, index = 0, tier = 0): Chunk {
-  const body = buildChunk(def, variant, mirror);
+/**
+ * Assist hazards (see ASCENT.assistHazardSpeed): the same layout with slower motion and longer
+ * warnings. Position triggers are unchanged (stone still shakes loose where the dragon is); only
+ * how fast things then move changes. The placed chunk is validated like any other.
+ */
+function assistHazard(h: HazardSpec): HazardSpec & { tg: number } {
+  const k = ASCENT.assistHazardSpeed;
+  const extra = ASCENT.assistTelegraph;
+  switch (h.motion) {
+    case 'door':
+    case 'slide':
+    case 'patrol':
+      return { ...h, b: h.b / k, tg: TELEGRAPH };
+    case 'lane':
+      // discharges come less often (same length), and glow `extra` s longer before each one
+      return { ...h, b: h.b / k, tg: TELEGRAPH + extra };
+    case 'swoop':
+      return { ...h, a: h.a * k, tg: HAWK_WARN + extra };
+    case 'fall':
+      return { ...h, a: h.a * k * k, tg: TELEGRAPH + extra };
+    default:
+      return { ...h, tg: TELEGRAPH };
+  }
+}
+
+/** Builds a placed chunk. Exposed for tests (validate every chunk at any speed, with and without assist). */
+export function placeChunk(def: ChunkDef, variant: number, mirror: boolean, start: number, t0: number, speed: number, firstId: number, index = 0, tier = 0, assist = false): Chunk {
+  const raw = buildChunk(def, variant, mirror);
+  const body = { ...raw, hazards: raw.hazards.map((h) => (assist ? assistHazard(h) : { ...h, tg: h.motion === 'swoop' ? HAWK_WARN : TELEGRAPH })) };
   let id = firstId;
   return {
     index,
@@ -501,6 +568,9 @@ export class AscentCourse {
   private lastId = '';
   private lastIntensity = 0;
   private tierShown = 0;
+  /** Gale hawks announced yet (their first chunk is always 'hawk-lanes', after calm air). */
+  private hawksShown = false;
+  private pendingHawks = false;
 
   constructor(seed: number, assist = false) {
     this.rng = createRng(seed ^ 0x51ed27);
@@ -547,7 +617,7 @@ export class AscentCourse {
 
   private append(def: ChunkDef, variant: number, mirror: boolean): Chunk {
     const m = AscentCourse.metresAt(this.endX);
-    const ch = placeChunk(def, variant, mirror, this.endX, this.endT, ascentSpeed(m, this.assist), this.nextId, this.count, tierFor(m));
+    const ch = placeChunk(def, variant, mirror, this.endX, this.endT, ascentSpeed(m, this.assist), this.nextId, this.count, tierFor(m), this.assist);
     this.nextId += ch.hazards.length;
     this.chunks.push(ch);
     this.count++;
@@ -563,12 +633,12 @@ export class AscentCourse {
     const variant = this.rng.int(0, def.variants - 1);
     const mirror = this.rng.chance(0.5);
     const m = AscentCourse.metresAt(this.endX);
-    const probe = placeChunk(def, variant, mirror, this.endX, this.endT, ascentSpeed(m, this.assist), 0);
+    const probe = placeChunk(def, variant, mirror, this.endX, this.endT, ascentSpeed(m, this.assist), 0, 0, 0, this.assist);
     if (!chunkAcceptsAll(probe)) return null;
     return this.append(def, variant, mirror);
   }
 
-  private generate() {
+  private generate(): void {
     const m = AscentCourse.metresAt(this.endX);
     // 1. upgrade shrine at each milestone
     if (m >= upgradeMetres(this.upgradeIdx) - 15) {
@@ -577,10 +647,22 @@ export class AscentCourse {
       this.append(CHUNK_BY_ID.get('rest')!, 0, false);
       return;
     }
+    const tier = tierFor(m);
+    const growth = lateGrowth(tier);
     // 2. calm air after intense stretches
-    if (this.debt >= 4 || this.lastIntensity >= 3) {
+    if (this.debt >= growth.debtLimit || this.lastIntensity >= 3) {
       this.debt = 0;
       this.append(CHUNK_BY_ID.get('recovery')!, this.rng.int(0, 2), false);
+      return;
+    }
+    // 3a. the first gale hawks: their own simple chunk and banner, after calm air
+    if (this.pendingHawks) {
+      this.pendingHawks = false;
+      this.hawksShown = true;
+      const ch = this.tryAppend(CHUNK_BY_ID.get('hawk-lanes')!) ?? this.fallback();
+      if (ch.def.id === 'hawk-lanes') ch.banner = { ...HAWK_INFO, family: 'guardians' };
+      else this.hawksShown = false;
+      this.debt += ch.def.intensity;
       return;
     }
     // 3. a new family: calm air first, then its intro chunk with a banner
@@ -597,20 +679,28 @@ export class AscentCourse {
       this.debt += intro.intensity;
       return;
     }
-    // 4. a weighted pick among the chunks allowed at this tier
-    const tier = tierFor(m);
-    const pool = CHUNKS.filter((c) => c.kind === 'hazard' && !c.intro && tier >= c.minTier && tier <= c.maxTier && c.id !== this.lastId && c.families.every((f) => this.introduced.has(f)));
+    // 4. a weighted pick among the chunks allowed at this tier (hawks only after their own intro)
+    const pool = CHUNKS.filter((c) => c.kind === 'hazard' && !c.intro && tier >= c.minTier && tier <= c.maxTier && c.id !== this.lastId && c.families.every((f) => this.introduced.has(f)) && (this.hawksShown || !hasHawks(c) || c.id === 'hawk-lanes'));
+    const weight = (c: ChunkDef) => c.weight * (c.intensity >= 3 ? growth.intenseWeight : 1);
     let placed: Chunk | null = null;
     for (let attempt = 0; attempt < 4 && !placed && pool.length; attempt++) {
-      const total = pool.reduce((s, c) => s + c.weight, 0);
+      const total = pool.reduce((s, c) => s + weight(c), 0);
       let pick = this.rng.range(0, total);
       let def = pool[0];
       for (const c of pool) {
-        pick -= c.weight;
+        pick -= weight(c);
         if (pick <= 0) {
           def = c;
           break;
         }
+      }
+      if (def.id === 'hawk-lanes' && !this.hawksShown) {
+        // calm air first, then the hawks with their banner
+        this.pendingHawks = true;
+        if (this.lastId === 'recovery' || this.lastId === 'rest') return this.generate();
+        this.debt = 0;
+        this.append(CHUNK_BY_ID.get('recovery')!, this.rng.int(0, 2), false);
+        return;
       }
       placed = this.tryAppend(def);
       if (!placed) this.rejected++;
@@ -628,12 +718,18 @@ export class AscentCourse {
   }
 }
 
+const HAWK_IDS = new Set(CHUNKS.filter((c) => c.build(0).hazards.some((h) => h.kind === 'hawk')).map((c) => c.id));
+function hasHawks(c: ChunkDef): boolean {
+  return HAWK_IDS.has(c.id);
+}
+
 // --- abilities: each species keeps its identity, mapped to a survival effect --------------------
 
 export type AscentPower =
   | { kind: 'ward'; seconds: number; pull: number }
   | { kind: 'phase'; seconds: number; dash: boolean }
-  | { kind: 'slow'; seconds: number; factor: number; agile: number }
+  /** `phase`: seconds of protection as time slows (slowing alone cannot stop a hit already coming). */
+  | { kind: 'slow'; seconds: number; factor: number; agile: number; phase: number }
   | { kind: 'clear'; count: number; range: number; phase: number };
 
 /** Maps a species' flight ability to its Aether Ascent effect (base values before level power). */
@@ -647,18 +743,19 @@ export function ascentPower(f: FlightEffect): AscentPower {
       return { kind: 'phase', seconds: Math.min(2.5, f.duration * 0.8), dash: false };
     case 'soften':
       return { kind: 'phase', seconds: f.duration * 0.5, dash: false };
+    // wards are short (they need no timing): POWER_TUNING.ward.maxSeconds at most
     case 'shield':
-      return { kind: 'ward', seconds: f.duration, pull: f.pull ?? 0 };
+      return { kind: 'ward', seconds: Math.min(POWER_TUNING.ward.maxSeconds, f.duration * 0.4), pull: f.pull ?? 0 };
     case 'magnet':
-      return { kind: 'ward', seconds: f.duration * 1.5, pull: f.radius };
+      return { kind: 'ward', seconds: Math.min(POWER_TUNING.ward.maxSeconds, f.duration * 0.6), pull: f.radius };
     case 'chain':
-      return { kind: 'ward', seconds: 5 + f.targets * 0.3, pull: f.range * 0.5 };
+      return { kind: 'ward', seconds: Math.min(POWER_TUNING.ward.maxSeconds, 2 + f.targets * 0.2), pull: f.range * 0.5 };
     case 'path':
-      return { kind: 'slow', seconds: f.duration * 0.8, factor: 0.55, agile: 1 };
+      return { kind: 'slow', seconds: f.duration * 0.8, factor: 0.55, agile: 1, phase: POWER_TUNING.slow.phase };
     case 'freeze':
-      return { kind: 'slow', seconds: f.duration * 0.75, factor: 0.5, agile: 1 };
+      return { kind: 'slow', seconds: f.duration * 0.75, factor: 0.5, agile: 1, phase: POWER_TUNING.slow.phase };
     case 'handling':
-      return { kind: 'slow', seconds: f.duration * 0.5, factor: 0.7, agile: f.steerMult };
+      return { kind: 'slow', seconds: f.duration * 0.5, factor: 0.7, agile: 1 + (f.steerMult - 1) * 0.5, phase: POWER_TUNING.slow.phase };
     case 'pulse':
       return { kind: 'clear', count: f.clearRocks ?? 1, range: f.radius * 1.6, phase: 0.5 };
     case 'sweep':
@@ -672,13 +769,13 @@ export function ascentPower(f: FlightEffect): AscentPower {
 export function ascentPowerText(p: AscentPower): string {
   switch (p.kind) {
     case 'ward':
-      return `A ward blocks the next hit for ${p.seconds.toFixed(0)} s${p.pull ? ' and pulls in pickups' : ''}.`;
+      return `A ward blocks the next hit for ${p.seconds.toFixed(1)} s${p.pull ? ' and pulls in pickups' : ''}.`;
     case 'phase':
       return p.dash ? `A free dash; nothing can hit you for ${p.seconds.toFixed(1)} s.` : `Pass through hazards for ${p.seconds.toFixed(1)} s.`;
     case 'slow':
-      return `Slows hazards and the skyway to ${Math.round(p.factor * 100)}% for ${p.seconds.toFixed(1)} s${p.agile > 1 ? ' and sharpens steering' : ''}.`;
+      return `Slows hazards and the skyway to ${Math.round(p.factor * 100)}% for ${p.seconds.toFixed(1)} s${p.agile > 1 ? ' and sharpens steering' : ''}; nothing can hit you for the first ${p.phase.toFixed(1)} s.`;
     case 'clear':
-      return `Shatters up to ${p.count} nearby stone, debris or guardian${p.count > 1 ? 's' : ''} ahead, with a brief shimmer of protection.`;
+      return `Shatters up to ${p.count} cracked stone, debris or guardian${p.count > 1 ? 's' : ''} ahead with a brief shimmer of protection (${POWER_TUNING.clear.fallbackPhase.toFixed(0)} s of protection when nothing is in reach).`;
   }
 }
 
@@ -691,7 +788,8 @@ export const UPGRADES: Record<UpgradeId, { name: string; text: string; max: numb
   spare: { name: 'Spare Ward', text: '+1 ward capacity and +1 ward.', max: 1 },
   shell: { name: 'Aether Shell', text: 'A shell blocks the next hit (one at a time).', max: 3 },
   reach: { name: 'Wide Reach', text: 'Pickups are drawn in from 30% farther.', max: 2 },
-  quick: { name: 'Quick Wings', text: 'Dash recovers 20% faster.', max: 2 },
+  // every Ascent dash gives ASCENT.dashPhase s of protection, so a faster dash is defensive too
+  quick: { name: 'Quick Wings', text: 'Dash recovers 20% faster (each dash protects you for 0.3 s).', max: 2 },
   grace: { name: 'Steady Heart', text: '+0.5 s of protection after a hit.', max: 2 },
   battery: { name: 'Aether Battery', text: 'Your ability charges 25% faster.', max: 2 },
   // always-available fallbacks once the others reach their caps (never currency)
@@ -701,6 +799,8 @@ export const UPGRADES: Record<UpgradeId, { name: string; text: string; max: numb
 };
 
 const UPGRADE_POOL: UpgradeId[] = ['mend', 'spare', 'shell', 'reach', 'quick', 'grace', 'battery'];
+/** Every shrine offers at least one of these (Steady Breath when all of them are capped). */
+export const DEFENSIVE_UPGRADES: readonly UpgradeId[] = ['shell', 'spare', 'mend', 'grace'];
 
 // --- the run ---------------------------------------------------------------------------------------
 
@@ -744,6 +844,8 @@ export type AscentEvent =
   | { type: 'milestone'; metres: number }
   | { type: 'shrine' }
   | { type: 'upgrade'; id: UpgradeId }
+  /** Assist: the shrine restored a ward. */
+  | { type: 'wardRestored'; wards: number }
   | { type: 'dash'; free: boolean }
   | { type: 'dashDenied' }
   | { type: 'ability'; power: AscentPower; x: number; y: number; targets: { x: number; y: number }[] }
@@ -806,6 +908,9 @@ export class AscentSim {
   dashCd = 0;
   private dashRequested = false;
   private abilityRequested = false;
+  /** Keyboard steering direction (-1 up, 1 down, 0 none) and how long it has been held. */
+  private keyDir: -1 | 0 | 1 = 0;
+  private keyHeld = 0;
   private prevWX = 0;
   private prevY: number = FLIGHT.startY;
 
@@ -922,7 +1027,8 @@ export class AscentSim {
    * their identity without near-permanent protection.
    */
   get chargeSeconds(): number {
-    return Math.max(ASCENT.minChargeSeconds, this.stats.chargeSeconds * 1.5) / (1 + 0.25 * this.upgrades.battery);
+    const t = POWER_TUNING[this.power.kind];
+    return Math.max(t.floor, this.stats.chargeSeconds * t.mult) / (1 + 0.25 * this.upgrades.battery);
   }
   get attractRadius(): number {
     return FLIGHT.attractRadius * this.stats.attractMult * (1 + 0.3 * this.upgrades.reach) * (this.wardT > 0 && this.power.kind === 'ward' && this.power.pull ? 1.4 : 1);
@@ -947,18 +1053,39 @@ export class AscentSim {
 
   // --- input --------------------------------------------------------------------------------------
 
+  /** Pointer steering: aim at height y (cancels keyboard steering). */
   setTarget(y: number): void {
+    this.keyDir = 0;
     const t = Math.min(FLIGHT.maxY, Math.max(FLIGHT.minY, y));
     if (Math.abs(t - this.targetY) > 6) this.lastEngage = this.time;
     this.targetY = t;
+  }
+  /**
+   * Keyboard steering: -1 up, 1 down, 0 released. Runs inside the substeps (frame-rate
+   * independent), counts as input every substep while held, and stops just ahead on release
+   * (no overshoot), like Dragon Rush.
+   */
+  setSteerKeys(dir: -1 | 0 | 1): void {
+    if (dir === this.keyDir) return;
+    if (dir !== 0) {
+      this.keyHeld = 0;
+      this.lastEngage = this.time;
+    } else {
+      this.targetY = Math.min(FLIGHT.maxY, Math.max(FLIGHT.minY, this.y + this.vy * ASCENT_KEYS.stop));
+    }
+    this.keyDir = dir;
+  }
+  get steerKeys(): -1 | 0 | 1 {
+    return this.keyDir;
   }
   requestDash(): void {
     this.dashRequested = true;
     this.lastEngage = this.time;
   }
-  requestAbility(): void {
+  /** `auto`: fired by the auto-ability assist setting, which is not player input. */
+  requestAbility(opts: { auto?: boolean } = {}): void {
     this.abilityRequested = true;
-    this.lastEngage = this.time;
+    if (!opts.auto) this.lastEngage = this.time;
   }
   drainEvents(): AscentEvent[] {
     const e = this.events;
@@ -976,6 +1103,7 @@ export class AscentSim {
     this.state = 'play';
     this.dashRequested = false;
     this.abilityRequested = false;
+    this.keyDir = 0;
     this.events.push({ type: 'upgrade', id });
     return true;
   }
@@ -1041,6 +1169,7 @@ export class AscentSim {
 
     this.updateDash();
     this.updateAbility(dt);
+    this.updateKeys(dt);
     this.updateVertical(dt, windAt(ch, this.dist + FLIGHT.restX) * scale);
     if (this.dashT > 0) this.lunge += (DASH.lungeDistance - this.lunge) * (1 - Math.exp(-DASH.lungeRate * dt));
     else this.lunge += (0 - this.lunge) * (1 - Math.exp(-DASH.returnRate * dt));
@@ -1059,6 +1188,12 @@ export class AscentSim {
     // upgrade shrine: everything freezes until a choice is made
     if (ch.shrineX !== null && !this.shrines.has(ch.index) && this.dist + FLIGHT.restX >= ch.shrineX) {
       this.shrines.add(ch.index);
+      this.keyDir = 0;
+      // assist: every shrine restores one ward (before the offers, so Mend is offered only when useful)
+      if (this.assist && this.wards < this.maxWards) {
+        this.wards += 1;
+        this.events.push({ type: 'wardRestored', wards: this.wards });
+      }
       this.offers = this.rollOffers();
       this.state = 'choosing';
       this.events.push({ type: 'shrine' });
@@ -1121,6 +1256,7 @@ export class AscentSim {
 
   private startDash(free: boolean) {
     this.dashT = DASH.duration;
+    this.phaseT = Math.max(this.phaseT, ASCENT.dashPhase);
     if (!free) this.dashCd = this.dashCooldown;
     this.events.push({ type: 'dash', free });
   }
@@ -1166,7 +1302,7 @@ export class AscentSim {
     const targets: { x: number; y: number }[] = [];
     switch (p.kind) {
       case 'ward':
-        this.wardT = p.seconds * k;
+        this.wardT = Math.min(POWER_TUNING.ward.maxSeconds, p.seconds * k);
         if (p.pull) for (const q of this.pickups) if (Math.hypot(q.x - wx, q.y - this.y) <= p.pull * k) q.attracted = true;
         break;
       case 'phase':
@@ -1176,6 +1312,7 @@ export class AscentSim {
       case 'slow':
         this.slowT = p.seconds * k;
         this.slowFactor = p.factor;
+        this.phaseT = Math.max(this.phaseT, p.phase);
         if (p.agile > 1) {
           this.agileT = p.seconds * k;
           this.agileMult = p.agile;
@@ -1202,10 +1339,21 @@ export class AscentSim {
           hazardPos(c.h, this.clock, tmpPos);
           targets.push({ x: (c.h.shape === 'rect' ? tmpPos.x + c.h.w / 2 : tmpPos.x) - this.dist, y: c.h.shape === 'rect' ? tmpPos.y + c.h.h / 2 : tmpPos.y });
         }
+        // nothing breakable in reach: the burst still shields you briefly
+        if (!targets.length) this.phaseT = Math.max(this.phaseT, POWER_TUNING.clear.fallbackPhase);
         break;
       }
     }
     this.events.push({ type: 'ability', power: p, x: this.dragonScreenX, y: this.y, targets });
+  }
+
+  private updateKeys(dt: number) {
+    if (!this.keyDir) return;
+    this.keyHeld += dt;
+    this.lastEngage = this.time;
+    const K = ASCENT_KEYS;
+    const lead = K.leadMin + (K.leadMax - K.leadMin) * Math.min(1, this.keyHeld / K.ramp);
+    this.targetY = Math.min(FLIGHT.maxY, Math.max(FLIGHT.minY, this.y + this.keyDir * lead));
   }
 
   private updateVertical(dt: number, wind: number) {
@@ -1403,7 +1551,13 @@ export class AscentSim {
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     const out = pool.slice(0, 3);
-    for (const f of ['blessing', 'refresh', 'breath'] as const) if (out.length < 3) out.push(f);
+    // at least one defensive card: swap one in (or Steady Breath when every defensive card is capped)
+    if (!out.some((id) => DEFENSIVE_UPGRADES.includes(id))) {
+      const def = pool.slice(3).find((id) => DEFENSIVE_UPGRADES.includes(id));
+      const slot = out.length < 3 ? out.length : this.upRng.int(0, out.length - 1);
+      out[slot] = def ?? 'breath';
+    }
+    for (const f of ['blessing', 'refresh', 'breath'] as const) if (out.length < 3 && !out.includes(f)) out.push(f);
     return out;
   }
 

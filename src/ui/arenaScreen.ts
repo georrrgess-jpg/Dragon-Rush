@@ -7,7 +7,7 @@ import { arenaSfx } from '../audio/arenaSfx';
 import { SPECIES } from '../content/species';
 import type { RegionId } from '../content/types';
 import { REGIONS } from '../content/world';
-import { ArenaRenderer, type ArenaLook } from '../render/arenaRenderer';
+import { ArenaRenderer, releaseArenaFloors, type ArenaLook } from '../render/arenaRenderer';
 import { ARENA, BOSS_PHASES, ENEMIES, UPGRADES, UPGRADE_IDS, ArenaSim, type ArenaEvent, type EnemyKind, type UpgradeId } from '../sim/arena';
 import type { ArenaStats } from '../stats';
 import { $, el, esc, icon } from './dom';
@@ -28,7 +28,17 @@ export interface ArenaHost {
   onEnd(report: ArenaReport, reason: 'defeat' | 'quit' | 'victory' | 'endless' | 'bossLeft'): void;
   /** A tutorial step was shown and finished: add `id` to save.prefs.tutorials. */
   onTutorialSeen?(id: string): void;
+  /**
+   * Pause menu → Settings. The app opens Settings over the pause overlay; the fight stays paused
+   * while Settings is open and after it closes (the player resumes from the pause menu). Call
+   * `applySettings` with the new values when Settings closes.
+   */
+  onOpenSettings?(): void;
 }
+
+/** Upgrade cards ignore clicks and keys this long after the choice opens (a held Space or a dash
+ * pressed at the last moment must not pick a card by accident). */
+export const CHOICE_INPUT_GUARD = 0.4;
 
 export interface ArenaSetup {
   stats: ArenaStats;
@@ -39,7 +49,7 @@ export interface ArenaSetup {
   reducedMotion: boolean;
   lowEffects: boolean;
   showHitboxes: boolean;
-  /** settings.screenShake (default on; reduced motion always disables it). */
+  /** settings.screenShake (default on; reduced motion and low effects also disable it). */
   screenShake?: boolean;
   /** save.prefs.tutorials: steps already seen are skipped. */
   tutorialsSeen?: readonly string[];
@@ -80,6 +90,7 @@ const STYLE = `
 .aw-role{display:inline-block;font-size:13px;text-transform:uppercase;letter-spacing:.5px;background:#d8541e;color:#fff;border-radius:6px;padding:0 7px;margin-right:8px;vertical-align:2px}
 .aw-role.loot{background:#c89a12}
 .aw-role.boss{background:#7a3ab8}
+.upgrade-panel h2:focus{outline:none}
 .aw-card{justify-content:flex-start}
 .aw-card .aw-cat{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;padding:1px 8px;border-radius:6px;color:#fff}
 .aw-card[data-cat=attack] .aw-cat{background:#b07810}
@@ -127,6 +138,8 @@ export class ArenaScreen {
   private coachQueue: TutId[] = [];
   private playT = 0;
   private sawDanger = false;
+  /** performance.now() when the upgrade choice opened (cards activate CHOICE_INPUT_GUARD later). */
+  private choiceAt = 0;
 
   constructor(
     private host: ArenaHost,
@@ -236,13 +249,29 @@ export class ArenaScreen {
           ${ups.length ? `<p style="margin-bottom:4px"><b>Your upgrades</b></p><ul class="aw-ups">${ups.map((u) => `<li><b>${u.name}${u.n > 1 ? ` ×${u.n}` : ''}</b>: ${esc(u.now)}</li>`).join('')}</ul>` : ''}
           <div class="stack">
             <button class="btn gold big" data-a="resume">Resume</button>
+            ${this.host.onOpenSettings ? '<button class="btn" data-a="settings">Settings</button>' : ''}
             <button class="btn ghost" data-a="quit">Leave the Arena and bank</button>
           </div>
         </div>
       </div>`)!;
     $(o, '[data-a=resume]').addEventListener('click', () => this.resume());
+    o.querySelector('[data-a=settings]')?.addEventListener('click', () => {
+      sfx.click();
+      this.host.onOpenSettings?.(); // stays paused: only Resume (or Esc) continues the fight
+    });
     $(o, '[data-a=quit]').addEventListener('click', () => this.finish('quit'), { once: true });
     ($(o, '[data-a=resume]') as HTMLButtonElement).focus({ preventScroll: true });
+  }
+
+  /** Applies display settings changed while paused (Settings opened from the pause menu). */
+  applySettings(s: { reducedMotion?: boolean; lowEffects?: boolean; showHitboxes?: boolean; screenShake?: boolean; autoAbility?: boolean }): void {
+    if (s.reducedMotion !== undefined) this.setup.reducedMotion = this.renderer.reducedMotion = s.reducedMotion;
+    if (s.lowEffects !== undefined) this.setup.lowEffects = this.renderer.lowEffects = s.lowEffects;
+    if (s.showHitboxes !== undefined) this.setup.showHitboxes = this.renderer.showHitboxes = s.showHitboxes;
+    if (s.screenShake !== undefined) this.setup.screenShake = this.renderer.screenShake = s.screenShake;
+    if (s.autoAbility !== undefined) this.setup.autoAbility = s.autoAbility;
+    // back on the pause menu: keyboard focus returns to Resume
+    this.overlay?.querySelector<HTMLButtonElement>('[data-a=resume]')?.focus({ preventScroll: true });
   }
 
   private resume() {
@@ -305,7 +334,7 @@ export class ArenaScreen {
     const o = this.setOverlay(`
       <div class="overlay" role="dialog" aria-modal="true" aria-label="Choose an upgrade">
         <div class="panel upgrade-panel">
-          <h2>Wave ${this.sim.wave} cleared!</h2>
+          <h2 tabindex="-1">Wave ${this.sim.wave} cleared!</h2>
           <p>Choose one upgrade for the rest of this session. <b>The fight is paused.</b></p>
           ${first ? '<p class="aw-help">Press 1, 2 or 3, or click a card. Upgrades last until the session ends.</p>' : ''}
           <div class="upgrade-row">${cards}</div>
@@ -313,11 +342,18 @@ export class ArenaScreen {
         </div>
       </div>`)!;
     o.querySelectorAll<HTMLButtonElement>('.upgrade-card').forEach((b) => b.addEventListener('click', () => this.choose(Number(b.dataset.i))));
-    o.querySelector<HTMLButtonElement>('.upgrade-card')?.focus({ preventScroll: true });
+    // Focus the heading, not a card: a Space or Enter meant for the fight must not pick an upgrade.
+    this.choiceAt = performance.now();
+    o.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
+  }
+
+  /** Cards activate only after CHOICE_INPUT_GUARD seconds. */
+  private get choiceReady(): boolean {
+    return performance.now() - this.choiceAt >= CHOICE_INPUT_GUARD * 1000;
   }
 
   private choose(i: number) {
-    if (this.mode !== 'choose' || !this.sim.chooseUpgrade(i)) return;
+    if (this.mode !== 'choose' || !this.choiceReady || !this.sim.chooseUpgrade(i)) return;
     sfx.levelUp();
     this.markSeen('arena.upgrade');
     this.setOverlay(null);
@@ -441,9 +477,17 @@ export class ArenaScreen {
   // --- input ---------------------------------------------------------------------------------
 
   key(code: string, down: boolean, repeat: boolean): boolean {
-    if (this.mode === 'choose' && down && /^Digit[1-3]$/.test(code)) {
-      this.choose(Number(code.slice(5)) - 1);
-      return true;
+    // Settings (or another app dialog) is open over the pause menu: its keys are not ours, and
+    // Esc there closes Settings without resuming the fight.
+    if (this.mode !== 'play' && this.host.root.closest('[inert]')) return false;
+    if (this.mode === 'choose') {
+      if (/^(Digit|Numpad)[1-3]$/.test(code)) {
+        if (down && !repeat) this.choose(Number(code.slice(-1)) - 1);
+        return true;
+      }
+      // Space (dash) and Enter never pick a card by themselves while the choice is open
+      // (Tab to a card, then Enter/Space, still works once the guard has passed).
+      if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') return repeat || !this.choiceReady || !this.focusOnCard();
     }
     const move = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
     if (move.includes(code)) {
@@ -470,6 +514,10 @@ export class ArenaScreen {
     return false;
   }
 
+  private focusOnCard(): boolean {
+    return !!(document.activeElement as HTMLElement | null)?.classList?.contains('upgrade-card');
+  }
+
   pointerDash(): void {
     if (this.mode === 'play') this.sim.requestDash();
   }
@@ -487,7 +535,7 @@ export class ArenaScreen {
       const x = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
       const y = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
       this.sim.setInput(x, y);
-      if (this.setup.autoAbility && this.sim.abilityCharge >= this.sim.maxCharge - 1e-6 && this.sim.enemies.length > 0) this.sim.requestAbility();
+      if (this.setup.autoAbility && this.sim.abilityCharge >= this.sim.maxCharge - 1e-6 && this.sim.enemies.length > 0) this.sim.requestAbility(true);
       this.sim.advance(dt);
       const ev = this.sim.drainEvents();
       this.renderer.handle(ev, this.sim);
@@ -685,5 +733,8 @@ export class ArenaScreen {
     this.hud.remove();
     this.overlay?.remove();
     this.host.canvas.classList.remove('active', 'arena');
+    // the pre-rendered floors are large (tens of MB each): free them when leaving the Arena
+    this.renderer.dispose();
+    releaseArenaFloors();
   }
 }

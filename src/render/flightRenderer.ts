@@ -11,6 +11,7 @@ import { drawChest, drawCoin, drawFruit, drawFruitSlice, drawPickupGlow, drawPod
 import { Background } from './background';
 import { drawDragon, mixHex, paletteFor } from './dragonArt';
 import { DragonAnimator } from './dragonAnim';
+import { shakeAllowed } from './fx';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -77,7 +78,7 @@ export class FlightRenderer {
   reducedMotion = false;
   lowEffects = false;
   showHitboxes = false;
-  /** Settings → screen shake (also off with reduced motion or low effects). */
+  /** Settings → screen shake (also off with reduced motion or low effects: see fx.shakeAllowed). */
   screenShake = true;
   private tally: Tally | null = null;
   private look: FlightLook = { species: 'ember', stage: 'hatchling', marking: 'default', trail: 'trail.wisp', abilityVariant: false };
@@ -89,6 +90,11 @@ export class FlightRenderer {
   private time = 0;
   private glowVis = 0;
   private abilityGlow = 0;
+  /** Great Current: the effect's full length (for the fade in) and last seen timer. */
+  private pathMax = 0;
+  private pathPrev = 0;
+  /** The dragon's palette is pale enough to need a soft backing (set by reset()). */
+  private pale = false;
   private anim = new DragonAnimator();
   private rockSprites = new Map<number, HTMLCanvasElement>();
   private coinSprite: HTMLCanvasElement;
@@ -135,6 +141,8 @@ export class FlightRenderer {
     this.abilityGlow = 0;
     this.tally = null;
     this.look = { ...this.look, ...look };
+    this.pale = luminanceOf(paletteFor(this.look.species, this.look.marking).body) >= PALE_BODY;
+    this.pathMax = this.pathPrev = 0;
     this.anim = new DragonAnimator(false, Math.random(), { species: this.look.species, stage: this.look.stage });
     this.rockSprites.clear();
   }
@@ -304,7 +312,7 @@ export class FlightRenderer {
   }
 
   private addShake(n: number) {
-    if (this.screenShake && !this.reducedMotion && !this.lowEffects) this.shake = Math.max(this.shake, n);
+    if (shakeAllowed(this)) this.shake = Math.max(this.shake, n);
   }
 
   /** Groups a burst of pickups into one "+N" counter beside the dragon. */
@@ -393,6 +401,8 @@ export class FlightRenderer {
     this.flash = Math.max(0, this.flash - dt * 2.5);
     this.abilityGlow = Math.max(0, this.abilityGlow - dt * 1.5);
     this.glowVis = sim.rushActive ? Math.min(1, this.glowVis + dt * 4) : Math.max(0, this.glowVis - dt * 2);
+    if (sim.pathT > this.pathPrev + 1e-6) this.pathMax = sim.pathT; // (re)started
+    this.pathPrev = sim.pathT;
     this.anim.update(dt, { vy: sim.vy, maxVy: FLIGHT.maxVerticalSpeed, dashing: sim.dashActive, rush: sim.rushActive, perch: false, reducedMotion: this.reducedMotion });
 
     if (this.tally) {
@@ -426,8 +436,10 @@ export class FlightRenderer {
 
   draw(ctx: Ctx, sim: FlightSim): void {
     this.background(sim.env).draw(ctx, sim.dist, this.time);
-    const sx = this.shake > 0 ? jitter(this.time, 1) * this.shake : 0;
-    const sy = this.shake > 0 ? jitter(this.time, 2) * this.shake : 0;
+    // the same rule as addShake, so a setting changed mid-shake stops it at once
+    const shake = this.shake > 0 && shakeAllowed(this) ? this.shake : 0;
+    const sx = shake ? jitter(this.time, 1) * shake : 0;
+    const sy = shake ? jitter(this.time, 2) * shake : 0;
     ctx.save();
     ctx.translate(sx, sy);
     const t = this.time;
@@ -534,6 +546,11 @@ export class FlightRenderer {
     ctx.globalAlpha = graceAlpha * (sim.ghostT > 0 ? 0.55 : 1);
     const pose = this.anim.pose();
     pose.rush = Math.max(pose.rush, this.abilityGlow * 0.6);
+    if (this.pale) {
+      // pale palettes (Leviara, Glacielle...) get a soft navy backing so they read on bright skies
+      const h = paleHalo();
+      ctx.drawImage(h, sim.dragonScreenX - 118, sim.y - 74, 236, 148);
+    }
     drawDragon(ctx, sim.dragonId, sim.dragonScreenX, sim.y, 0.78, pose, { stage: this.look.stage, marking: this.look.marking, detail: this.lowEffects ? 0 : 1 });
     ctx.globalAlpha = 1;
     this.drawAuras(ctx, sim, false);
@@ -736,13 +753,24 @@ export class FlightRenderer {
     ctx.restore();
   }
 
+  /** Leviara's Great Current: a flowing band of water ahead of the dragon (under every hazard). */
   private drawPathBand(ctx: Ctx, sim: FlightSim) {
-    ctx.save();
-    ctx.globalAlpha = 0.22;
-    ctx.fillStyle = this.color;
-    const band = sim.pathBand;
-    ctx.fillRect(sim.dragonScreenX, sim.y - band / 2, VIEW.width, band);
-    ctx.restore();
+    const elapsed = Math.max(0, this.pathMax - sim.pathT);
+    const alpha = Math.min(1, elapsed / 0.35, sim.pathT / 0.6);
+    const x0 = sim.dragonScreenX - 40;
+    drawCurrent(ctx, {
+      x: x0,
+      y: sim.y,
+      angle: 0,
+      length: VIEW.width + 60 - x0,
+      width: sim.pathBand * 1.12, // soft edges fall just outside the pull band
+      alpha,
+      time: this.time,
+      water: elementColor(sim.dragonId),
+      flow: 300,
+      calm: this.reducedMotion,
+      simple: this.lowEffects,
+    });
   }
 
   private drawWaterfall(ctx: Ctx, x: number) {
@@ -1105,6 +1133,176 @@ export class FlightRenderer {
     }
     ctx.globalAlpha = 1;
   }
+}
+
+// --- authored water (Leviara's Great Current in Rush, the Arena 'wave') -------------------------
+
+const currentBodies = new Map<string, HTMLCanvasElement>();
+
+/** Soft water body: deep in the middle, fading to nothing at every edge (cached per colour). */
+function currentBody(water: string): HTMLCanvasElement {
+  let c = currentBodies.get(water);
+  if (!c) {
+    c = makeSprite(256, 96, 1, (g) => {
+      const deep = mixHex(water, '#0b2e52', 0.35);
+      const across = g.createLinearGradient(0, 0, 0, 96);
+      across.addColorStop(0, hexA(water, 0));
+      across.addColorStop(0.18, hexA(water, 0.55));
+      across.addColorStop(0.5, hexA(deep, 0.85));
+      across.addColorStop(0.82, hexA(water, 0.55));
+      across.addColorStop(1, hexA(water, 0));
+      g.fillStyle = across;
+      g.fillRect(0, 0, 256, 96);
+      // multiply by an along-the-band mask so the ends dissolve too
+      g.globalCompositeOperation = 'destination-in';
+      const along = g.createLinearGradient(0, 0, 256, 0);
+      along.addColorStop(0, 'rgba(0,0,0,0)');
+      along.addColorStop(0.14, 'rgba(0,0,0,1)');
+      along.addColorStop(0.86, 'rgba(0,0,0,1)');
+      along.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = along;
+      g.fillRect(0, 0, 256, 96);
+    });
+    currentBodies.set(water, c);
+  }
+  return c;
+}
+
+export interface CurrentOpts {
+  /** Band start (local origin), length along `angle`, and full width across it. */
+  x: number;
+  y: number;
+  angle: number;
+  length: number;
+  width: number;
+  /** Overall opacity 0..1 (fade in/out with the effect timer). */
+  alpha: number;
+  /** Renderer time in seconds (frozen while paused). */
+  time: number;
+  /** Element colour of the water. */
+  water: string;
+  /** Flow speed of the streaks along the band (px/s). */
+  flow: number;
+  /** Reduced motion: streaks hold still. */
+  calm: boolean;
+  /** Low effects: body plus a few straight streaks, no foam edges. */
+  simple: boolean;
+  /** Arena wave: a bright rolling crest at the band's far end. */
+  crest?: boolean;
+}
+
+/**
+ * Water drawn as an authored current rather than a flat slab: a soft gradient body, flowing streaks
+ * and foam edges. Kept at modest opacity and drawn under hazards so threats stay readable on top.
+ */
+export function drawCurrent(ctx: Ctx, o: CurrentOpts): void {
+  if (o.alpha <= 0.01 || o.length <= 4) return;
+  const L = o.length;
+  const W = o.width;
+  const light = mixHex(o.water, '#ffffff', 0.62);
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.rotate(o.angle);
+  ctx.globalAlpha = 0.42 * o.alpha;
+  ctx.drawImage(currentBody(o.water), 0, -W / 2, L, W);
+  // current streaks: lanes across the band, dashes flowing along it
+  const lanes = o.simple ? 3 : 6;
+  const period = 210;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = light;
+  for (let i = 0; i < lanes; i++) {
+    const f = -0.34 + (0.68 * i) / (lanes - 1);
+    const v = f * W;
+    const edge = 1 - Math.abs(f) / 0.5; // lanes near the edges are fainter
+    const h = ((i * 7919) % 97) / 97; // per-lane variety
+    const dash = 70 + 60 * h;
+    const speed = o.flow * (0.8 + 0.45 * h);
+    const off = o.calm ? h * period : (o.time * speed + h * period) % period;
+    ctx.lineWidth = o.simple ? 2.5 : 2 + 1.5 * edge;
+    for (let u = off - period; u < L; u += period) {
+      const u0 = Math.max(0, u);
+      const u1 = Math.min(L, u + dash);
+      if (u1 - u0 < 8) continue;
+      const mid = (u0 + u1) / 2;
+      const ends = Math.min(1, mid / (0.16 * L + 1), (L - mid) / (0.16 * L + 1));
+      ctx.globalAlpha = o.alpha * (0.2 + 0.4 * edge) * Math.max(0, ends);
+      ctx.beginPath();
+      if (o.simple) {
+        ctx.moveTo(u0, v);
+        ctx.lineTo(u1, v);
+      } else {
+        const wob = o.calm ? 0 : Math.sin(o.time * 2.2 + i * 1.7) * 3;
+        ctx.moveTo(u0, v + wob);
+        ctx.quadraticCurveTo(mid, v - 6 * (i % 2 ? 1 : -1) - wob, u1, v + wob);
+      }
+      ctx.stroke();
+    }
+  }
+  if (!o.simple) {
+    // foam along both edges: thin wavy lines that drift with the flow
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    for (const side of [-1, 1]) {
+      ctx.globalAlpha = 0.3 * o.alpha;
+      ctx.beginPath();
+      const ph = o.calm ? 0 : -o.time * o.flow * 0.03;
+      for (let u = 0.08 * L; u <= 0.92 * L; u += 18) {
+        const yv = side * W * 0.36 + Math.sin(u * 0.045 + ph + side) * 4;
+        if (u <= 0.08 * L) ctx.moveTo(u, yv);
+        else ctx.lineTo(u, yv);
+      }
+      ctx.stroke();
+    }
+  }
+  if (o.crest) {
+    // the wave front: a bright crescent bulging forward with a white lip
+    const bulge = Math.min(46, L * 0.2);
+    for (const [w, c, a] of [
+      [14, light, 0.5],
+      [4, '#ffffff', 0.85],
+    ] as const) {
+      ctx.globalAlpha = a * o.alpha;
+      ctx.strokeStyle = c;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(L - bulge, -W * 0.46);
+      ctx.quadraticCurveTo(L + bulge * 0.6, 0, L - bulge, W * 0.46);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// --- readability backing for pale dragons ---------------------------------------------------------
+
+const lum = new Map<string, number>();
+/** Relative luminance (0..1) of a #rrggbb colour. */
+export function luminanceOf(hex: string): number {
+  let l = lum.get(hex);
+  if (l === undefined) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = (k: number) => ((n >> k) & 255) / 255;
+    l = 0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0);
+    lum.set(hex, l);
+  }
+  return l;
+}
+
+/** Palettes this light (Leviara, Glacielle, Cloudtail, ...) get a soft dark backing in flight. */
+export const PALE_BODY = 0.8;
+
+let haloSprite: HTMLCanvasElement | null = null;
+/** A soft navy glow (cached) drawn behind pale dragons so they separate from bright skies. */
+export function paleHalo(): HTMLCanvasElement {
+  haloSprite ??= makeSprite(128, 128, 1, (g) => {
+    const r = g.createRadialGradient(64, 64, 6, 64, 64, 64);
+    r.addColorStop(0, 'rgba(16,34,64,0.5)');
+    r.addColorStop(0.55, 'rgba(16,34,64,0.3)');
+    r.addColorStop(1, 'rgba(16,34,64,0)');
+    g.fillStyle = r;
+    g.fillRect(0, 0, 128, 128);
+  });
+  return haloSprite;
 }
 
 function hexA(hex: string, a: number): string {

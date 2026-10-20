@@ -14,10 +14,13 @@ import type { Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
 import type { ArenaEffect, RegionId, SpeciesId } from '../content/types';
 import type { MarkingId } from '../content/world';
+import { paletteFor } from './dragonArt';
 import { ARENA, BOSS_PHASES, ENEMIES, PICKUP_LIFE, cameraFor, type ArenaEvent, type ArenaSim, type Enemy, type EnemyKind } from '../sim/arena';
 import { drawCoin, drawFruit, makeSprite } from './art';
 import { ArenaFloor } from './arenaFloor';
-import { abilityColor, FONT } from './flightRenderer';
+import { shakeAllowed } from './fx';
+export { releaseArenaFloors } from './arenaFloor';
+import { abilityColor, drawCurrent, elementColor, FONT, luminanceOf, PALE_BODY, paleHalo } from './flightRenderer';
 import { TopDragonMotion, drawDragonTop } from './topdown';
 
 type Ctx = CanvasRenderingContext2D;
@@ -32,7 +35,7 @@ const DANGER_DARK = '#7a1606';
 const DANGER_FILL = 'rgba(255,80,40,0.16)';
 
 interface Particle {
-  kind: 'spark' | 'ring' | 'text' | 'chain' | 'arc' | 'band' | 'puff';
+  kind: 'spark' | 'ring' | 'text' | 'chain' | 'arc' | 'puff';
   x: number;
   y: number;
   vx: number;
@@ -59,6 +62,11 @@ function jitter(time: number, k: number): number {
   return v - Math.floor(v) - 0.5;
 }
 
+/** Arena wave visual: total life, time to roll out to full reach, and reach (matches the sim's 420 px). */
+const WAVE_LIFE = 0.9;
+const WAVE_ROLL = 0.35;
+const WAVE_REACH = 420;
+
 /** Highest sprite resolution (device pixels per world pixel) for cached bodies. */
 const SPR_MAX = 2;
 
@@ -66,13 +74,17 @@ export class ArenaRenderer {
   reducedMotion = false;
   lowEffects = false;
   showHitboxes = false;
-  /** Settings → screen shake (also off under reduced motion). */
+  /** Settings → screen shake (also off with reduced motion or low effects: see fx.shakeAllowed). */
   screenShake = true;
   camX = 0;
   camY = 0;
   private dashW = 0;
   private floors = new Map<RegionId, ArenaFloor>();
   private particles: Particle[] = [];
+  /** Rolling waves (Leviara's Great Current): drawn on the ground layer, under every hazard. */
+  private waves: { x: number; y: number; dir: number; width: number; t: number }[] = [];
+  /** The player's palette is pale enough to need a soft backing on light floors. */
+  private pale: boolean;
   private time = 0;
   private shake = 0;
   private abilityGlow = 0;
@@ -87,6 +99,7 @@ export class ArenaRenderer {
   /** Sprite resolution matching the canvas's device-pixel scale (set each draw). */
   private spr = 1;
   constructor(private look: ArenaLook) {
+    this.pale = luminanceOf(paletteFor(look.species, look.marking).body) >= PALE_BODY;
     this.motion = new TopDragonMotion(look.species, look.stage, PLAYER_SCALE);
     this.coin = makeSprite(28, 28, 2, (c) => drawCoin(c, 14, 14, 11));
     this.fruit = makeSprite(30, 30, 2, (c) => drawFruit(c, 15, 15, 24));
@@ -99,6 +112,14 @@ export class ArenaRenderer {
       this.floors.set(region, f);
     }
     return f;
+  }
+
+  /** Drops cached floors and sprites (the screen is closing). */
+  dispose(): void {
+    this.floors.clear();
+    this.sprites.clear();
+    this.particles.length = 0;
+    this.waves.length = 0;
   }
 
   get color(): string {
@@ -129,7 +150,7 @@ export class ArenaRenderer {
   }
 
   private kick(amount: number) {
-    if (this.screenShake && !this.reducedMotion) this.shake = Math.max(this.shake, amount);
+    if (shakeAllowed(this)) this.shake = Math.max(this.shake, amount);
   }
 
   handle(events: ArenaEvent[], sim: ArenaSim): void {
@@ -163,7 +184,7 @@ export class ArenaRenderer {
           this.add({ kind: 'ring', x: sim.x, y: sim.y, size: 50, life: 0.3, color: 'rgba(255,255,255,0.9)' });
           break;
         case 'ability':
-          this.abilityFx(e.effect, e.power, e.x, e.y, e.dir, e.targets);
+          this.abilityFx(e.effect, e.power, e.x, e.y, e.dir, e.targets, e.healed ?? 1);
           break;
         case 'victory':
           this.add({ kind: 'ring', x: sim.x, y: sim.y, size: 400, life: 1, color: '#ffe27a' });
@@ -188,7 +209,7 @@ export class ArenaRenderer {
     }
   }
 
-  private abilityFx(f: ArenaEffect, power: number, x: number, y: number, dir: number, targets: { x: number; y: number }[]) {
+  private abilityFx(f: ArenaEffect, power: number, x: number, y: number, dir: number, targets: { x: number; y: number }[], healed = 1) {
     const col = this.color;
     this.abilityGlow = 1;
     this.burst(x, y, col, 16, 1.4);
@@ -201,12 +222,13 @@ export class ArenaRenderer {
         this.add({ kind: 'arc', x, y, size: f.range * Math.min(1.5, power), rot: dir, life: 0.4, color: col, vx: f.halfAngle });
         break;
       case 'wave':
-        this.add({ kind: 'band', x, y, size: f.width, rot: dir, life: 0.5, color: col });
+        this.waves.push({ x, y, dir, width: f.width, t: 0 });
         break;
       case 'chain':
         this.add({ kind: 'chain', x, y, life: 0.4, color: col, pts: [{ x, y }, ...targets] });
         break;
       case 'heal':
+        if (!healed) break; // already healed this wave: only the pull happened
         for (let i = 0; i < 6; i++) this.add({ kind: 'text', x: x + (Math.random() - 0.5) * 50, y: y - 10, vy: -70, life: 0.9, size: 20, color: '#9dffb0', text: '+' });
         break;
       default:
@@ -240,6 +262,8 @@ export class ArenaRenderer {
       }
     }
     this.particles = this.particles.filter((p) => p.life > 0);
+    for (const w of this.waves) w.t += dt;
+    this.waves = this.waves.filter((w) => w.t < WAVE_LIFE);
     // camera follows the player (nudged toward the boss), eased, slightly beyond the walls
     const f = sim.viewFocus();
     const c = cameraFor(f.x, f.y);
@@ -357,8 +381,10 @@ export class ArenaRenderer {
   // --- drawing ------------------------------------------------------------------------------------
 
   draw(ctx: Ctx, sim: ArenaSim, region: RegionId): void {
-    const shx = this.shake ? jitter(this.time, 1) * this.shake : 0;
-    const shy = this.shake ? jitter(this.time, 2) * this.shake : 0;
+    // the same rule as kick(), so a setting changed mid-shake stops it at once
+    const shake = this.shake > 0 && shakeAllowed(this) ? this.shake : 0;
+    const shx = shake ? jitter(this.time, 1) * shake : 0;
+    const shy = shake ? jitter(this.time, 2) * shake : 0;
     const cx = Math.round(this.camX + shx);
     const cy = Math.round(this.camY + shy);
     // sprites are cached at the canvas's device-pixel scale (1 on a plain screen, 2 on HiDPI)
@@ -394,6 +420,8 @@ export class ArenaRenderer {
         ctx.restore();
       }
     }
+
+    for (const w of this.waves) this.drawWave(ctx, w);
 
     this.drawTelegraphs(ctx, sim);
     this.drawIncomingGround(ctx, sim, cx, cy);
@@ -474,6 +502,8 @@ export class ArenaRenderer {
       }
     }
 
+    // pale palettes (Leviara, Glacielle...) get a soft navy backing so they read on light floors
+    if (this.pale) ctx.drawImage(paleHalo(), sim.x - 62, sim.y - 58, 124, 124);
     // player ground ring: keeps the dragon readable on any floor
     ctx.save();
     ctx.strokeStyle = 'rgba(20,30,40,0.55)';
@@ -543,6 +573,31 @@ export class ArenaRenderer {
       ctx.fillRect(0, 0, VIEW.width, VIEW.height);
     }
     this.drawEdgeMarkers(ctx, sim, cx, cy);
+  }
+
+  /**
+   * The Arena 'wave': water rolls forward from the dragon over the sim's hit area (420 px along,
+   * `width` across), then the band settles and fades. Ground layer, modest opacity.
+   */
+  private drawWave(ctx: Ctx, w: { x: number; y: number; dir: number; width: number; t: number }) {
+    const k = Math.min(1, w.t / WAVE_LIFE);
+    const roll = Math.min(1, w.t / WAVE_ROLL);
+    const front = WAVE_REACH * (this.reducedMotion ? 1 : 1 - (1 - roll) * (1 - roll));
+    const alpha = Math.min(1, w.t / 0.06) * (k < 0.55 ? 1 : (1 - k) / 0.45);
+    drawCurrent(ctx, {
+      x: w.x - Math.cos(w.dir) * 20,
+      y: w.y - Math.sin(w.dir) * 20,
+      angle: w.dir,
+      length: front + 20,
+      width: w.width * 1.15,
+      alpha,
+      time: this.time,
+      water: elementColor(this.look.species),
+      flow: 420,
+      calm: this.reducedMotion,
+      simple: this.lowEffects,
+      crest: roll < 1 || this.reducedMotion,
+    });
   }
 
   /** Ground telegraphs: hazard circles, thorn patches, charge lanes and aim lines. */
@@ -878,15 +933,6 @@ export class ArenaRenderer {
           ctx.closePath();
           ctx.fill();
           ctx.globalAlpha = k;
-          break;
-        case 'band':
-          ctx.save();
-          ctx.translate(p.x, p.y);
-          ctx.rotate(p.rot ?? 0);
-          ctx.fillStyle = p.color;
-          ctx.globalAlpha = 0.4 * k;
-          ctx.fillRect((1 - k) * 380, -p.size / 2, 60, p.size);
-          ctx.restore();
           break;
         case 'chain':
           if (p.pts && p.pts.length > 1)

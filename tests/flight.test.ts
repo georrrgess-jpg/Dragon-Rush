@@ -607,6 +607,34 @@ describe('qualified time and normalization', () => {
     expect(sim.qualifiedSeconds).toBeLessThan(21);
   });
 
+  it('auto-activated abilities are not player input: idle runs with auto-ability stop qualifying too', () => {
+    // Ember's Ember Wake also starts a free dash; neither may refresh the engagement window.
+    for (const dragon of ['ember', 'zephyr', 'tide'] as const) {
+      const sim = emptySim(dragon);
+      let fired = 0;
+      for (let i = 0; i < 60 * 50; i++) {
+        sim.abilityCharge = sim.maxCharge; // as if the meter kept filling
+        sim.requestAbility(true); // what FlightScreen does with Settings → auto-activate
+        sim.advance(1 / 60);
+        fired += sim.drainEvents().filter((e) => e.type === 'ability').length;
+      }
+      expect(fired, dragon).toBeGreaterThan(10);
+      expect(sim.qualifiedSeconds, dragon).toBeLessThan(21);
+    }
+  });
+
+  it('a manual ability press still counts as input, even when an automatic request is pending', () => {
+    const sim = emptySim('tide');
+    for (let i = 0; i < 60 * 30; i++) sim.advance(1 / 60);
+    const q = sim.qualifiedSeconds;
+    expect(q).toBeLessThan(21);
+    sim.abilityCharge = 1;
+    sim.requestAbility(true);
+    sim.requestAbility(); // the player pressed E in the same frame
+    for (let i = 0; i < 60 * 5; i++) sim.advance(1 / 60);
+    expect(sim.qualifiedSeconds).toBeGreaterThan(q + 4.9);
+  });
+
   it('Trials ignore species ring-size bonuses', () => {
     const z = makeSim('zephyr', { mode: 'trials', course: { id: 't', spawns: [], length: 2000, checkpoints: [1800] } });
     expect(z.stats.ringRadiusMult).toBe(1);
