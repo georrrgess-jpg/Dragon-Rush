@@ -87,9 +87,11 @@ export class Sfx {
       this.tone(base * 1.5, 0.12, 'sine', rush ? 0.16 : 0.1, 0.04);
       if (rush) this.tone(base * 2, 0.1, 'triangle', 0.08, 0.07);
     } else {
-      const base = (rush ? 620 : 440) * step;
-      this.tone(base, 0.12, 'triangle', 0.26, 0, base * 1.6);
-      if (rush) this.tone(base * 2, 0.1, 'sine', 0.12, 0.05);
+      // softer, rounder "bloop" for Emberfruit
+      const base = (rush ? 560 : 400) * step;
+      this.tone(base, 0.16, 'sine', 0.3, 0, base * 1.5);
+      this.tone(base * 0.5, 0.12, 'sine', 0.12, 0.01);
+      if (rush) this.tone(base * 2, 0.1, 'sine', 0.1, 0.05);
     }
   }
 
@@ -98,6 +100,17 @@ export class Sfx {
     this.tone(kind === 'chest' ? 110 : 160, 0.22, 'triangle', 0.4, 0, 60);
     const notes = kind === 'chest' ? [1046, 1318, 1568, 2093] : [784, 988, 1175, 1568];
     notes.forEach((n, i) => this.tone(n, 0.16, 'sine', 0.13, 0.06 + i * 0.05));
+  }
+
+  /** Wind ring: an airy whoosh with a rising shimmer. */
+  ring(): void {
+    this.noiseBurst(0.35, 0.28, 900, 'bandpass', 0, 3200);
+    [880, 1175, 1568].forEach((n, i) => this.tone(n, 0.14, 'sine', 0.08, 0.05 + i * 0.04));
+  }
+
+  /** Grove's pod bonus: a soft leafy chime. */
+  bloom(): void {
+    [1046, 1318].forEach((n, i) => this.tone(n, 0.18, 'triangle', 0.1, 0.12 + i * 0.07));
   }
 
   dash(): void {

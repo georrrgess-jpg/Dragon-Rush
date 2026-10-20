@@ -1,6 +1,6 @@
 // App controller: screens, input routing, saving and run settlement.
 import { sfx } from './audio';
-import { DRAGONS, VIEW, type DragonId } from './config';
+import { DRAGONS, VIEW, type DragonId, type EnvId } from './config';
 import * as eco from './economy';
 import { ensureObjectives } from './objectives';
 import { browserStore, loadSaveDetailed, writeSave, type KeyValueStore, type SaveData } from './save';
@@ -8,7 +8,7 @@ import type { RunSummary } from './sim/flight';
 import { $, sizeCanvas } from './ui/dom';
 import { FlightScreen } from './ui/flightScreen';
 import { HatchReveal } from './ui/hatch';
-import { HomeScreen } from './ui/home';
+import { HomeScreen, type HomeActions } from './ui/home';
 import { ResultsScreen } from './ui/results';
 
 export class App {
@@ -140,10 +140,12 @@ export class App {
   // --- loop --------------------------------------------------------------------
 
   private frame = (now: number) => {
+    // Clamp frame time so a tab switch never produces a big jump.
     const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     if (this.flight) this.flight.update(dt);
     else this.home?.update(dt);
+    this.results?.update(dt);
     this.hatch?.update(dt);
     requestAnimationFrame(this.frame);
   };
@@ -203,16 +205,19 @@ export class App {
       if (settlement) {
         const bonus = settlement.bonusPercent ? ` (incl. +${settlement.bonusPercent}% bonus)` : '';
         this.toast(`Flight ended early. Banked ${settlement.total.gold} gold and ${settlement.total.fruit} Emberfruit${bonus}.`);
+        this.announce(settlement.objectives);
+        for (const id of settlement.newlyEligible) this.toast(`${DRAGONS[id].name}'s egg is ready to hatch!`);
       }
       return;
     }
     sfx.finish();
     this.clearScreens();
-    this.results = new ResultsScreen(summary, settlement, this.save, this.scale, {
+    this.results = new ResultsScreen(summary, settlement, this.save, this.scale, this.save.settings.reducedMotion, {
       again: () => this.startRun(),
       home: () => this.goHome(),
     });
     this.root.appendChild(this.results.el);
+    (this.results.el.querySelector('[data-a=again]') as HTMLButtonElement | null)?.focus({ preventScroll: true });
   }
 
   toast(text: string, ms = 3800): void {
@@ -230,7 +235,14 @@ export class App {
     this.home?.render(this.save);
   }
 
-  private homeActions = {
+  private announce(done: { title: string; reward: { gold: number; fruit: number } }[]) {
+    for (const o of done) {
+      const parts = [o.reward.gold ? `${o.reward.gold} gold` : '', o.reward.fruit ? `${o.reward.fruit} Emberfruit` : ''].filter(Boolean).join(' + ');
+      this.toast(`Objective complete: ${o.title} (+${parts})`);
+    }
+  }
+
+  private homeActions: HomeActions = {
     play: () => {
       sfx.click();
       this.startRun();
@@ -242,24 +254,31 @@ export class App {
       sfx.feed();
       this.home?.onFed(r.level);
       this.refreshHome();
+      this.announce(r.objectives);
     },
     select: (id: DragonId) => {
       sfx.click();
       this.persist(eco.selectDragon(this.save, id));
       this.refreshHome();
     },
-    hatch: () => {
+    hatch: (id: DragonId) => {
       if (this.hatch) return;
-      const r = eco.unlockDragon(this.save, 'tide');
+      const r = eco.unlockDragon(this.save, id);
       if (!r.ok) return this.toast(r.reason);
       this.persist(r.save); // paid and unlocked before the reveal plays
+      this.home?.onHatched(id);
       this.refreshHome();
       sfx.hatch();
-      this.hatch = new HatchReveal(this.scale, this.save.settings.reducedMotion, () => {
+      this.hatch = new HatchReveal(id, this.scale, this.save.settings.reducedMotion, () => {
         this.hatch = null;
-        this.toast(`${DRAGONS.tide.name} joined your nest! Pick a dragon before each flight.`);
+        this.toast(`${DRAGONS[id].name} joined your nest and is selected for your next flight.`);
       });
       this.stage.appendChild(this.hatch.el);
+    },
+    environment: (env: EnvId) => {
+      sfx.click();
+      this.persist(eco.selectEnvironment(this.save, env));
+      this.refreshHome();
     },
     buyDecoration: () => {
       const r = eco.buyDecoration(this.save);
@@ -289,5 +308,6 @@ export class App {
       this.applyMotionClass();
       this.refreshHome();
     },
+    toggleFullscreen: () => this.toggleFullscreen(),
   };
 }

@@ -1,9 +1,10 @@
 import { iconDataUrl } from '../render/art';
 
-let icons: Record<'gold' | 'fruit' | 'slice' | 'egg' | 'chest', string> | null = null;
+type IconKind = 'gold' | 'fruit' | 'slice' | 'egg' | 'chest' | 'ring';
+let icons: Record<IconKind, string> | null = null;
 
 /** Item icons rendered from the same canvas art used in flight. */
-export function icon(kind: 'gold' | 'fruit' | 'slice' | 'egg' | 'chest', cls = 'icon'): string {
+export function icon(kind: IconKind, cls = 'icon'): string {
   if (!icons) {
     icons = {
       gold: iconDataUrl('gold'),
@@ -11,9 +12,10 @@ export function icon(kind: 'gold' | 'fruit' | 'slice' | 'egg' | 'chest', cls = '
       slice: iconDataUrl('slice'),
       egg: iconDataUrl('egg'),
       chest: iconDataUrl('chest'),
+      ring: iconDataUrl('ring'),
     };
   }
-  const alt = kind === 'gold' ? 'gold' : kind === 'fruit' || kind === 'slice' ? 'Emberfruit' : kind;
+  const alt = kind === 'gold' ? 'gold' : kind === 'fruit' || kind === 'slice' ? 'Emberfruit' : kind === 'ring' ? 'wind ring' : kind;
   return `<img class="${cls}" src="${icons[kind]}" alt="${alt}" draggable="false">`;
 }
 

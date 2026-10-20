@@ -369,6 +369,75 @@ export function drawPod(ctx: Ctx, x: number, y: number, r: number, pulse: number
   ctx.restore();
 }
 
+/** One half of a split pod: magenta skin with the golden, seeded flesh showing on the cut face. */
+export function drawPodHalf(ctx: Ctx, x: number, y: number, r: number, side: -1 | 1): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(side, 1);
+  // skin half (the right half when side = 1)
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.95, r, 0, -Math.PI / 2, Math.PI / 2);
+  ctx.closePath();
+  const g = ctx.createRadialGradient(r * 0.3, -r * 0.3, r * 0.1, 0, 0, r * 1.1);
+  g.addColorStop(0, '#ff7cbc');
+  g.addColorStop(0.6, '#d81b74');
+  g.addColorStop(1, '#93104f');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = PALETTE.fruitSkinDark;
+  ctx.stroke();
+  // cut face
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.22, r * 0.86, 0, 0, Math.PI * 2);
+  ctx.fillStyle = PALETTE.flesh;
+  ctx.fill();
+  ctx.fillStyle = PALETTE.seed;
+  for (let i = 0; i < 9; i++) {
+    ctx.beginPath();
+    ctx.arc(((i % 3) - 1) * r * 0.07, -r * 0.6 + i * r * 0.15, r * 0.03, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = PALETTE.bract;
+  ctx.strokeStyle = PALETTE.bractDark;
+  ctx.lineWidth = 2;
+  bract(ctx, r * 0.6, r * 0.3, 0.6, r * 0.4, r * 0.12);
+  bract(ctx, r * 0.4, -r * 0.6, -0.8, r * 0.4, r * 0.12);
+  ctx.restore();
+}
+
+/** Sunset Canyon wind ring seen side-on. half: draw only the back (-1) or front (+1) arc. */
+export function drawWindRing(ctx: Ctx, x: number, y: number, r: number, t: number, half: -1 | 1, alpha = 1, scale = 1): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.globalAlpha = alpha;
+  const rx = r * 0.32;
+  const a0 = half < 0 ? Math.PI / 2 : -Math.PI / 2;
+  const a1 = half < 0 ? (Math.PI * 3) / 2 : Math.PI / 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, r, 0, a0, a1);
+  ctx.strokeStyle = 'rgba(20,90,110,0.55)';
+  ctx.lineWidth = 11;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, r, 0, a0, a1);
+  ctx.strokeStyle = half < 0 ? '#7fd8d4' : '#bdf6ef';
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  // moving airflow dashes
+  ctx.setLineDash([10, 14]);
+  ctx.lineDashOffset = -t * 60;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, r, 0, a0, a1);
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
 // --- rocks ----------------------------------------------------------------------------
 
 /** Mossy boulder: jagged, matte, no glow, clearly different from containers. */
@@ -447,8 +516,17 @@ export function drawRock(ctx: Ctx, x: number, y: number, r: number, seed: number
 
 // --- egg -----------------------------------------------------------------------------------
 
-/** Tide's egg: blue-teal shell with wave speckles. crack in [0,1]. */
-export function drawEgg(ctx: Ctx, x: number, y: number, h: number, crack = 0): void {
+const EGG_COLORS: Record<string, [string, string, string, string, string]> = {
+  // light, mid, dark, outline, pattern
+  tide: ['#c9f4ff', '#4fb6e6', '#2a6fb8', '#163f73', 'rgba(80,230,220,0.85)'],
+  grove: ['#eaffc8', '#8bcf5f', '#4f8f35', '#1f4a1c', 'rgba(250,255,190,0.85)'],
+  gale: ['#ffffff', '#cfe8f8', '#93bfe0', '#2f5878', 'rgba(255,240,205,0.95)'],
+  ember: ['#fff0c8', '#f7a74a', '#d4661b', '#6e2e0e', 'rgba(255,220,120,0.85)'],
+};
+
+/** A dragon egg with species-colored shell and wave speckles. crack in [0,1]. */
+export function drawEgg(ctx: Ctx, x: number, y: number, h: number, crack = 0, kind = 'tide'): void {
+  const [light, mid, dark, outline, pattern] = EGG_COLORS[kind] ?? EGG_COLORS.tide;
   ctx.save();
   ctx.translate(x, y);
   const w = h * 0.38;
@@ -457,17 +535,17 @@ export function drawEgg(ctx: Ctx, x: number, y: number, h: number, crack = 0): v
   ctx.bezierCurveTo(w * 1.05, -h / 2, w * 1.25, h * 0.32, 0, h / 2);
   ctx.bezierCurveTo(-w * 1.25, h * 0.32, -w * 1.05, -h / 2, 0, -h / 2);
   const g = ctx.createRadialGradient(-w * 0.3, -h * 0.2, h * 0.05, 0, 0, h * 0.6);
-  g.addColorStop(0, '#c9f4ff');
-  g.addColorStop(0.5, '#4fb6e6');
-  g.addColorStop(1, '#2a6fb8');
+  g.addColorStop(0, light);
+  g.addColorStop(0.5, mid);
+  g.addColorStop(1, dark);
   ctx.fillStyle = g;
   ctx.fill();
   ctx.lineWidth = h * 0.03;
-  ctx.strokeStyle = '#163f73';
+  ctx.strokeStyle = outline;
   ctx.stroke();
   ctx.save();
   ctx.clip();
-  ctx.strokeStyle = 'rgba(80,230,220,0.85)';
+  ctx.strokeStyle = pattern;
   ctx.lineWidth = h * 0.05;
   for (const wy of [-0.05, 0.2]) {
     ctx.beginPath();
@@ -526,14 +604,17 @@ export function makeSprite(w: number, h: number, scale: number, draw: (ctx: Ctx)
 }
 
 /** Icons for HTML UI (counters, buttons) drawn with the same art as the game. */
-export function iconDataUrl(kind: 'gold' | 'fruit' | 'slice' | 'egg' | 'chest', size = 64): string {
+export function iconDataUrl(kind: 'gold' | 'fruit' | 'slice' | 'egg' | 'chest' | 'ring', size = 64): string {
   const c = makeSprite(size, size, 1, (ctx) => {
     const m = size / 2;
     if (kind === 'gold') drawCoin(ctx, m, m, size * 0.42);
     else if (kind === 'fruit') drawFruit(ctx, m, m, size * 0.86);
     else if (kind === 'slice') drawFruitSlice(ctx, m, m, size * 0.4);
     else if (kind === 'egg') drawEgg(ctx, m, m, size * 0.9);
-    else drawChest(ctx, m, m + size * 0.04, size * 0.27, 0.5);
+    else if (kind === 'ring') {
+      drawWindRing(ctx, m, m, size * 0.38, 0, -1);
+      drawWindRing(ctx, m, m, size * 0.38, 0, 1);
+    } else drawChest(ctx, m, m + size * 0.04, size * 0.27, 0.5);
   });
   return c.toDataURL();
 }

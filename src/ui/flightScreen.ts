@@ -43,17 +43,20 @@ export class FlightScreen {
     this.hud = el(`
       <div class="hud">
         <div class="hud-top">
-          <div class="pill timer" aria-label="Time left"><span data-k="time">60s</span></div>
-          <div class="pill counters">
-            ${icon('gold')}<b data-k="gold">0</b>
-            ${icon('fruit')}<b data-k="fruit">0</b>
+          <div class="timer" data-k="timer" role="timer" aria-label="Time left"><b data-k="time">60</b><small>sec</small></div>
+          <div class="haul" aria-label="This flight's haul (banked when the flight ends)">
+            <span class="haul-label">This flight</span>
+            <span class="haul-items">${icon('gold')}<b data-k="gold">0</b>${icon('fruit')}<b data-k="fruit">0</b></span>
           </div>
           <button class="pause-btn" data-k="pause" aria-label="Pause (Esc)" title="Pause (Esc)"><i></i><i></i></button>
         </div>
-        <div class="hint" data-k="hint"></div>
-        <div class="tutorial" data-k="tutorial">Move mouse <b>up/down</b> to steer • <b>Click</b> to dash</div>
+        <div class="hint" data-k="hint" role="status"></div>
+        <div class="tutorial" data-k="tutorial">Move the mouse <b>up/down</b> to steer · <b>Click</b> to dash <span>(or W/S and Space)</span></div>
         <div class="hud-bottom">
-          <div class="dash-ind ready" data-k="dash"><b>DASH</b><small data-k="dashTxt">Ready</small></div>
+          <div class="dash-ind ready" data-k="dash" aria-label="Dash">
+            <svg viewBox="0 0 40 24" aria-hidden="true"><path d="M3 3 L15 12 L3 21 M17 3 L29 12 L17 21" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M31 6 L37 12 L31 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".6"/></svg>
+            <span data-k="dashTxt">READY</span>
+          </div>
           <div class="rush" data-k="rush">
             <div class="rush-label"><span data-k="rushTxt">Dragon Rush</span><span data-k="rushNum">0/${RUSH.threshold}</span></div>
             <div class="bar"><i data-k="rushFill"></i></div>
@@ -133,10 +136,10 @@ export class FlightScreen {
       <div class="overlay">
         <div class="panel">
           <h2>Paused</h2>
-          <p>${reason === 'focus' ? 'The game paused when the window lost focus. No time was lost.' : 'Take a breather — the timer is frozen.'}</p>
+          <p>${reason === 'focus' ? 'The game paused because the window lost focus. No time was lost.' : 'The timer, dash and Rush are frozen.'}</p>
           <div class="stack">
-            <button class="btn gold" data-a="resume">Resume</button>
-            <button class="btn ghost" data-a="home">Return Home — bank ${gold} ${icon('gold')} ${fruit} ${icon('fruit')}</button>
+            <button class="btn gold big" data-a="resume">Resume</button>
+            <button class="btn ghost" data-a="home">End flight and bank ${gold} ${icon('gold', 'icon sm')} ${fruit} ${icon('fruit', 'icon sm')}</button>
           </div>
         </div>
       </div>`);
@@ -200,7 +203,11 @@ export class FlightScreen {
           break;
         case 'break':
           sfx.crack(e.kind);
+          if (e.traitBonus) sfx.bloom();
           this.bump(e.gold ? this.els.gold : this.els.fruit);
+          break;
+        case 'ring':
+          sfx.ring();
           break;
         case 'dash':
           sfx.dash();
@@ -249,8 +256,9 @@ export class FlightScreen {
     const time = Math.ceil(s.timeLeft);
     if (time !== sh.time) {
       sh.time = time;
-      this.els.time.textContent = `${time}s`;
-      this.els.time.parentElement!.classList.toggle('low', time <= 10);
+      this.els.time.textContent = String(time);
+      this.els.timer.classList.toggle('low', time <= 10);
+      this.els.timer.style.setProperty('--p', (s.timeLeft / s.runSeconds).toFixed(3));
     }
     if (s.gold !== sh.gold) this.els.gold.textContent = String((sh.gold = s.gold));
     if (s.fruit !== sh.fruit) this.els.fruit.textContent = String((sh.fruit = s.fruit));
@@ -262,7 +270,7 @@ export class FlightScreen {
       sh.dashReady = ready;
       this.els.dash.style.setProperty('--p', p.toFixed(3));
       this.els.dash.classList.toggle('ready', ready);
-      this.els.dashTxt.textContent = ready ? 'Ready' : `${s.dashCd.toFixed(1)}s`;
+      this.els.dashTxt.textContent = ready ? 'READY' : 'charging';
     }
 
     const rush = s.rushActive;
@@ -272,8 +280,8 @@ export class FlightScreen {
       sh.rush = rush;
       this.els.rush.classList.toggle('active', rush);
       this.els.rushFill.style.width = `${(fill * 100).toFixed(1)}%`;
-      this.els.rushTxt.textContent = rush ? 'DRAGON RUSH!' : 'Dragon Rush';
-      this.els.rushNum.textContent = rush ? `${s.rushT.toFixed(1)}s` : `${s.charge}/${RUSH.threshold}`;
+      this.els.rushTxt.textContent = rush ? 'DRAGON RUSH!' : fill >= 0.8 ? 'Dragon Rush — almost!' : 'Dragon Rush';
+      this.els.rushNum.textContent = rush ? `${Math.ceil(s.rushT)}s` : `${s.charge}/${RUSH.threshold}`;
     }
 
     if (s.time > 7) this.els.tutorial.classList.add('hide');
