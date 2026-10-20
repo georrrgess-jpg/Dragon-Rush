@@ -57,11 +57,15 @@ export class SettingsPanel {
         this.close();
         return;
       case 'toggle': {
-        const k = b.dataset.v as 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes';
+        const k = b.dataset.v as 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes' | 'screenShake';
         this.app.commit(updateSettings(this.app.save, { [k]: !s[k] }));
         sfx.click();
         break;
       }
+      case 'replay-tutorials':
+        this.app.commit({ ...this.app.save, prefs: { ...this.app.save.prefs, tutorials: [] } });
+        this.app.toast('Tutorial tips will show again in each mode.');
+        break;
       case 'fullscreen':
         this.app.toggleFullscreen();
         break;
@@ -110,7 +114,7 @@ export class SettingsPanel {
     const ft = this.app.frameTimes;
     const avg = ft.length ? ft.reduce((a, b) => a + b, 0) / ft.length : 0;
     const worst = ft.length ? Math.max(...ft) : 0;
-    const tog = (k: 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes', label: string, help: string) =>
+    const tog = (k: 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes' | 'screenShake', label: string, help: string) =>
       `<div class="set-row"><div><b>${label}</b><small>${help}</small></div><button class="toggle" data-a="toggle" data-v="${k}" data-fk="tog-${k}" aria-pressed="${s[k]}" aria-label="${label}">${s[k] ? 'On' : 'Off'}</button></div>`;
     const slider = (k: 'master' | 'music' | 'sfx', label: string) =>
       `<div class="set-row"><label for="vol-${k}"><b>${label}</b></label><input type="range" id="vol-${k}" name="${k}" data-fk="vol-${k}" min="0" max="100" step="5" value="${Math.round(s[k] * 100)}"><output for="vol-${k}">${Math.round(s[k] * 100)}%</output></div>`;
@@ -128,7 +132,8 @@ export class SettingsPanel {
           ${tog('muted', 'Mute everything', 'Silences music and effects.')}
           <h3 id="set-access">Accessibility</h3>
           ${tog('reducedMotion', 'Reduced motion', 'Calm, still menus and portraits, no screen shake, a short fade instead of the egg reel and hatching animation.')}
-          ${tog('autoAbility', 'Auto-activate ability', 'Fires your E ability automatically when its meter is full.')}
+          ${tog('screenShake', 'Screen shake', 'Camera shake on hits and impacts (always off with reduced motion).')}
+          ${tog('autoAbility', 'Auto-activate ability (assist)', 'Fires your E ability automatically when its meter is full. Shown as an assist in the HUD.')}
           ${tog('showHitboxes', 'Show collision outlines', 'For checking fairness: draws the real collision circles.')}
           <div class="set-row"><div><b>Fullscreen</b><small>Also with the F key.</small></div><button class="btn small" data-a="fullscreen" data-fk="fullscreen">Toggle</button></div>
         </section>
@@ -141,7 +146,14 @@ export class SettingsPanel {
           <div class="row wrap"><button class="btn small" data-a="export" data-fk="export">Export save</button><button class="btn small ghost" data-a="import" data-fk="import">Import save…</button>${this.app.recovery || recoveryCopies(this.app.storeRef as never).length ? `<button class="btn small ghost" data-a="recovery" data-fk="recovery">Download unreadable save copy${recoveryCopies(this.app.storeRef as never).length > 1 ? ` (newest of ${recoveryCopies(this.app.storeRef as never).length})` : ''}</button>` : ''}</div>
           <input type="file" accept=".json,application/json,text/plain" hidden>
           <h3>Controls</h3>
-          <p class="small">Rush & Trials: mouse height (or W/S) steers · click/Space dash · E ability · Esc pause.<br>Arena: WASD/arrows move · Space/click dash · E ability · 1–3 choose upgrade · Esc pause.<br>Dragon Observatory: drag to pan · wheel or +/− to zoom · 0 recenters · Esc closes.</p>
+          <table class="controls-ref">
+            <tr><th>Rush, Trials, Ascent</th><td>Mouse height or <kbd>W</kbd>/<kbd>S</kbd> (arrows) steer · click or <kbd>Space</kbd> dash · <kbd>E</kbd> ability · <kbd>Esc</kbd> pause</td></tr>
+            <tr><th>Ascent upgrades</th><td>Click or <kbd>1</kbd>–<kbd>3</kbd> to choose</td></tr>
+            <tr><th>Arena</th><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows move · <kbd>Space</kbd>/click dash · <kbd>E</kbd> ability · <kbd>1</kbd>–<kbd>3</kbd> upgrade · <kbd>Esc</kbd> pause</td></tr>
+            <tr><th>Observatory</th><td>Drag or arrows pan · wheel or <kbd>+</kbd>/<kbd>−</kbd> zoom · <kbd>0</kbd> recenter · <kbd>Esc</kbd> close</td></tr>
+            <tr><th>Anywhere</th><td><kbd>F</kbd> fullscreen · <kbd>Tab</kbd> moves between controls</td></tr>
+          </table>
+          <button class="btn small ghost" data-a="replay-tutorials" data-fk="replay-tut">Show the short tutorials again</button>
         </section>
       </div>`,
     );

@@ -48,6 +48,10 @@ export class JournalScreen implements Screen {
         else doIt();
         return;
       }
+      case 'replay-tutorials':
+        this.ui.commit({ ...this.ui.save, prefs: { ...this.ui.save.prefs, tutorials: [] } });
+        this.ui.toast('Tutorial tips will show again in each mode.');
+        break;
       case 'cosmetic': {
         const owned = this.ui.save.cosmetics.owned.includes(v);
         const r = owned ? equipCosmetic(this.ui.save, v) : buyCosmetic(this.ui.save, v);
@@ -95,7 +99,7 @@ export class JournalScreen implements Screen {
           <h2>Contracts</h2>
           <p class="muted">Three goals at a time, from any mode. Progress counts across outings; each pays once. Free replacement: <b>${s.contracts.replaceTokens ? 'available' : 'used (complete a contract to recharge)'}</b>. A replaced contract may return later, starting from zero.</p>
           <ul class="contracts">${list}</ul>
-          <p class="muted small">Completed so far: ${s.lifetime.contracts}. Complete 12 to earn Bramble.</p>`;
+          <p class="muted small">Completed so far: ${s.lifetime.contracts}.${s.milestones.includes('contracts-12') ? '' : ` Complete 12 to earn ${s.dragons.bramble.owned ? 'Essence (you already own Bramble)' : 'Bramble'}.`}</p>`;
       }
       case 'milestones':
         return `
@@ -122,6 +126,7 @@ export class JournalScreen implements Screen {
           ['Ability uses', lt.abilityUses],
           ['Sky Trial medals (G/S/B)', `${medals[3]} / ${medals[2]} / ${medals[1]}`],
           ['Arena sessions / wins', `${lt.arenaRuns} / ${lt.arenaWins}`],
+          ['Aether Ascent runs', s.ascent.runs],
           ['Arena best wave', s.arena.bestWave || '—'],
           ['Endless record', s.arena.bestEndless ? fmtTime(s.arena.bestEndless) : '—'],
           ['Enemies / elites / bosses', `${lt.arenaKills} / ${lt.elites} / ${lt.bosses}`],
@@ -132,7 +137,18 @@ export class JournalScreen implements Screen {
           const r = s.trials[t.id];
           return `<tr><th>${t.group}-${t.index} ${esc(t.name)}</th><td>${['—', 'Bronze', 'Silver', 'Gold'][r?.bestMedal ?? 0]}</td><td>${r ? r.bestRings : '—'}</td><td>${r?.fewestCollisions ?? '—'}</td><td>v${r?.rulesVersion ?? 1}</td></tr>`;
         }).join('');
-        return `<h2>Records</h2><table class="records">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>
+        const golds = Object.values(s.trials).filter((t) => t.bestMedal === 3).length;
+        const pb: [string, string, string][] = [
+          ['Dragon Rush', s.stats.bestHaul ? `${s.stats.bestHaul}` : '—', 'best haul (gold + Emberfruit in one flight)'],
+          ['Aether Ascent', s.ascent.best ? `${s.ascent.best.toLocaleString()} m` : '—', `best distance${s.ascent.bestAssist ? ` · with assist ${s.ascent.bestAssist.toLocaleString()} m (kept separately)` : ''}`],
+          ['Dragon Arena', s.arena.wins ? 'Victory' : s.arena.bestWave ? `Wave ${s.arena.bestWave}` : '—', s.arena.bestEndless ? `endless record ${fmtTime(s.arena.bestEndless)}` : 'furthest wave reached'],
+          ['Sky Trials', `${golds} / ${TRIALS.length}`, 'Gold medals'],
+        ];
+        return `<h2>Records</h2>
+          <h3>Personal bests</h3>
+          <div class="pb-grid">${pb.map(([m, v, d]) => `<div class="pb"><span class="pb-mode">${m}</span><b class="pb-val">${v}</b><small class="muted">${d}</small></div>`).join('')}</div>
+          <h3>Lifetime</h3>
+          <table class="records">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>
           <h3>Sky Trials</h3><table class="records trials-rec"><tr><th>Course</th><th>Medal</th><th>Rings</th><th>Fewest collisions</th><th>Rules</th></tr>${trialRows}</table>`;
       }
       case 'cosmetics': {
@@ -163,12 +179,15 @@ export class JournalScreen implements Screen {
           <p>Fixed courses with checkpoints. Finish for Bronze; collect rings with few collisions for Silver and Gold. Every dragon flies with the same level-1 stats here, so medals depend on skill. Practice mode records nothing.</p>
           <h3>Dragon Arena</h3>
           <p>Top-down: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, attacks are automatic, <kbd>Space</kbd>/click to dash (brief invulnerability), <kbd>E</kbd> for your ability. Pick an upgrade after each wave. Step out of red ground rings and lanes. You keep everything you collect even if you fall.</p>
+          <h3>Aether Ascent</h3>
+          <p>An endless flight with the Rush controls. You have three wards: each collision costs one, with a brief moment of protection afterwards. Hazards are introduced one family at a time with a warning: ruins (fly through the gaps), wind gates (currents push you), crystal shutters (wait for the opening), storm lanes (leave before they discharge), sky guardians (follow their warning path) and breaking bridges. At distance milestones the flight pauses for a choice of upgrades. The Assist option is easier and keeps its own record.</p>
           <h3>Growing dragons</h3>
           <p>Dragons earn XP from active play (about 200 per minute) and from feeding 20 Emberfruit for 100 XP. They evolve at levels 5 (juvenile), 15 (adult) and 30 (elder), gain talent choices at 10 and 20, and earn small capped bonuses.</p>
           <h3>Aether Hatchery</h3>
           <p>Aether Keys come from play (about one per 3 minutes of active play) and one-time rewards. Each egg awards one dragon; duplicates turn into Essence, which can unlock any dragon directly. The odds and protection counters are always shown on the Hatchery screen.</p>
           <h3>Keys</h3>
-          <p><kbd>Esc</kbd> pause · <kbd>F</kbd> fullscreen · <kbd>Tab</kbd> moves between buttons in menus.</p>`;
+          <p><kbd>Esc</kbd> pause · <kbd>F</kbd> fullscreen · <kbd>Tab</kbd> moves between buttons in menus.</p>
+          <p><button class="btn small" data-a="replay-tutorials" data-fk="replay-tut">Show the short tutorials again</button> <small class="muted">Each mode shows its quick tips again next time you play.</small></p>`;
     }
   }
 }

@@ -1799,3 +1799,46 @@ table.compare thead img {
 .element {
   white-space: nowrap;
 }
+/* Update 5: personal bests */
+.pb-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 6px 0 14px;
+}
+.pb {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 0 rgba(15, 79, 88, 0.18);
+}
+.pb-mode {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--teal-700);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pb-val {
+  font-size: 24px;
+  color: var(--ink);
+}
+.controls-ref {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.controls-ref th {
+  text-align: left;
+  width: 130px;
+  vertical-align: top;
+  padding: 3px 6px 3px 0;
+  color: var(--teal-800);
+}
+.controls-ref td {
+  padding: 3px 0;
+}
