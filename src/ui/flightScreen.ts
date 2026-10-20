@@ -147,6 +147,7 @@ export class FlightScreen {
         if (down) this.keyboardMode = true;
         return true;
       case 'Space':
+        if (this.paused) return false; // let Space activate the focused overlay button
         if (down && !repeat) this.pointerDash();
         return true;
       case 'KeyE':
@@ -215,6 +216,7 @@ export class FlightScreen {
       { once: true },
     );
     this.host.root.appendChild(this.overlay);
+    this.hud.inert = true;
     ($(this.overlay, '[data-a=resume]') as HTMLButtonElement).focus({ preventScroll: true });
   }
 
@@ -223,6 +225,7 @@ export class FlightScreen {
     this.paused = null;
     this.overlay?.remove();
     this.overlay = null;
+    this.hud.inert = false;
     this.inputGuard = DASH.resumeInputGuard;
     (document.activeElement as HTMLElement | null)?.blur?.();
   }

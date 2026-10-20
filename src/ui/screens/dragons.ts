@@ -175,7 +175,7 @@ export class DragonsScreen implements Screen {
       return true;
     }).sort((a, b) => Number(s.dragons[b].favorite) - Number(s.dragons[a].favorite));
     const els = (['any', 'fire', 'water', 'nature', 'air', 'frost', 'storm'] as const)
-      .map((e) => `<button class="chip-btn ${this.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${this.element === e}" title="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
+      .map((e) => `<button class="chip-btn ${this.element === e ? 'on' : ''}" data-a="element" data-v="${e}" data-fk="el-${e}" aria-pressed="${this.element === e}" title="${e === 'any' ? 'All elements' : ELEMENTS[e].name}" aria-label="${e === 'any' ? 'All elements' : ELEMENTS[e].name}">${e === 'any' ? 'All' : ELEMENTS[e].symbol}</button>`)
       .join('');
     const cards = list
       .map((id) => {

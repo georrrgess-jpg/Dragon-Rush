@@ -106,7 +106,7 @@ export class JournalScreen implements Screen {
         const rows: [string, string | number][] = [
           ['Active play time', fmtTime(lt.activeSeconds)],
           ['Full Rush flights', lt.flights],
-          ['Best Rush haul', `${s.stats.bestHaul} (${s.stats.bestGold} gold + ${s.stats.bestFruit} fruit)`],
+          ['Best Rush haul', `${s.stats.bestHaul} (${s.stats.bestGold} gold + ${s.stats.bestFruit} Emberfruit)`],
           ['Gold collected', lt.goldCollected],
           ['Emberfruit collected', lt.fruitCollected],
           ['Chests / pods broken', `${lt.chests} / ${lt.pods}`],

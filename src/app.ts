@@ -39,6 +39,7 @@ export class App implements UI {
   private results: ResultsScreen | null = null;
   private settings: SettingsPanel | null = null;
   private modal: HTMLElement | null = null;
+  private lastFocus: HTMLElement | null = null;
   private runId: string | null = null;
   private lastTrial: { id: string; practice: boolean } | null = null;
   /** Most recent settlement (read by automated checks; not used by gameplay). */
@@ -219,6 +220,10 @@ export class App implements UI {
 
   // --- screens ---------------------------------------------------------------------------------
 
+  clearToasts(): void {
+    this.toastRoot.innerHTML = '';
+  }
+
   private clearAll() {
     this.screen?.destroy?.();
     this.screen?.el.remove();
@@ -264,18 +269,35 @@ export class App implements UI {
     if (this.settings) return;
     this.settings = new SettingsPanel(this, () => this.closeSettings());
     this.stage.appendChild(this.settings.el);
+    this.updateInert();
     this.settings.focus();
   }
 
   closeSettings(): void {
     this.settings?.el.remove();
     this.settings = null;
+    this.updateInert();
     this.refresh();
+    this.root.querySelector<HTMLElement>('.gear')?.focus({ preventScroll: true });
   }
+
+  /** While a dialog is open, everything behind it is inert (no Tab, no clicks, no key actions). */
+  private updateInert() {
+    this.root.inert = !!(this.settings || this.modal);
+    if (this.settings) this.settings.el.inert = !!this.modal;
+  }
+
+  get dialogOpen(): boolean {
+    return !!(this.settings || this.modal);
+  }
+
+  /** Freezes the wallet display (e.g. while the egg reel plays) so it can't spoil the result. */
+  walletView: SaveData['wallet'] | null = null;
 
   confirm(title: string, body: string, ok: string, cancel = 'Cancel'): Promise<boolean> {
     return new Promise((resolve) => {
       this.closeModal(false);
+      this.lastFocus = document.activeElement as HTMLElement | null;
       const m = el(`
         <div class="overlay modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
           <div class="panel">
@@ -289,6 +311,7 @@ export class App implements UI {
       $(m, '[data-a=no]').addEventListener('click', () => this.closeModal(false));
       this.modal = m;
       this.stage.appendChild(m);
+      this.updateInert();
       ($(m, '[data-a=yes]') as HTMLButtonElement).focus({ preventScroll: true });
     });
   }
@@ -296,8 +319,11 @@ export class App implements UI {
   private closeModal(v: boolean) {
     const m = this.modal as (HTMLElement & { resolve?: (v: boolean) => void }) | null;
     if (!m) return;
+    const back = this.lastFocus;
     this.modal = null;
     m.remove();
+    this.updateInert();
+    back?.focus({ preventScroll: true });
     m.resolve?.(v);
   }
 
@@ -327,6 +353,7 @@ export class App implements UI {
 
   private beginRun(opts: eco.StartOptions): string {
     sfx.unlock();
+    this.clearToasts();
     const runId = eco.newRunId();
     this.commit(eco.startRun(this.save, runId, Date.now(), opts));
     this.runId = runId;
@@ -422,6 +449,12 @@ export class App implements UI {
       {
         ...this.canvasHost(),
         onCheckpoint: (r) => this.arenaCheckpoint(r),
+        onBack: () => {
+          // Left from the intro: nothing happened, so the run is simply cancelled.
+          this.runId = null;
+          this.commit({ ...this.save, activeRun: null });
+          this.go('play', 'arena');
+        },
         onEnd: (r, reason) => this.endArena(r, reason),
       },
       {

@@ -16,7 +16,7 @@ import type { Screen, UI } from '../types';
 import { bindGoal, goalStrip } from './common';
 
 const REEL_W = 1220;
-const REEL_H = 270;
+const REEL_H = 232;
 const SLOT = 150;
 const WIN_INDEX = 38;
 const REEL_SECONDS = 4.6;
@@ -35,6 +35,7 @@ export class HatcheryScreen implements Screen {
   private idleReel: SpeciesId[];
   private panel: 'odds' | 'history' | 'catalog' = 'odds';
   private busy = false;
+  private pendingEvents: Parameters<UI['announce']>[0] | null = null;
 
   constructor(private ui: UI) {
     const rng = createRng(20260101);
@@ -87,6 +88,7 @@ export class HatcheryScreen implements Screen {
         this.renderLower();
         return;
       case 'buy': {
+        if (this.phase !== 'idle') return;
         const id = b.dataset.v as SpeciesId;
         void this.ui.confirm(`Unlock ${SPECIES[id].name}?`, `Spend ${HATCHERY.directPrice[SPECIES[id].rarity]} Essence to add ${SPECIES[id].name} to your roster.`, 'Unlock').then((yes) => {
           if (!yes) return;
@@ -115,8 +117,10 @@ export class HatcheryScreen implements Screen {
       this.ui.toast(r.reason);
       return;
     }
+    // Hold the wallet display so an Essence jump can't give the result away before the reveal.
+    this.holdWallet(true);
     this.ui.commit(r.save);
-    this.ui.announce(r.events);
+    this.pendingEvents = r.events;
     sfx.click();
     this.begin(r.openings, false);
     this.busy = false;
@@ -131,7 +135,7 @@ export class HatcheryScreen implements Screen {
       this.reel = buildReel(openings[0].species, cryptoRandom(), 46, WIN_INDEX);
       this.phase = this.ui.save.settings.reducedMotion ? 'hatch' : 'reel';
     }
-    if (recovered) this.ui.toast('Showing the egg you already opened. It was saved before the page closed; nothing was charged again.', 5000);
+    if (recovered) this.ui.toast('Showing the egg you opened earlier. It was already saved; nothing was charged again.', 5000);
     this.render();
   }
 
@@ -147,10 +151,19 @@ export class HatcheryScreen implements Screen {
     }
   }
 
+  private holdWallet(on: boolean) {
+    const app = this.ui as UI & { walletView?: unknown };
+    if (on) app.walletView = { ...this.ui.save.wallet, keys: this.ui.save.wallet.keys };
+    else app.walletView = null;
+  }
+
   private reveal() {
     const o = this.current[0];
     if (o) sfx.hatch(SPECIES[o.species].element);
+    this.holdWallet(false);
     this.ui.commit(markRevealed(this.ui.save, this.current.map((c) => c.tx)));
+    if (this.pendingEvents) this.ui.announce(this.pendingEvents);
+    this.pendingEvents = null;
     this.renderUi();
     this.el.querySelector<HTMLButtonElement>('[data-a=done]')?.focus({ preventScroll: true });
   }
@@ -170,6 +183,9 @@ export class HatcheryScreen implements Screen {
 
   private renderUi() {
     const s = this.ui.save;
+    const animating = this.phase === 'reel' || this.phase === 'hatch' || this.phase === 'batch';
+    this.el.querySelector<HTMLElement>('.hatch-lower')!.inert = animating;
+    this.el.querySelector<HTMLElement>('.goal-wrap')!.inert = animating;
     const ui = this.el.querySelector<HTMLElement>('.reel-ui')!;
     const keyLeft = HATCHERY.secondsPerKey - s.keyProgress;
     if (this.phase === 'idle') {
@@ -239,6 +255,17 @@ export class HatcheryScreen implements Screen {
         : '<p>You own every species. Duplicates become Essence.</p>';
     }
     rerender(this.el.querySelector<HTMLElement>('.hatch-lower')!, `<div class="panel lower-panel"><div class="seg-tabs" role="tablist">${tabs}</div>${body}</div>`);
+  }
+
+  /** Leaving mid-animation: the result was already saved, so reveal it now (as a toast). */
+  destroy(): void {
+    if (this.phase === 'reel' || this.phase === 'hatch' || this.phase === 'batch') {
+      this.holdWallet(false);
+      this.ui.commit(markRevealed(this.ui.save, this.current.map((c) => c.tx)));
+      if (this.pendingEvents) this.ui.announce(this.pendingEvents);
+      const txt = this.current.map((o) => `${SPECIES[o.species].name}${o.duplicate ? ` (+${o.essence} Essence)` : ' (new)'}`).join(', ');
+      this.ui.toast(`Your egg${this.current.length > 1 ? 's' : ''}: ${txt}.`, 5000);
+    }
   }
 
   // --- animation -----------------------------------------------------------------------------

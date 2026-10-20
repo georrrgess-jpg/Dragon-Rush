@@ -85,7 +85,7 @@ export class HomeScreen implements Screen {
       </div>
       <div class="panel recent-card">
         <h3>Recent</h3>
-        ${s.recent.length ? `<ul>${s.recent.slice(0, 3).map((r) => `<li>${esc(r.text)}</li>`).join('')}</ul>` : '<p class="muted">Your achievements will appear here.</p>'}
+        ${s.recent.length ? `<ul>${s.recent.slice(0, 2).map((r) => `<li>${esc(r.text)}</li>`).join('')}</ul>` : '<p class="muted">Your achievements will appear here.</p>'}
       </div>`;
     this.el.querySelector('.goal-wrap')!.innerHTML = goalStrip(this.ui, 'home');
   }
@@ -93,7 +93,7 @@ export class HomeScreen implements Screen {
   update(dt: number): void {
     const s = this.ui.save;
     const d = s.dragons[s.selected];
-    const st = { species: s.selected, stage: stageOf(d.level), marking: d.marking, region: s.rush.region, perch: s.cosmetics.perch, banner: s.cosmetics.banner, reducedMotion: s.settings.reducedMotion, backdrop: true, focusX: 0.68 };
+    const st = { species: s.selected, stage: stageOf(d.level), marking: d.marking, region: s.rush.region, perch: s.cosmetics.perch, banner: s.cosmetics.banner, reducedMotion: s.settings.reducedMotion, backdrop: true, focusX: 0.71 };
     this.hero.update(dt, st);
     this.hero.draw(this.ctx, st);
   }

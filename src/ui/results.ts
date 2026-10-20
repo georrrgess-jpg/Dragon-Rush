@@ -4,7 +4,7 @@ import { sfx } from '../audio';
 import { MILESTONE_LEVELS, stageOf, xpToNext } from '../content/progression';
 import { SPECIES } from '../content/species';
 import { TRIALS, TRIAL_BY_ID, nextMedalText, trialUnlocked } from '../content/trials';
-import { HATCHERY } from '../content/world';
+import { HATCHERY, REGIONS } from '../content/world';
 import { dragonName, rewardText, type Settlement } from '../economy';
 import { HeroView } from '../render/perch';
 import type { SaveData } from '../save';
@@ -70,10 +70,13 @@ export class ResultsScreen {
     const lines: string[] = [];
     for (const r of st.modeRewards) lines.push(`${esc(r.source)}: ${rewardText(r.reward, r.convertedEssence)}`);
     for (const c of ev.contracts) lines.push(`Contract complete: ${esc(c.title)} (+${rewardText(c.reward)})`);
-    for (const m of ev.milestones) lines.push(`Milestone: ${esc(m.title)}`);
+    for (const m of ev.milestones) {
+      const g = ev.rewards.find((r) => r.source === `Milestone: ${m.title}`);
+      lines.push(`Milestone: ${esc(m.title)} (+${rewardText(m.reward, g?.convertedEssence)})`);
+    }
     for (const m of ev.mastery) lines.push(`Mastery: ${esc(m.title)} → ${esc(m.rewardText)}`);
     for (const id of ev.newSpecies) lines.push(`<b>${SPECIES[id].name} joined your roster!</b>`);
-    for (const r of ev.regions) lines.push(`New region unlocked: ${r}`);
+    for (const r of ev.regions) lines.push(`New region unlocked: <b>${REGIONS[r].name}</b>`);
     const levelLine =
       lc.to > lc.from
         ? `<div class="levelup">Level ${lc.from} → <b>${lc.to}</b>${lc.stageTo !== lc.stageFrom ? ` · evolved into its <b>${lc.stageTo}</b> form!` : ''}${lc.milestones.map((l) => `<br><small>Level ${l}: ${MILESTONE_LEVELS[l]}</small>`).join('')}</div>`
@@ -107,6 +110,7 @@ export class ResultsScreen {
           <div class="stack">
             <button class="btn gold big" data-a="again">${d.kind === 'trials' ? 'Retry course' : 'Play again'}</button>
             ${showNext ? `<button class="btn" data-a="next">Next course: ${esc(nextCourse!.name)}</button>` : ''}
+            <button class="btn" data-a="dragons">${d.save.wallet.fruit >= 20 && dr.level < 30 ? `Feed ${esc(dragonName(s, st.dragon))}` : 'Dragons'}</button>
             <button class="btn" data-a="play">${d.kind === 'trials' ? 'Course list' : 'Modes'}</button>
             <button class="btn ghost" data-a="home">Home</button>
           </div>

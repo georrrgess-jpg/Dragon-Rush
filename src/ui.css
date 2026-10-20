@@ -1458,3 +1458,24 @@ kbd {
 /* toasts sit at the right, below the top bar, so they never cover the main content */
 #toast-root { left: auto; right: 16px; top: 70px; transform: none; align-items: flex-end; }
 .toast { max-width: 420px; text-align: left; font-size: 15px; padding: 8px 14px; }
+
+/* --- critic fixes (UI/UX gate 1) --- */
+.btn.ghost:disabled { background: #ece4d7; color: #9d8f80; box-shadow: 0 4px 0 #c4b8a7; }
+:focus-visible { outline: 3px solid #0b3c43; outline-offset: 2px; box-shadow: 0 0 0 6px rgba(246, 196, 69, 0.85); }
+#toast-root { left: 18px; right: auto; top: auto; bottom: 80px; align-items: flex-start; z-index: 30; flex-direction: column-reverse; }
+.screen small, .hud small, .results2 small, .settings-panel small { font-size: 13px; }
+.dc-sel { font-size: 12px; }
+.dc-meta { font-size: 13px; }
+.region-chip small { font-size: 12px; }
+.dcard2 img { width: 96px; height: 72px; }
+.card-grid { gap: 6px; }
+.dcard2 { padding: 2px 4px 4px; }
+.insp-title { max-width: 230px; z-index: 1; }
+.insp-title .muted { display: block; margin-top: 2px; }
+.odds th, .odds td { padding: 2px 6px; }
+.odds-grid { font-size: 13px; }
+.lower-panel { padding: 6px 14px; }
+.hero-info { width: 330px; }
+/* toasts use the empty middle of the top bar first, then stack downward; they never take clicks */
+#toast-root { left: 652px; right: auto; top: 6px; bottom: auto; width: 310px; transform: none; align-items: stretch; flex-direction: column; gap: 6px; }
+#toast-root .toast { max-width: none; font-size: 14px; line-height: 1.25; padding: 6px 12px; background: rgba(8, 44, 50, 0.96); border: 1px solid rgba(246, 196, 69, 0.5); }

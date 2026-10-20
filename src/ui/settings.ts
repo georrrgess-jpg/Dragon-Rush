@@ -102,7 +102,7 @@ export class SettingsPanel {
     const avg = ft.length ? ft.reduce((a, b) => a + b, 0) / ft.length : 0;
     const worst = ft.length ? Math.max(...ft) : 0;
     const tog = (k: 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes', label: string, help: string) =>
-      `<div class="set-row"><div><b>${label}</b><small>${help}</small></div><button class="toggle" data-a="toggle" data-v="${k}" aria-pressed="${s[k]}">${s[k] ? 'On' : 'Off'}</button></div>`;
+      `<div class="set-row"><div><b>${label}</b><small>${help}</small></div><button class="toggle" data-a="toggle" data-v="${k}" aria-pressed="${s[k]}" aria-label="${label}">${s[k] ? 'On' : 'Off'}</button></div>`;
     const slider = (k: 'master' | 'music' | 'sfx', label: string) =>
       `<div class="set-row"><label for="vol-${k}"><b>${label}</b></label><input type="range" id="vol-${k}" name="${k}" min="0" max="100" step="5" value="${Math.round(s[k] * 100)}"><output for="vol-${k}">${Math.round(s[k] * 100)}%</output></div>`;
     this.el.querySelector('.settings-panel')!.innerHTML = `

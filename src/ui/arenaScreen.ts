@@ -17,6 +17,8 @@ export interface ArenaHost {
   root: HTMLElement;
   /** Victory reached: bank everything so far (Arena checkpoint) before offering endless. */
   onCheckpoint(report: ArenaReport): void;
+  /** Left from the intro before starting: cancel without counting a session. */
+  onBack(): void;
   /** Called once when the session ends (defeat, quit, stop after victory, boss left). */
   onEnd(report: ArenaReport, reason: 'defeat' | 'quit' | 'victory' | 'endless' | 'bossLeft'): void;
 }
@@ -86,6 +88,7 @@ export class ArenaScreen {
   private setOverlay(html: string | null): HTMLElement | null {
     this.overlay?.remove();
     this.overlay = html ? el(html) : null;
+    this.hud.inert = !!this.overlay;
     if (this.overlay) this.host.root.appendChild(this.overlay);
     return this.overlay;
   }
@@ -105,9 +108,14 @@ export class ArenaScreen {
             <li><kbd>Esc</kbd>: pause</li>
           </ul>
           <p>Survive four waves, choose an upgrade after each, then defeat the boss. Red rings and lanes on the ground mark attacks: step out before they fill. If you fall, everything you collected is still banked.</p>
-          <button class="btn gold big" data-a="go">Start</button>
+          <div class="row center"><button class="btn ghost" data-a="back">Back</button><button class="btn gold big" data-a="go">Start</button></div>
         </div>
       </div>`)!;
+    $(o, '[data-a=back]').addEventListener('click', () => {
+      sfx.click();
+      this.mode = 'ended';
+      this.host.onBack();
+    }, { once: true });
     const go = $(o, '[data-a=go]') as HTMLButtonElement;
     go.addEventListener('click', () => {
       sfx.click();
@@ -235,7 +243,10 @@ export class ArenaScreen {
       return true;
     }
     if (code === 'Escape' && down && !repeat) {
-      if (this.mode === 'play') this.pause();
+      if (this.mode === 'intro') {
+        this.mode = 'ended';
+        this.host.onBack();
+      } else if (this.mode === 'play') this.pause();
       else if (this.mode === 'pause') this.resume();
       return true;
     }

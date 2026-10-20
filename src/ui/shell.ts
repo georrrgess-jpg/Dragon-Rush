@@ -54,15 +54,16 @@ export class Shell {
 
   render(): void {
     const s = this.ui.save;
+    const w = (this.ui as UI & { walletView?: typeof s.wallet | null }).walletView ?? s.wallet;
     this.nav.innerHTML = TABS.map(
       (t) =>
         `<button data-tab="${t.id}" data-fk="tab-${t.id}" ${t.id === this.tab ? 'aria-current="page" class="on"' : ''}>${t.label}${t.id === 'hatchery' && s.wallet.keys > 0 ? `<span class="dot" aria-label="${s.wallet.keys} keys">${s.wallet.keys}</span>` : ''}</button>`,
     ).join('');
     const keyPct = Math.round((s.keyProgress / HATCHERY.secondsPerKey) * 100);
     this.wallet.innerHTML = `
-      <span class="chip" title="Gold: buy dragons, cosmetics">${icon('gold', 'icon sm')}<b>${s.wallet.gold}</b></span>
-      <span class="chip" title="Emberfruit: feed dragons for XP">${icon('fruit', 'icon sm')}<b>${s.wallet.fruit}</b></span>
-      <span class="chip" title="Essence: direct dragon unlocks and markings">${icon('essence', 'icon sm')}<b>${s.wallet.essence}</b></span>
-      <span class="chip key" title="Aether Keys open eggs. Next key: ${keyPct}% (about 3 minutes of active play per key)">${icon('key', 'icon sm')}<b>${s.wallet.keys}</b><i style="--p:${keyPct / 100}"></i></span>`;
+      <span class="chip" title="Gold: buy dragons, cosmetics">${icon('gold', 'icon sm')}<b>${w.gold}</b></span>
+      <span class="chip" title="Emberfruit: feed dragons for XP">${icon('fruit', 'icon sm')}<b>${w.fruit}</b></span>
+      <span class="chip" title="Essence: direct dragon unlocks and markings">${icon('essence', 'icon sm')}<b>${w.essence}</b></span>
+      <span class="chip key" title="Aether Keys open eggs. Next key: ${keyPct}% (about 3 minutes of active play per key)">${icon('key', 'icon sm')}<b>${w.keys}</b><i style="--p:${keyPct / 100}"></i></span>`;
   }
 }
