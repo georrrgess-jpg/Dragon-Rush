@@ -3,7 +3,7 @@ import { sfx } from '../audio';
 import type { App } from '../app';
 import { updateSettings } from '../economy';
 import { backupBeforeImport, exportSave, importSave, recoveryCopies } from '../save';
-import { el, esc } from './dom';
+import { el, esc, rerender } from './dom';
 
 export class SettingsPanel {
   el: HTMLElement;
@@ -111,36 +111,40 @@ export class SettingsPanel {
     const avg = ft.length ? ft.reduce((a, b) => a + b, 0) / ft.length : 0;
     const worst = ft.length ? Math.max(...ft) : 0;
     const tog = (k: 'muted' | 'reducedMotion' | 'lowEffects' | 'autoAbility' | 'showHitboxes', label: string, help: string) =>
-      `<div class="set-row"><div><b>${label}</b><small>${help}</small></div><button class="toggle" data-a="toggle" data-v="${k}" aria-pressed="${s[k]}" aria-label="${label}">${s[k] ? 'On' : 'Off'}</button></div>`;
+      `<div class="set-row"><div><b>${label}</b><small>${help}</small></div><button class="toggle" data-a="toggle" data-v="${k}" data-fk="tog-${k}" aria-pressed="${s[k]}" aria-label="${label}">${s[k] ? 'On' : 'Off'}</button></div>`;
     const slider = (k: 'master' | 'music' | 'sfx', label: string) =>
-      `<div class="set-row"><label for="vol-${k}"><b>${label}</b></label><input type="range" id="vol-${k}" name="${k}" min="0" max="100" step="5" value="${Math.round(s[k] * 100)}"><output for="vol-${k}">${Math.round(s[k] * 100)}%</output></div>`;
-    this.el.querySelector('.settings-panel')!.innerHTML = `
-      <div class="row spread"><h2>Settings</h2><button class="btn small ghost" data-a="close">Close (Esc)</button></div>
+      `<div class="set-row"><label for="vol-${k}"><b>${label}</b></label><input type="range" id="vol-${k}" name="${k}" data-fk="vol-${k}" min="0" max="100" step="5" value="${Math.round(s[k] * 100)}"><output for="vol-${k}">${Math.round(s[k] * 100)}%</output></div>`;
+    const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+    rerender(
+      this.el.querySelector<HTMLElement>('.settings-panel')!,
+      `
+      <div class="row spread"><h2>Settings</h2><button class="btn small ghost" data-a="close" data-fk="close">Close (Esc)</button></div>
       <div class="settings-grid">
-        <section>
-          <h3>Audio</h3>
+        <section aria-labelledby="set-audio">
+          <h3 id="set-audio">Audio</h3>
           ${slider('master', 'Master volume')}
           ${slider('music', 'Music')}
           ${slider('sfx', 'Sound effects')}
           ${tog('muted', 'Mute everything', 'Silences music and effects.')}
-          <h3>Accessibility</h3>
-          ${tog('reducedMotion', 'Reduced motion', 'Calmer menus, no screen shake, short fade instead of the egg reel.')}
-          ${tog('lowEffects', 'Low effects', 'Fewer particles and lighter backgrounds for slower computers.')}
+          <h3 id="set-access">Accessibility</h3>
+          ${tog('reducedMotion', 'Reduced motion', 'Calm, still menus and portraits, no screen shake, a short fade instead of the egg reel and hatching animation.')}
           ${tog('autoAbility', 'Auto-activate ability', 'Fires your E ability automatically when its meter is full.')}
+          ${tog('showHitboxes', 'Show collision outlines', 'For checking fairness: draws the real collision circles.')}
+          <div class="set-row"><div><b>Fullscreen</b><small>Also with the F key.</small></div><button class="btn small" data-a="fullscreen" data-fk="fullscreen">Toggle</button></div>
         </section>
         <section>
-          <h3>Display</h3>
-          <div class="set-row"><div><b>Fullscreen</b><small>Also with the F key.</small></div><button class="btn small" data-a="fullscreen">Toggle</button></div>
-          ${tog('showHitboxes', 'Show collision outlines', 'For checking fairness: draws the real collision circles.')}
-          <p class="muted small">Frame time (last ${ft.length} frames): average ${avg.toFixed(1)} ms, worst ${worst.toFixed(1)} ms.</p>
+          <h3 id="set-perf">Performance</h3>
+          ${tog('lowEffects', 'Low effects', 'Fewer particles, simpler dragon detail and lighter backgrounds for slower computers.')}
+          <p class="muted small">Measured here: frame time over the last ${ft.length} frames, average ${avg.toFixed(1)} ms, worst ${worst.toFixed(1)} ms${mem ? ` · script memory ${(mem.usedJSHeapSize / 1048576).toFixed(0)} MB` : ''}.</p>
           <h3>Save data</h3>
           <p class="muted small">Progress is saved in this browser automatically. Export a copy to move it or keep it safe. ${this.app.readOnly ? '<b>This save is from a newer version and is not being overwritten.</b>' : ''}</p>
-          <div class="row wrap"><button class="btn small" data-a="export">Export save</button><button class="btn small ghost" data-a="import">Import save…</button>${this.app.recovery || recoveryCopies(this.app.storeRef as never).length ? `<button class="btn small ghost" data-a="recovery">Download unreadable save copy${recoveryCopies(this.app.storeRef as never).length > 1 ? ` (newest of ${recoveryCopies(this.app.storeRef as never).length})` : ''}</button>` : ''}</div>
+          <div class="row wrap"><button class="btn small" data-a="export" data-fk="export">Export save</button><button class="btn small ghost" data-a="import" data-fk="import">Import save…</button>${this.app.recovery || recoveryCopies(this.app.storeRef as never).length ? `<button class="btn small ghost" data-a="recovery" data-fk="recovery">Download unreadable save copy${recoveryCopies(this.app.storeRef as never).length > 1 ? ` (newest of ${recoveryCopies(this.app.storeRef as never).length})` : ''}</button>` : ''}</div>
           <input type="file" accept=".json,application/json,text/plain" hidden>
           <h3>Controls</h3>
-          <p class="small">Rush & Trials: mouse height (or W/S) steers · click/Space dash · E ability · Esc pause.<br>Arena: WASD/arrows move · Space/click dash · E ability · 1–3 choose upgrade · Esc pause.</p>
+          <p class="small">Rush & Trials: mouse height (or W/S) steers · click/Space dash · E ability · Esc pause.<br>Arena: WASD/arrows move · Space/click dash · E ability · 1–3 choose upgrade · Esc pause.<br>Dragon Observatory: drag to pan · wheel or +/− to zoom · 0 recenters · Esc closes.</p>
         </section>
-      </div>`;
+      </div>`,
+    );
   }
 }
 
