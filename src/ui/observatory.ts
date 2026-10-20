@@ -160,7 +160,7 @@ export class Observatory implements Overlay {
         ? `
       <div class="obs-main">
         <div class="obs-stage">
-          <canvas class="obs-canvas" aria-label="${esc(sp.name)}, ${this.stage}, ${this.view === 'side' ? 'side view' : 'Arena view from above'}" role="img"></canvas>
+          <canvas class="obs-canvas" tabindex="0" data-fk="obs-view" aria-label="${esc(sp.name)}, ${this.stage}, ${this.view === 'side' ? 'side view' : 'Arena view from above'}" role="img" aria-description="Arrow keys pan, plus and minus zoom, 0 recenters"></canvas>
           ${previewing ? '<span class="obs-preview-note">Preview only: nothing is unlocked by viewing</span>' : ''}
           <div class="obs-zoom" role="group" aria-label="Zoom">
             <button class="chip-btn" data-a="zoom" data-v="-1" data-fk="z-out" aria-label="Zoom out">−</button>
@@ -293,7 +293,16 @@ export class Observatory implements Overlay {
     if (e.key === '+' || e.key === '=') this.setZoom(this.zoom * 1.2);
     else if (e.key === '-') this.setZoom(this.zoom / 1.2);
     else if (e.key === '0') this.recenter();
-    else return;
+    else if (e.key.startsWith('Arrow') && (e.target as Element).classList?.contains('obs-canvas')) {
+      // keyboard panning when the view itself has focus
+      const d = 24;
+      if (e.key === 'ArrowLeft') this.pan.x += d;
+      else if (e.key === 'ArrowRight') this.pan.x -= d;
+      else if (e.key === 'ArrowUp') this.pan.y += d;
+      else this.pan.y -= d;
+      e.preventDefault();
+      return;
+    } else return;
     e.preventDefault();
     this.render();
   }

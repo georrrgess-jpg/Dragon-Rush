@@ -57,7 +57,7 @@ export class Shell {
     const w = (this.ui as UI & { walletView?: typeof s.wallet | null }).walletView ?? s.wallet;
     this.nav.innerHTML = TABS.map(
       (t) =>
-        `<button data-tab="${t.id}" data-fk="tab-${t.id}" ${t.id === this.tab ? 'aria-current="page" class="on"' : ''}>${t.label}${t.id === 'hatchery' && s.wallet.keys > 0 ? `<span class="dot" aria-label="${s.wallet.keys} keys">${s.wallet.keys}</span>` : ''}</button>`,
+        `<button data-tab="${t.id}" data-fk="tab-${t.id}" ${t.id === this.tab ? 'aria-current="page" class="on"' : ''}>${t.label}${t.id === 'hatchery' && w.keys > 0 ? `<span class="dot" aria-label="${w.keys} keys">${w.keys}</span>` : ''}</button>`,
     ).join('');
     const keyPct = Math.round((s.keyProgress / HATCHERY.secondsPerKey) * 100);
     this.wallet.innerHTML = `

@@ -303,7 +303,7 @@ export class DragonsScreen implements Screen {
       .map((id) => {
         const d = s.dragons[id];
         const sp = SPECIES[id];
-        return `<button class="dcard2 r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}, ${sp.name}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
+        return `<button class="dcard2 r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}${eco.dragonName(s, id) !== sp.name ? `, ${sp.name}` : ''}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
           <img src="${portraitUrl(id, d.owned ? stageOf(d.level) : 'adult', d.owned ? d.marking : 'default', 120, 90)}" alt="" draggable="false">
           <span class="dc-name">${d.favorite ? '<i class="fav">★</i>' : ''}${esc(eco.dragonName(s, id))}</span>
           <span class="dc-meta"><span class="rs">${RARITIES[sp.rarity].symbol}</span> ${ELEMENTS[sp.element].symbol} ${d.owned ? `Lv ${d.level}` : '🔒'}</span>
@@ -349,8 +349,8 @@ export class DragonsScreen implements Screen {
           <button class="btn small ghost obs-open" data-a="observatory" data-fk="obs-open" title="Large view, poses, stages and egg">Observatory</button>
           ${d.owned ? (s.selected === id ? '<span class="badge sel">Flying now</span>' : `<button class="btn gold small" data-a="select" data-fk="select">Fly with ${esc(eco.dragonName(s, id))}</button>`) : ''}
         </div>
-        <div class="insp-tabs" role="tablist">${tabs.map(([t, l]) => `<button role="tab" aria-selected="${this.tab === t}" class="${this.tab === t ? 'on' : ''}" data-a="tab" data-v="${t}" data-fk="tab-${t}">${l}</button>`).join('')}</div>
-        <div class="insp-body" data-scroll="insp">${this.tabHtml()}</div>
+        <div class="insp-tabs" role="tablist" aria-label="Dragon details">${tabs.map(([t, l]) => `<button role="tab" aria-selected="${this.tab === t}" class="${this.tab === t ? 'on' : ''}" data-a="tab" data-v="${t}" data-fk="tab-${t}">${l}</button>`).join('')}</div>
+        <div class="insp-body" data-scroll="insp" role="tabpanel" aria-label="${tabs.find(([t]) => t === this.tab)![1]}">${this.tabHtml()}</div>
       </aside>`;
   }
 
@@ -482,9 +482,9 @@ export class DragonsScreen implements Screen {
           <button class="chip-btn" data-a="qty" data-v="1" data-fk="qty-inc" aria-label="One portion more" ${this.feedQty >= max ? 'disabled' : ''}>+</button>
           <button class="chip-btn" data-a="qty" data-v="max" data-fk="qty-max" ${max > 1 && this.feedQty < max ? '' : 'disabled'}>Max (${Math.max(1, max)})</button>
         </div>
-        <p class="small feed-preview">${preview}</p>
+        <p class="small feed-preview" id="feed-why">${preview}</p>
         <div class="row feed-row2">
-          <button class="btn gold" data-a="feed" data-v="${this.feedQty}" data-fk="feed" ${plan.reason || this.feedBusy ? 'disabled' : ''}>Feed ${plan.fruit} ${icon('fruit', 'icon sm')} → ${plan.xp} XP</button>
+          <button class="btn gold" data-a="feed" data-v="${this.feedQty}" data-fk="feed" aria-describedby="feed-why" ${plan.reason ? 'disabled' : ''}>Feed ${plan.fruit} ${icon('fruit', 'icon sm')} → ${plan.xp} XP</button>
           <small class="muted">You have ${s.wallet.fruit} Emberfruit. ${XP.feedFruit} per portion; playing earns ~200 XP per active minute.</small>
         </div>
         <p class="small">${evoText}</p>

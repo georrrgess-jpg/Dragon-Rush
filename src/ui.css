@@ -1777,3 +1777,20 @@ table.compare thead img {
   font-size: 14px;
   margin: 4px 0 8px;
 }
+/* UI review fixes (Update 4) */
+.stages img,
+.marking img {
+  width: 96px;
+  height: 72px;
+}
+.stages figcaption,
+.preview-tag,
+.egg-mini small {
+  font-size: 13px;
+}
+/* toasts stack over the top of the scene panel: clear of the wallet and the main call to action */
+#toast-root {
+  left: 420px;
+  top: 72px;
+  width: 370px;
+}

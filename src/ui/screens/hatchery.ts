@@ -238,8 +238,10 @@ export class HatcheryScreen implements Screen {
       this.ui.toast(r.reason);
       return;
     }
-    // Hold the wallet display so an Essence jump can't give the result away before the reveal.
+    // Hold the wallet display, pity counters, history and goal so nothing gives the result away
+    // before the reveal (the award itself is already decided and is committed just below).
     this.holdWallet(true);
+    this.shown = this.ui.save;
     this.ui.commit(r.save);
     this.pendingEvents = r.events;
     sfx.click();
@@ -298,10 +300,13 @@ export class HatcheryScreen implements Screen {
     if (o && !this.soundPlayed) sfx.hatch(SPECIES[o.species].element);
     this.soundPlayed = true;
     this.holdWallet(false);
+    this.shown = null;
     this.ui.commit(markRevealed(this.ui.save, this.current.map((c) => c.tx)));
     if (this.pendingEvents) this.ui.announce(this.pendingEvents);
     this.pendingEvents = null;
     this.renderUi();
+    this.renderLower();
+    this.el.querySelector('.goal-wrap')!.innerHTML = goalStrip(this.ui, 'hatchery');
     const first = this.current.length > 1 ? '[data-fk="bc-0"]' : '[data-a=done]';
     this.el.querySelector<HTMLButtonElement>(first)?.focus({ preventScroll: true });
   }
@@ -317,7 +322,14 @@ export class HatcheryScreen implements Screen {
   render(): void {
     this.renderUi();
     this.renderLower();
-    this.el.querySelector('.goal-wrap')!.innerHTML = goalStrip(this.ui, 'hatchery');
+    this.el.querySelector('.goal-wrap')!.innerHTML = goalStrip(this.shownUi, 'hatchery');
+  }
+
+  /** The save as displayed: the pre-opening snapshot while a reveal is pending. */
+  private shown: UI['save'] | null = null;
+
+  private get shownUi(): UI {
+    return this.shown ? (Object.create(this.ui, { save: { value: this.shown } }) as UI) : this.ui;
   }
 
   private ownedLine(o: OpeningRecord): string {
@@ -395,7 +407,7 @@ export class HatcheryScreen implements Screen {
   }
 
   private renderLower() {
-    const s = this.ui.save;
+    const s = this.shown ?? this.ui.save;
     const odds = nextOdds(s.hatchery);
     const tabs = (['odds', 'history', 'catalog'] as const).map((p) => `<button class="${this.panel === p ? 'on' : ''}" data-a="panel" data-v="${p}" data-fk="p-${p}" aria-selected="${this.panel === p}" role="tab">${p === 'odds' ? 'Odds & protection' : p === 'history' ? 'Recent openings' : 'Essence catalog'}</button>`).join('');
     let body = '';
@@ -416,7 +428,7 @@ export class HatcheryScreen implements Screen {
         </div>`;
     } else if (this.panel === 'history') {
       body = s.hatchery.history.length
-        ? `<ul class="history" data-scroll="hist">${s.hatchery.history.map((o) => `<li class="r-${o.rarity}"><span>${new Date(o.at).toLocaleString()}</span><b>${RARITIES[o.rarity].symbol} ${SPECIES[o.species].name}</b><span>${o.duplicate ? `duplicate → +${o.essence} Essence` : 'new'}${o.rule !== 'base' ? ` · ${o.rule.replace('-', ' ')}` : ''}</span><small class="muted">${esc(o.tx)}</small></li>`).join('')}</ul>`
+        ? `<ul class="history" data-scroll="hist">${s.hatchery.history.map((o) => `<li class="r-${o.rarity}"><span>${o.at > 1 ? new Date(o.at).toLocaleString() : 'date not recorded'}</span><b>${RARITIES[o.rarity].symbol} ${SPECIES[o.species].name}</b><span>${o.duplicate ? `duplicate → +${o.essence} Essence` : 'new'}${o.rule !== 'base' ? ` · ${o.rule.replace('-', ' ')}` : ''}</span></li>`).join('')}</ul>`
         : '<p class="muted">No eggs opened yet. You start with one welcome key.</p>';
     } else {
       const unowned = SPECIES_IDS.filter((id) => !s.dragons[id].owned).sort((a, b) => RARITIES[SPECIES[a].rarity].order - RARITIES[SPECIES[b].rarity].order);

@@ -48,6 +48,8 @@ export function esc(s: string): string {
 export function rerender(container: HTMLElement, html: string): void {
   const active = document.activeElement as HTMLElement | null;
   const fk = active && container.contains(active) ? active.dataset.fk : undefined;
+  // remember the focus order so focus can move to a neighbour if its control disappears
+  const order = fk ? Array.from(container.querySelectorAll<HTMLElement>('[data-fk]'), (n) => n.dataset.fk!) : [];
   // keep the caret in text fields (search) across a re-render
   const sel = active instanceof HTMLInputElement && ['text', 'search'].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
   const scrolls = new Map<string, number>();
@@ -58,9 +60,18 @@ export function rerender(container: HTMLElement, html: string): void {
     if (v !== undefined) n.scrollTop = v;
   });
   if (fk) {
-    const n = container.querySelector<HTMLElement>(`[data-fk="${CSS.escape(fk)}"]`);
+    const find = (k: string) => {
+      const n = container.querySelector<HTMLElement>(`[data-fk="${CSS.escape(k)}"]`);
+      return n && !(n as HTMLButtonElement).disabled && !n.closest('[inert]') ? n : null;
+    };
+    let n = find(fk);
+    if (!n) {
+      // the control went away or became disabled: focus the nearest neighbour in the old order
+      const i = order.indexOf(fk);
+      for (let d = 1; d < order.length && !n; d++) n = (order[i + d] && find(order[i + d])) || (i - d >= 0 && order[i - d] ? find(order[i - d]) : null);
+    }
     n?.focus({ preventScroll: true });
-    if (sel && n instanceof HTMLInputElement) n.setSelectionRange(sel[0], sel[1]);
+    if (sel && n instanceof HTMLInputElement && n.dataset.fk === fk) n.setSelectionRange(sel[0], sel[1]);
   }
 }
 

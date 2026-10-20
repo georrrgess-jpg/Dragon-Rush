@@ -257,6 +257,8 @@ export function defaultSettings(): Settings {
 
 export function defaultSave(): SaveData {
   const dragons = Object.fromEntries(SPECIES_IDS.map((id) => [id, defaultDragon(id === 'ember')])) as Record<SpeciesId, DragonRecord>;
+  // a brand-new save records when its starter joined (older saves keep 1 = "not recorded")
+  dragons.ember.acquiredAt = Date.now();
   return {
     version: SAVE_VERSION,
     wallet: { gold: 0, fruit: 0, essence: 0, keys: HATCHERY.welcomeKeys },
