@@ -64,7 +64,6 @@ const LEDGE_BACK = 8;
 const LEDGE_LIP = 42;
 
 /** Optional animator hooks (present on newer rigs); called only when available. */
-type AnimHooks = DragonAnimator & { setReducedMotion?: (on: boolean) => void; setSpecies?: (id: SpeciesId) => void };
 
 interface Float {
   x: number;
@@ -105,6 +104,8 @@ export class HeroView {
 
   feed(): void {
     this.feedT = 0;
+    // the jaw starts opening early so the bite lands as the fruit reaches the mouth (0.55 s)
+    this.anim.feed(0.55);
   }
 
   cheer(): void {
@@ -120,16 +121,14 @@ export class HeroView {
     const key = `${s.species}:${s.stage}`;
     if (key !== this.key) {
       this.key = key;
-      this.anim = new DragonAnimator(true);
-      this.anim.setStage(s.stage);
-      (this.anim as AnimHooks).setSpecies?.(s.species);
+      this.anim = new DragonAnimator(true, 0.2, { species: s.species, stage: s.stage, reducedMotion: s.reducedMotion });
     }
-    (this.anim as AnimHooks).setReducedMotion?.(s.reducedMotion);
+    this.anim.setReducedMotion(s.reducedMotion);
     this.rm = s.reducedMotion;
     this.t += dt;
     // Full motion: a little hop with wingbeats to catch the fruit. Reduced motion: stays perched.
     const hopping = !s.reducedMotion && this.feedT >= 0 && this.feedT < 0.6;
-    this.anim.update(dt, { vy: 0, maxVy: 1000, dashing: false, rush: false, perch: !hopping });
+    this.anim.update(dt, { vy: 0, maxVy: 1000, dashing: false, rush: false, perch: !hopping, reducedMotion: s.reducedMotion });
     if (this.feedT >= 0) {
       const before = this.feedT;
       this.feedT += dt;
@@ -237,10 +236,12 @@ export class HeroView {
       ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
     }
 
-    drawDragon(ctx, s.species, ox, oy, scale, this.pose(s), { stage: s.stage, marking: s.marking });
+    const pose = this.pose(s);
+    drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
     drawPerch(ctx, s.perch, cx, baseY, pu, true, s.reducedMotion ? -1 : this.t);
 
-    const [mx, my] = mouthPoint(s.species, s.stage);
+    // aim the fruit at where the jaw actually is in this pose
+    const [mx, my] = mouthPoint(s.species, s.stage, pose);
     this.mouth = [ox + mx * scale, oy + my * scale];
     if (this.feedT >= 0 && this.feedT < 0.55) {
       const k = this.feedT / 0.55;

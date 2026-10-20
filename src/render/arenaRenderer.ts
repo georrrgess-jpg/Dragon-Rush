@@ -338,7 +338,7 @@ export class ArenaRenderer {
     const blink = sim.iT > 0 && sim.dashT <= 0 ? 0.55 + 0.45 * Math.cos(t * 22) : 1;
     ctx.globalAlpha = blink;
     const mp = this.motion.pose({ dash: sim.dashT > 0 ? 1 : 0, hurt: this.hurt, ability: this.abilityGlow, time: t });
-    drawDragonTop(ctx, this.look.species, sim.x, sim.y, this.motion.heading, PLAYER_SCALE, mp, { stage: this.look.stage, marking: this.look.marking });
+    drawDragonTop(ctx, this.look.species, sim.x, sim.y, this.motion.heading, PLAYER_SCALE, mp, { stage: this.look.stage, marking: this.look.marking, detail: this.lowEffects ? 0 : 1 });
     ctx.globalAlpha = 1;
     if (sim.shieldHits > 0 || sim.barrierReady) {
       ctx.save();

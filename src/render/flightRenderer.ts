@@ -427,7 +427,7 @@ export class FlightRenderer {
     ctx.globalAlpha = graceAlpha * (sim.ghostT > 0 ? 0.55 : 1);
     const pose = this.anim.pose();
     pose.rush = Math.max(pose.rush, this.abilityGlow * 0.6);
-    drawDragon(ctx, sim.dragonId, sim.dragonScreenX, sim.y, 0.78, pose, { stage: this.look.stage, marking: this.look.marking });
+    drawDragon(ctx, sim.dragonId, sim.dragonScreenX, sim.y, 0.78, pose, { stage: this.look.stage, marking: this.look.marking, detail: this.lowEffects ? 0 : 1 });
     ctx.globalAlpha = 1;
     this.drawAuras(ctx, sim, false);
     if (this.showHitboxes) this.hitCircle(ctx, sim.dragonScreenX, sim.y, FLIGHT.bodyRadius, '#00e0ff');
