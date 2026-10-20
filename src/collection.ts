@@ -22,7 +22,7 @@ export const SORT_LABELS: Record<CollectionSort, string> = {
 
 export interface CollectionQuery {
   text: string;
-  own: 'all' | 'owned' | 'locked';
+  own: 'all' | 'owned' | 'locked' | 'favorites';
   element: Element | 'any';
   rarity: Rarity | 'any';
   sort: CollectionSort;
@@ -54,6 +54,7 @@ export function queryCollection(save: SaveData, q: CollectionQuery): SpeciesId[]
     const o = save.dragons[id].owned;
     if (q.own === 'owned' && !o) return false;
     if (q.own === 'locked' && o) return false;
+    if (q.own === 'favorites' && !save.dragons[id].favorite) return false;
     if (q.element !== 'any' && SPECIES[id].element !== q.element) return false;
     if (q.rarity !== 'any' && SPECIES[id].rarity !== q.rarity) return false;
     return matchesText(save, id, q.text);

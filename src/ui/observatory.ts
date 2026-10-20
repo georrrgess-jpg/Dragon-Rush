@@ -17,7 +17,9 @@ import { SPECIES_ART } from '../render/speciesArt';
 import { drawDragonTop } from '../render/topdown';
 import type { ObservatoryPose } from '../save';
 import { el, esc, rerender, sizeCanvas } from './dom';
-import { eggUrl, elementTag, rarityTag } from './screens/common';
+import { eggUrl, elementTag } from './screens/common';
+import { rarityBadge } from './rarity';
+import { drawRarityAura } from '../render/rarityArt';
 import type { Overlay, UI } from './types';
 
 const CW = 760;
@@ -63,7 +65,7 @@ export function eggCodexHtml(ui: UI, id: SpeciesId, opts: { canvas: boolean; dra
       ${opts.canvas ? '<canvas class="codex-egg" aria-hidden="true"></canvas>' : `<img class="codex-egg-img" src="${eggUrl(id, 120, 150)}" alt="">`}
       <div class="codex-info">
         <h3>${esc(sp.name)} egg</h3>
-        <div>${rarityTag(id)} ${elementTag(id)}</div>
+        <div>${rarityBadge(SPECIES[id].rarity)} ${elementTag(id)}</div>
         <p class="small">${status}</p>
         <h4>How to obtain</h4>
         <ul class="facts">${obtainLines(s, id).map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
@@ -176,6 +178,7 @@ export class Observatory implements Overlay {
             <button class="chip-btn ${this.view === 'side' ? 'on' : ''}" data-a="view" data-v="side" data-fk="v-side" aria-pressed="${this.view === 'side'}">Side</button>
             <button class="chip-btn ${this.view === 'top' ? 'on' : ''}" data-a="view" data-v="top" data-fk="v-top" aria-pressed="${this.view === 'top'}">Arena (top)</button></div></div>
           <div class="obs-group"><b>Animation</b><div class="seg" role="group" aria-label="Animation">${poses.map(([p, l]) => `<button class="chip-btn ${this.pose === p ? 'on' : ''}" data-a="pose" data-v="${p}" data-fk="p-${p}" aria-pressed="${this.pose === p}">${l}</button>`).join('')}</div>
+            <div class="seg" role="group" aria-label="Reactions"><button class="chip-btn" data-a="react" data-fk="p-react">Say hello</button><button class="chip-btn" data-a="arrive" data-fk="p-arrive">Arrival pose</button></div>
             ${s.settings.reducedMotion ? '<small class="muted">Reduced motion is on: poses are shown still.</small>' : ''}</div>
           <div class="obs-group"><b>Evolution stage</b><div class="chips">${stageBtns}</div></div>
           <div class="obs-group"><b>Markings</b><div class="chips">${markBtns}</div></div>
@@ -191,7 +194,7 @@ export class Observatory implements Overlay {
       `
       <header class="obs-head">
         <h2>${esc(eco.dragonName(s, id))} <small class="muted">${esc(sp.name !== eco.dragonName(s, id) ? sp.name : '')}</small></h2>
-        <div>${rarityTag(id)} ${elementTag(id)} <span class="muted small">${FAMILIES[sp.family]}</span></div>
+        <div>${rarityBadge(SPECIES[id].rarity)} ${elementTag(id)} <span class="muted small">${FAMILIES[sp.family]}</span></div>
         <div class="obs-tabs" role="tablist">
           <button role="tab" aria-selected="${this.tab === 'dragon'}" class="${this.tab === 'dragon' ? 'on' : ''}" data-a="tab" data-v="dragon" data-fk="t-dragon">Dragon</button>
           <button role="tab" aria-selected="${this.tab === 'egg'}" class="${this.tab === 'egg' ? 'on' : ''}" data-a="tab" data-v="egg" data-fk="t-egg">Egg</button>
@@ -255,6 +258,17 @@ export class Observatory implements Overlay {
         return;
       case 'shot':
         this.screenshot();
+        return;
+      case 'react':
+      case 'arrive':
+        // preview animations only (nothing is granted); idle pose so the reaction reads clearly
+        if (this.pose !== 'idle') {
+          this.setPose('idle');
+          this.render();
+        }
+        if (a === 'react') this.anim.react();
+        else this.anim.arrive();
+        this.dirty = true;
         return;
       case 'codex-egg':
         this.id = v as SpeciesId;
@@ -409,7 +423,11 @@ export class Observatory implements Overlay {
       }
       const pose = still ? stillPose(this.pose) : { ...this.anim.pose(), time: this.t };
       // the tail reaches far left: shift right so the whole dragon fits at 100%
-      drawDragon(ctx, this.id, 40, this.pose === 'idle' ? 30 : 0, SPECIES[this.id].family === 'serpent' ? 1.5 : 1.75, pose, opts);
+      const sc = SPECIES[this.id].family === 'serpent' ? 1.5 : 1.75;
+      const dy = this.pose === 'idle' ? 30 : 0;
+      // rarity aura (inspection views only; still under reduced motion)
+      drawRarityAura(ctx, this.id, 40, dy, sc, this.t, this.ui.save.settings.reducedMotion || this.ui.save.settings.lowEffects);
+      drawDragon(ctx, this.id, 40, dy, sc, pose, opts);
     } else {
       const tp = this.t;
       drawDragonTop(ctx, this.id, 0, 30, -Math.PI / 2, 2, {

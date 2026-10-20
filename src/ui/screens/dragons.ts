@@ -12,12 +12,16 @@ import { HeroView } from '../../render/perch';
 import { arenaStats, flightStats } from '../../stats';
 import { bar, el, esc, icon, rerender, sizeCanvas, svg } from '../dom';
 import { Observatory, eggCodexHtml } from '../observatory';
+import { rarityBadge, rarityCardClass } from '../rarity';
 import type { Screen, UI } from '../types';
-import { bindGoal, eggUrl, elementTag, goalStrip, portraitUrl, rarityTag } from './common';
+import { bindGoal, eggUrl, elementTag, goalStrip, portraitUrl } from './common';
 
 type InspectTab = 'overview' | 'growth' | 'compare' | 'mastery' | 'style' | 'records';
 const VIEW_W = 420;
 const VIEW_H = 230;
+
+/** The last collection filters, kept while the game is open. */
+let lastQuery: CollectionQuery | null = null;
 
 export class DragonsScreen implements Screen {
   el: HTMLElement;
@@ -38,7 +42,8 @@ export class DragonsScreen implements Screen {
     arg?: string,
   ) {
     this.focus = arg && arg in SPECIES ? (arg as SpeciesId) : ui.save.selected;
-    this.q = { ...DEFAULT_QUERY, sort: ui.save.prefs.collectionSort };
+    // filters persist for the session (the sort is also remembered in the save)
+    this.q = { ...(lastQuery ?? DEFAULT_QUERY), sort: ui.save.prefs.collectionSort };
     this.el = el(`<section class="screen dragons"></section>`);
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.el.addEventListener('submit', (e) => this.onSubmit(e));
@@ -51,6 +56,7 @@ export class DragonsScreen implements Screen {
     const t = e.target as HTMLInputElement;
     if (t.dataset.fk !== 'search') return;
     this.q.text = t.value.slice(0, 24);
+    lastQuery = { ...this.q };
     // update the list only, so the caret and focus stay in the search field
     this.renderGrid();
   }
@@ -226,6 +232,7 @@ export class DragonsScreen implements Screen {
   }
 
   render(): void {
+    lastQuery = { ...this.q };
     const right = this.view === 'eggs' ? this.eggPanelHtml() : this.inspectHtml();
     rerender(this.el, `<div class="dragons-layout">${this.collectionHtml()}${right}</div><div class="goal-wrap">${goalStrip(this.ui, 'dragons')}</div>`);
     this.canvas = this.el.querySelector('.inspect-canvas');
@@ -280,7 +287,7 @@ export class DragonsScreen implements Screen {
         </div>
         <div class="coll-head filters">
           <div class="seg" role="group" aria-label="Show">
-            ${(['all', 'owned', 'locked'] as const).map((f) => `<button class="chip-btn ${q.own === f ? 'on' : ''}" data-a="filter" data-v="${f}" data-fk="f-${f}" aria-pressed="${q.own === f}">${f === 'all' ? 'All' : f === 'owned' ? 'Owned' : 'Not hatched'}</button>`).join('')}
+            ${(['all', 'owned', 'locked', 'favorites'] as const).map((f) => `<button class="chip-btn ${q.own === f ? 'on' : ''}" data-a="filter" data-v="${f}" data-fk="f-${f}" aria-pressed="${q.own === f}">${f === 'all' ? 'All' : f === 'owned' ? 'Owned' : f === 'locked' ? 'Not hatched' : '★ Favorites'}</button>`).join('')}
           </div>
           <div class="seg" role="group" aria-label="Rarity">${rars}</div>
           <div class="seg" role="group" aria-label="Element">${els}</div>
@@ -312,10 +319,10 @@ export class DragonsScreen implements Screen {
       .map((id) => {
         const d = s.dragons[id];
         const sp = SPECIES[id];
-        return `<button class="dcard2 r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}${eco.dragonName(s, id) !== sp.name ? `, ${sp.name}` : ''}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
+        return `<button class="dcard2 ${rarityCardClass(sp.rarity)} r-${sp.rarity} ${d.owned ? '' : 'locked'} ${id === this.focus ? 'on' : ''} ${id === s.selected ? 'sel' : ''}" data-a="focus" data-v="${id}" data-fk="card-${id}" aria-pressed="${id === this.focus}" aria-label="${esc(eco.dragonName(s, id))}${eco.dragonName(s, id) !== sp.name ? `, ${sp.name}` : ''}, ${RARITIES[sp.rarity].name} ${ELEMENTS[sp.element].name}${d.owned ? `, level ${d.level}` : ', not hatched'}">
           <img src="${portraitUrl(id, d.owned ? stageOf(d.level) : 'adult', d.owned ? d.marking : 'default', 120, 90)}" alt="" draggable="false">
           <span class="dc-name">${d.favorite ? '<i class="fav">★</i>' : ''}${esc(eco.dragonName(s, id))}</span>
-          <span class="dc-meta"><span class="rs">${RARITIES[sp.rarity].symbol}</span> ${ELEMENTS[sp.element].symbol} ${d.owned ? `Lv ${d.level}` : '🔒'}</span>
+          <span class="dc-meta">${rarityBadge(sp.rarity, { compact: true })} ${ELEMENTS[sp.element].symbol} ${d.owned ? `Lv ${d.level}` : '🔒'}</span>
           ${id === s.selected ? '<span class="dc-sel">Flying</span>' : ''}
         </button>`;
       })
@@ -352,7 +359,7 @@ export class DragonsScreen implements Screen {
           <canvas class="inspect-canvas" aria-hidden="true"></canvas>
           <div class="insp-title">
             <h2>${esc(eco.dragonName(s, id))} ${d.owned ? `<button class="star-btn ${d.favorite ? 'on' : ''}" data-a="favorite" data-fk="fav" aria-pressed="${d.favorite}" aria-label="Favorite" title="Favorite">${svg('star')}</button>` : ''}</h2>
-            <div>${rarityTag(id)} ${elementTag(id)} <span class="muted small">${FAMILIES[sp.family]}</span></div>
+            <div>${rarityBadge(sp.rarity)} ${elementTag(id)} <span class="muted small">${FAMILIES[sp.family]}</span></div>
             ${d.title ? `<div class="title-tag">${esc(d.title)}</div>` : ''}
           </div>
           <button class="btn small ghost obs-open" data-a="observatory" data-fk="obs-open" title="Large view, poses, stages and egg">Observatory</button>
