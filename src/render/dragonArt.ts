@@ -2914,7 +2914,7 @@ function drawWing(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig
 const portraitCache = new Map<string, HTMLCanvasElement>();
 
 /** Cached still portrait (for cards and lists): perched pose, given stage and marking. */
-export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'default', w = 200, h = 150, silhouette = false): HTMLCanvasElement {
+export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'default', w = 200, h = 150, silhouette = false, cache = true): HTMLCanvasElement {
   const key = `${ART_REV}:${id}:${stage}:${marking}:${w}x${h}:${silhouette ? 1 : 0}`;
   const hit = portraitCache.get(key);
   if (hit) return hit;
@@ -2932,6 +2932,9 @@ export function portrait(id: SpeciesId, stage: Stage, marking: MarkingId = 'defa
     ctx.fillStyle = 'rgba(40,52,70,0.82)';
     ctx.fillRect(0, 0, w, h);
   }
-  portraitCache.set(key, c);
+  if (cache) {
+    portraitCache.set(key, c);
+    while (portraitCache.size > 96) portraitCache.delete(portraitCache.keys().next().value!);
+  }
   return c;
 }

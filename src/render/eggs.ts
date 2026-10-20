@@ -17,6 +17,10 @@ type Ctx = CanvasRenderingContext2D;
 export const EGG_ART_REV = 1;
 /** Most cached shell pictures kept at once (least recently used are dropped). */
 export const EGG_CACHE_LIMIT = 120;
+/** Memory budget for cached shell pictures (width × height × 4 bytes, both layers). */
+export const EGG_CACHE_BYTES = 24 * 1024 * 1024;
+let shellBytes = 0;
+const entryBytes = (e: { canvas: HTMLCanvasElement; emissive: HTMLCanvasElement | null }) => e.canvas.width * e.canvas.height * 4 * (e.emissive ? 2 : 1);
 
 /** 0 = reel/icon, 1 = result/card, 2 = codex/hero. */
 export type EggTier = 0 | 1 | 2;
@@ -2016,12 +2020,13 @@ function bucket(px: number): number {
 }
 
 /** Cache diagnostics (entries, limit, canvases created so far). */
-export function eggCacheStats(): { entries: number; limit: number; canvasesCreated: number; icons: number } {
-  return { entries: shells.size, limit: EGG_CACHE_LIMIT, canvasesCreated, icons: icons.size };
+export function eggCacheStats(): { entries: number; limit: number; bytes: number; byteLimit: number; canvasesCreated: number; icons: number } {
+  return { entries: shells.size, limit: EGG_CACHE_LIMIT, bytes: shellBytes, byteLimit: EGG_CACHE_BYTES, canvasesCreated, icons: icons.size };
 }
 
 export function clearEggCache(): void {
   shells.clear();
+  shellBytes = 0;
   icons.clear();
 }
 
@@ -2053,7 +2058,13 @@ export function eggShellImage(id: SpeciesId, tier: EggTier, pxHeight: number): S
   renderShell(c, g, id, tier, Q);
   const entry: ShellEntry = { canvas, emissive: em, box: { x: EGG_BOX.x, y: EGG_BOX.y, w: cw / Q, h: ch / Q } };
   shells.set(k, entry);
-  while (shells.size > EGG_CACHE_LIMIT) shells.delete(shells.keys().next().value!);
+  shellBytes += entryBytes(entry);
+  // least recently used go first, bounded by both count and memory (always keep the newest)
+  while (shells.size > 1 && (shells.size > EGG_CACHE_LIMIT || shellBytes > EGG_CACHE_BYTES)) {
+    const oldest = shells.keys().next().value!;
+    shellBytes -= entryBytes(shells.get(oldest)!);
+    shells.delete(oldest);
+  }
   return entry;
 }
 

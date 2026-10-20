@@ -157,7 +157,8 @@ export class DragonsScreen implements Screen {
         this.feedBusy = true;
         setTimeout(() => {
           this.feedBusy = false;
-          this.render();
+          // the screen may have been left within the lock
+          if (this.el.isConnected) this.render();
         }, 450);
         this.feedQty = 1;
         ui.commit(r.save);

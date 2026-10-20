@@ -11,7 +11,7 @@ import { RARITY_ORDER, buildReel, cryptoRandom, markRevealed, nextOdds, openEggs
 import { DragonAnimator } from '../../render/dragonAnim';
 import { DEFAULT_POSE, drawDragon, type DragonPose } from '../../render/dragonArt';
 import { drawShellFragments } from '../../render/eggFracture';
-import { drawEgg, drawRarityPlaque, eggIcon, eggShellImage, eggStyle } from '../../render/eggs';
+import { EGG_ART_REV, drawEgg, drawRarityPlaque, eggIcon, eggShellImage, eggStyle } from '../../render/eggs';
 import type { OpeningRecord } from '../../save';
 import { createRng } from '../../sim/rng';
 import { bar, el, esc, fmtTime, icon, rerender, sizeCanvas } from '../dom';
@@ -77,9 +77,19 @@ export function reelEase(k: number): number {
   return (1 - Math.pow(1 - x, 3)) * smooth(0, 0.12, x);
 }
 
+// Reel cards and pedestals outlive the screen (rebuilding 24 cards per visit was measurable);
+// keyed by device scale and egg art revision, bounded.
+const CARDS = new Map<string, HTMLCanvasElement>();
+const PEDESTALS = new Map<string, HTMLCanvasElement>();
+function boundedSet(m: Map<string, HTMLCanvasElement>, k: string, v: HTMLCanvasElement, cap: number) {
+  m.set(k, v);
+  while (m.size > cap) m.delete(m.keys().next().value!);
+}
+
 const iconUrls = new Map<string, string>();
 function eggIconUrl(id: SpeciesId, size: number): string {
-  const k = `${id}|${size}`;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const k = `${id}|${size}|${dpr}|${EGG_ART_REV}`;
   let u = iconUrls.get(k);
   if (!u) {
     u = eggIcon(id, size).toDataURL();
@@ -128,8 +138,6 @@ export class HatcheryScreen implements Screen {
   private fired = new Set<string>();
   private soundPlayed = false;
   private particles: Particle[] = [];
-  private cards = new Map<string, HTMLCanvasElement>();
-  private pedestals = new Map<string, HTMLCanvasElement>();
   private grads = new Map<string, CanvasGradient>();
 
   constructor(private ui: UI) {
@@ -464,7 +472,8 @@ export class HatcheryScreen implements Screen {
 
   /** A reel card: tier-0 egg + name + rarity plaque, drawn once per species. */
   private card(id: SpeciesId): HTMLCanvasElement {
-    let c = this.cards.get(id);
+    const ck = `${this.k}|${EGG_ART_REV}|${id}`;
+    let c = CARDS.get(ck);
     if (c) return c;
     const [cv, x] = this.newCanvas(CARD_W, CARD_H);
     const sp = SPECIES[id];
@@ -497,22 +506,22 @@ export class HatcheryScreen implements Screen {
     x.fillStyle = '#f4f8fb';
     x.fillText(sp.name, CARD_W / 2, 155);
     drawRarityPlaque(x, sp.rarity, CARD_W / 2, 182, 112);
-    this.cards.set(id, cv);
+    boundedSet(CARDS, ck, cv, 72);
     c = cv;
     return c;
   }
 
   /** A small elemental pedestal (top center at its local (w/2 + 20, 18)). */
   private pedestal(element: Elem, w: number): HTMLCanvasElement {
-    const key = `${element}|${w}`;
-    let c = this.pedestals.get(key);
+    const key = `${this.k}|${element}|${w}`;
+    let c = PEDESTALS.get(key);
     if (c) return c;
     const W = w + 40;
     const H = w * 0.5 + 30;
     const [cv, x] = this.newCanvas(W, H);
     x.translate(W / 2, 18);
     drawPedestal(x, element, w);
-    this.pedestals.set(key, cv);
+    boundedSet(PEDESTALS, key, cv, 24);
     c = cv;
     return c;
   }

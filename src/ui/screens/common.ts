@@ -17,8 +17,10 @@ export function portraitUrl(id: SpeciesId, stage: Stage, marking: MarkingId = 'd
   const key = `${ART_REV}:${id}:${stage}:${marking}:${w}:${h}:${silhouette}`;
   let u = urlCache.get(key);
   if (!u) {
-    u = portrait(id, stage, marking, w, h, silhouette).toDataURL();
+    // rendered once and dropped: only the data URL is kept (bounded)
+    u = portrait(id, stage, marking, w, h, silhouette, false).toDataURL();
     urlCache.set(key, u);
+    while (urlCache.size > 240) urlCache.delete(urlCache.keys().next().value!);
   }
   return u;
 }
@@ -40,6 +42,7 @@ export function eggUrl(id: SpeciesId, w = 64, h = 80): string {
     drawEgg(ctx, id, w / 2, h * 0.52, h * 0.82, { tier: h <= 64 ? 0 : h < 120 ? 1 : 2 });
     u = c.toDataURL();
     eggUrls.set(key, u);
+    while (eggUrls.size > 120) eggUrls.delete(eggUrls.keys().next().value!);
   }
   return u;
 }

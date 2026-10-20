@@ -94,6 +94,8 @@ export class Observatory implements Overlay {
   private eggCtx: CanvasRenderingContext2D | null = null;
   private drag: { x: number; y: number; px: number; py: number } | null = null;
   private dashClock = 0;
+  /** Under reduced motion the picture is still: redraw only when something changed. */
+  private dirty = true;
   private abilityClock = 0;
 
   constructor(
@@ -205,6 +207,7 @@ export class Observatory implements Overlay {
       c.style.height = `${CH}px`;
       this.ctx = sizeCanvas(c, CW, CH, this.ui.scale);
     }
+    this.dirty = true;
     const e = this.panel.querySelector<HTMLCanvasElement>('.codex-egg');
     this.eggCtx = null;
     if (e) {
@@ -244,10 +247,12 @@ export class Observatory implements Overlay {
         break;
       case 'zoom':
         this.setZoom(this.zoom * (Number(v) > 0 ? 1.2 : 1 / 1.2));
-        break;
+        this.zoomLabel();
+        return;
       case 'recenter':
         this.recenter();
-        break;
+        this.zoomLabel();
+        return;
       case 'shot':
         this.screenshot();
         return;
@@ -281,11 +286,19 @@ export class Observatory implements Overlay {
 
   private setZoom(z: number) {
     this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    this.dirty = true;
+  }
+
+  /** Zoom changes update the label in place (the canvas is kept). */
+  private zoomLabel() {
+    const label = this.panel.querySelector('.obs-zoom .small');
+    if (label) label.textContent = `${Math.round(this.zoom * 100)}%`;
   }
 
   private recenter() {
     this.zoom = 1;
     this.pan = { x: 0, y: 0 };
+    this.dirty = true;
   }
 
   private onKey(e: KeyboardEvent) {
@@ -293,18 +306,21 @@ export class Observatory implements Overlay {
     if (e.key === '+' || e.key === '=') this.setZoom(this.zoom * 1.2);
     else if (e.key === '-') this.setZoom(this.zoom / 1.2);
     else if (e.key === '0') this.recenter();
-    else if (e.key.startsWith('Arrow') && (e.target as Element).classList?.contains('obs-canvas')) {
+    if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '0') {
+      e.preventDefault();
+      this.zoomLabel();
+      return;
+    }
+    if (e.key.startsWith('Arrow') && (e.target as Element).classList?.contains('obs-canvas')) {
       // keyboard panning when the view itself has focus
       const d = 24;
       if (e.key === 'ArrowLeft') this.pan.x += d;
       else if (e.key === 'ArrowRight') this.pan.x -= d;
       else if (e.key === 'ArrowUp') this.pan.y += d;
       else this.pan.y -= d;
+      this.dirty = true;
       e.preventDefault();
-      return;
-    } else return;
-    e.preventDefault();
-    this.render();
+    }
   }
 
   private onDown(e: PointerEvent) {
@@ -318,14 +334,14 @@ export class Observatory implements Overlay {
     const k = 1 / (this.ui.scale || 1);
     this.pan.x = Math.max(-CW / 2, Math.min(CW / 2, this.drag.px + (e.clientX - this.drag.x) * k));
     this.pan.y = Math.max(-CH / 2, Math.min(CH / 2, this.drag.py + (e.clientY - this.drag.y) * k));
+    this.dirty = true;
   }
 
   private onWheel(e: WheelEvent) {
     if (!(e.target as Element).classList?.contains('obs-canvas')) return;
     e.preventDefault();
     this.setZoom(this.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-    const label = this.panel.querySelector('.obs-zoom .small');
-    if (label) label.textContent = `${Math.round(this.zoom * 100)}%`;
+    this.zoomLabel();
   }
 
   private screenshot() {
@@ -360,7 +376,8 @@ export class Observatory implements Overlay {
       // top view: accumulate the wing phase at the family rate (switching pose never jumps it)
       const m = FAMILY_MOTION[SPECIES[this.id].family];
       this.topPhase += dt * (this.pose === 'idle' ? 0.35 : 1) * m.freq;
-    }
+    } else if (!this.dirty) return;
+    this.dirty = false;
     this.draw();
   }
 
@@ -380,7 +397,8 @@ export class Observatory implements Overlay {
     ctx.save();
     ctx.translate(CW / 2 + this.pan.x, CH / 2 + this.pan.y);
     ctx.scale(this.zoom, this.zoom);
-    const opts = { stage: this.stage, marking: this.marking, detail: 2 as const };
+    // Low effects: one detail tier less
+    const opts = { stage: this.stage, marking: this.marking, detail: (this.ui.save.settings.lowEffects ? 1 : 2) as 1 | 2 };
     if (this.view === 'side') {
       // ground line and a contact shadow when perched
       if (this.pose === 'idle') {
@@ -418,7 +436,7 @@ export class Observatory implements Overlay {
     ctx.fill();
     // a slow, gentle sway only (no flashing); still under reduced motion
     const sway = this.ui.save.settings.reducedMotion ? 0 : Math.sin(this.t * 0.9) * 0.025;
-    drawEgg(ctx, this.id, EGG_W / 2, EGG_H * 0.5, EGG_H * 0.72, { wobble: sway, tier: 2, time: this.t, reducedMotion: this.ui.save.settings.reducedMotion });
+    drawEgg(ctx, this.id, EGG_W / 2, EGG_H * 0.5, EGG_H * 0.72, { wobble: sway, tier: this.ui.save.settings.lowEffects ? 1 : 2, time: this.t, reducedMotion: this.ui.save.settings.reducedMotion });
   }
 }
 
