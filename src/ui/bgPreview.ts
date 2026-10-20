@@ -3,6 +3,7 @@ import type { RegionId } from '../content/types';
 import { VIEW } from '../config';
 import { Background, regionThumbnail } from '../render/background';
 import { ARENA_H, ARENA_W, ArenaFloor } from '../render/arenaFloor';
+import { HeroView, type HeroState } from '../render/perch';
 
 const REGIONS: [RegionId, string][] = [
   ['isles', 'Sunleaf Isles'],
@@ -144,6 +145,8 @@ export function runBackgroundPreview(): void {
   const params = new URLSearchParams(location.search);
   const only = params.get('region') as RegionId | null;
   const frozen = params.has('still');
+  // &low previews the low-effects path (time-driven motion frozen, scroll only)
+  const low = params.has('low');
 
   const page = document.createElement('div');
   page.style.cssText = 'padding:16px;font:14px/1.4 system-ui,sans-serif;color:#e8e8ee;display:flex;flex-direction:column;gap:18px';
@@ -169,7 +172,9 @@ export function runBackgroundPreview(): void {
     const arena = canvas(640, 360);
     row.append(label, side, arena);
     page.append(row);
-    rows.push({ bg: new Background(id), floor: new ArenaFloor(id), side: side.getContext('2d')!, arena: arena.getContext('2d')! });
+    const bg = new Background(id);
+    bg.lowEffects = low;
+    rows.push({ bg, floor: new ArenaFloor(id), side: side.getContext('2d')!, arena: arena.getContext('2d')! });
   }
   document.body.append(page);
 
@@ -208,7 +213,7 @@ export function runBackgroundPreview(): void {
     dist = d;
     time = t;
   };
-  w.__bgBench = (frames = 120, cpu = false) => {
+  w.__bgBench = (frames = 120, cpu = false, lowEffects = false) => {
     const out: Record<string, { batched: number; flushed: number; build: number }> = {};
     const c = document.createElement('canvas');
     c.width = VIEW.width;
@@ -218,6 +223,7 @@ export function runBackgroundPreview(): void {
     for (const [id] of REGIONS) {
       const b0 = performance.now();
       const bg = new Background(id);
+      bg.lowEffects = lowEffects;
       const build = performance.now() - b0;
       for (let i = 0; i < 10; i++) bg.draw(ctx, i * 7, i / 60);
       ctx.getImageData(0, 0, 1, 1);
@@ -249,8 +255,47 @@ export function runBackgroundPreview(): void {
     c.width = VIEW.width;
     c.height = VIEW.height;
     const ctx = c.getContext('2d')!;
-    new Background(id).draw(ctx, d, t);
+    const bg = new Background(id);
+    bg.lowEffects = false;
+    bg.reducedMotion = false;
+    bg.draw(ctx, d, t);
     if (objects) drawSideObjects(ctx, d, t);
+    return c.toDataURL('image/png');
+  };
+  /**
+   * Home hero at its real size (780×574, focusX 0.71): `steps` frames of `dt` are simulated
+   * first; `feed`/`cheer` trigger those reactions at the start. Returns a PNG data URL.
+   */
+  w.__heroShot = (opts: Partial<HeroState> & { steps?: number; dt?: number; feed?: boolean; cheer?: boolean; w?: number; h?: number } = {}) => {
+    const hw = opts.w ?? 780;
+    const hh = opts.h ?? 574;
+    const view = new HeroView(hw, hh);
+    const st: HeroState = {
+      species: opts.species ?? 'ember',
+      stage: opts.stage ?? 'adult',
+      marking: opts.marking ?? 'default',
+      region: opts.region ?? 'isles',
+      perch: opts.perch ?? 'perch.nest',
+      banner: opts.banner ?? 'banner.sun',
+      reducedMotion: opts.reducedMotion ?? false,
+      backdrop: opts.backdrop ?? true,
+      focusX: opts.focusX ?? 0.71,
+      zoom: opts.zoom,
+      quality: opts.quality,
+    };
+    const c = document.createElement('canvas');
+    c.width = hw;
+    c.height = hh;
+    const ctx = c.getContext('2d')!;
+    if (opts.feed) view.feed();
+    if (opts.cheer) {
+      view.update(0, st);
+      view.cheer();
+    }
+    for (let i = 0; i < (opts.steps ?? 30); i++) {
+      view.update(opts.dt ?? 1 / 60, st);
+      view.draw(ctx, st);
+    }
     return c.toDataURL('image/png');
   };
 }

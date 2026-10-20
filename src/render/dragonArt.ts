@@ -40,6 +40,19 @@ export interface DragonPose {
   ability: number;
   /** Seconds, for shimmer effects. */
   time: number;
+  /** Head pivot offset (local units): neck stabilization, reaching, dipping. */
+  headX: number;
+  headY: number;
+  /** Impact squash (0..1): wider and shorter about the collision center. */
+  squash: number;
+  /** 0..1 lid squint (hit wince, contented chewing). */
+  squint: number;
+  /** Swallow progress 0..1: a throat bulge travels from the jaw to the chest (0 = none). */
+  swallow: number;
+  /** Follow-through angle (rad) of frills, fins, whiskers, manes and plumes. */
+  frillLag: number;
+  /** Tail-tip flick (-1..1): a quick curl of the tip, then back. */
+  tailFlick: number;
 }
 
 export const DEFAULT_POSE: DragonPose = {
@@ -63,6 +76,13 @@ export const DEFAULT_POSE: DragonPose = {
   perch: 0,
   ability: 0,
   time: 0,
+  headX: 0,
+  headY: 0,
+  squash: 0,
+  squint: 0,
+  swallow: 0,
+  frillLag: 0,
+  tailFlick: 0,
 };
 
 /** Local-space offset of the collision center relative to the drawing origin. */
@@ -183,13 +203,39 @@ export function headScale(id: SpeciesId, stage: Stage): [number, number] {
   return [lx * snout, ly];
 }
 
-/** Mouth position relative to the drawing origin at scale 1 (used for feeding effects). */
-export function mouthPoint(id: SpeciesId, stage: Stage = 'adult'): Pt {
+/**
+ * Mouth position relative to the drawing origin at scale 1 (used for feeding effects). Without a
+ * pose it is the rest position; with a pose it follows the head (offset, turn), bob, bank and
+ * squash exactly as drawDragon() places it, so fruit can fly to where the jaw really is.
+ */
+export function mouthPoint(id: SpeciesId, stage: Stage = 'adult', p?: Partial<DragonPose>): Pt {
   const sp = SPECIES[id];
   const st = STAGE_RIG[stage];
-  const [hx, hy] = FAMILY[sp.family].headPivot(sp.look, st);
+  const [px, py] = FAMILY[sp.family].headPivot(sp.look, st);
   const [lx, ly] = headScale(id, stage);
-  return [(hx + 34 * st.head * lx - DRAGON_HIT_OFFSET.x) * st.scale, (hy + 10 * st.head * ly - DRAGON_HIT_OFFSET.y) * st.scale];
+  if (!p) return [(px + 34 * st.head * lx - DRAGON_HIT_OFFSET.x) * st.scale, (py + 10 * st.head * ly - DRAGON_HIT_OFFSET.y) * st.scale];
+  const pose = { ...DEFAULT_POSE, ...p };
+  const mx = 34 * st.head * lx;
+  const my = 10 * st.head * ly;
+  const ct = Math.cos(pose.headTurn);
+  const sn = Math.sin(pose.headTurn);
+  let x = px + pose.headX + mx * ct - my * sn - DRAGON_HIT_OFFSET.x;
+  let y = py + pose.headY + mx * sn + my * ct - DRAGON_HIT_OFFSET.y + pose.bob;
+  if (pose.squash > 0) {
+    x *= 1 + 0.07 * pose.squash;
+    y *= 1 - 0.09 * pose.squash;
+  }
+  if (pose.windup > 0) {
+    x *= 1 - 0.04 * pose.windup;
+    y *= 1 + 0.03 * pose.windup;
+  }
+  if (pose.dash > 0) {
+    x *= 1 + 0.05 * pose.dash;
+    y *= 1 - 0.04 * pose.dash;
+  }
+  const cb = Math.cos(pose.bank);
+  const sb = Math.sin(pose.bank);
+  return [(x * cb - y * sb) * st.scale, (x * sb + y * cb) * st.scale];
 }
 
 // --- body construction ---------------------------------------------------------------------------
@@ -409,7 +455,7 @@ function serpentBody(L: number, T: number, tailLen: number, pose: DragonPose): B
   const p0: Pt = [36, -22];
   const p1: Pt = [-18, 34];
   const p2: Pt = [-58 * L, -34 + pose.tailBend1 * 0.6];
-  const p3: Pt = [-108 * L * tailLen, 12 + pose.tailBend2 + 30 * pose.perch];
+  const p3: Pt = [-108 * L * tailLen, 12 + pose.tailBend2 + 30 * pose.perch - 14 * pose.tailFlick];
   const pts: Pt[] = [];
   for (let i = 0; i <= N; i++) {
     const t = i / N;
@@ -519,6 +565,7 @@ export function drawDragon(ctx: Ctx, id: SpeciesId, x: number, y: number, scale:
   ctx.rotate(pose.bank);
   if (pose.dash > 0) ctx.scale(1 + 0.05 * pose.dash, 1 - 0.04 * pose.dash);
   if (pose.windup > 0) ctx.scale(1 - 0.04 * pose.windup, 1 + 0.03 * pose.windup);
+  if (pose.squash > 0) ctx.scale(1 + 0.07 * pose.squash, 1 - 0.09 * pose.squash);
   ctx.translate(-DRAGON_HIT_OFFSET.x, -DRAGON_HIT_OFFSET.y + pose.bob);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
@@ -1006,7 +1053,7 @@ function drawTailTube(ctx: Ctx, look: Look, c: Palette, st: StageRig, pose: Drag
   const perch = pose.perch;
   const p0 = body.tailRoot;
   const p1: Pt = [-80 * len + 6 * perch, 10 + pose.tailBend1 + w1 + 40 * perch];
-  const p2: Pt = [-116 * len + 40 * perch, -6 + pose.tailBend2 + w2 + 46 * perch];
+  const p2: Pt = [-116 * len + 40 * perch + 6 * Math.abs(pose.tailFlick), -6 + pose.tailBend2 + w2 + 46 * perch - 16 * pose.tailFlick];
   const N = 16;
   const left: Pt[] = [];
   const right: Pt[] = [];
@@ -1569,8 +1616,11 @@ function headShape(kind: Look['head'], [lx, ly]: [number, number]): HeadShape {
 
 function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: StageRig, pose: DragonPose) {
   const fam = FAMILY[family];
-  const [hx, hy] = fam.headPivot(look, st);
+  const [px, py] = fam.headPivot(look, st);
+  const hx = px + pose.headX;
+  const hy = py + pose.headY;
   const [cx, cy] = fam.chest;
+  const lag = pose.frillLag;
   const neckW = family === 'drake' ? 1.25 : family === 'serpent' ? 0.85 : 1;
   const neck = new Path2D();
   if (family === 'crystal') {
@@ -1613,22 +1663,29 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   ctx.bezierCurveTo(hx - 4, hy + 20, cx + 24, cy + 12, cx + 16, cy + 24);
   ctx.fillStyle = c.belly;
   ctx.fill();
+  if (pose.swallow > 0 && pose.swallow < 1) swallowBulge(ctx, c, [hx + 10, hy + 13], [cx + 18, cy + 24], pose.swallow);
+  if (lag) lagAbout(ctx, hx - 10, hy + 4, lag);
   if (look.frill === 'mane') mane(ctx, c, hx, hy, st, true);
   if (look.frill === 'aurora') aurora(ctx, c, hx, hy, st, pose);
+  if (lag) ctx.restore();
 
   ctx.save();
   ctx.translate(hx, hy);
   ctx.rotate(pose.headTurn);
   ctx.scale(st.head, st.head);
   const h = headShape(look.head, HEAD_K);
-  // far-side parts
+  // far-side parts (frills trail a little behind head motion: follow-through)
+  const soft = look.frill === 'fin' || look.frill === 'plume' || look.frill === 'petal';
   if (look.frill === 'sunburst') sunburst(ctx, c, st, pose);
   drawHorns(ctx, look, c, st, true);
+  if (soft && lag) lagAbout(ctx, -2, -6, lag * 1.2);
   if (look.frill === 'fin') frill(ctx, c, -4, -8, 0.85, true);
   if (look.frill === 'plume') plumes(ctx, c, true);
   if (look.frill === 'petal') petals(ctx, c, st, true);
+  if (soft && lag) ctx.restore();
   headBase(ctx, c, pose, h, st);
   drawHorns(ctx, look, c, st, false);
+  if (soft && lag) lagAbout(ctx, 0, -6, lag);
   if (look.frill === 'fin') {
     frill(ctx, c, 0, -10, 1, false);
     ctx.beginPath();
@@ -1644,38 +1701,107 @@ function drawNeckHead(ctx: Ctx, family: Family, look: Look, c: Palette, st: Stag
   }
   if (look.frill === 'plume') plumes(ctx, c, false);
   if (look.frill === 'petal') petals(ctx, c, st, false);
+  if (soft && lag) ctx.restore();
   if (look.frill === 'whiskers') whiskers(ctx, c, h, st, pose);
-  if (look.frill === 'mane' || look.frill === 'aurora') mane(ctx, c, 0, 0, st, false);
+  if (look.frill === 'mane' || look.frill === 'aurora') {
+    if (lag) lagAbout(ctx, -4, 0, lag * 0.6);
+    mane(ctx, c, 0, 0, st, false);
+    if (lag) ctx.restore();
+  }
   if (look.fangs) fangs(ctx, h);
   if (DETAIL > 0) drawFace(ctx, family, c, h, st, pose);
   if (st === STAGE_RIG.elder) elderTrait(ctx, family, c, h, pose);
   ctx.restore();
 }
 
-function headBase(ctx: Ctx, c: Palette, pose: DragonPose, h: HeadShape, st: StageRig) {
-  if (pose.mouth > 0.02) {
-    ctx.save();
-    ctx.translate(8, 12);
-    ctx.rotate(0.35 * pose.mouth);
+/**
+ * Open jaw (feeding, roar): drawn over the head so the opening reads at any scale. The lower jaw
+ * hinges at the cheek; the mouth interior fills the gap between the lip line and the jaw.
+ */
+function drawJaw(ctx: Ctx, c: Palette, h: HeadShape, m: number) {
+  const ang = 0.5 * Math.min(1, m);
+  const cs = Math.cos(ang);
+  const sn = Math.sin(ang);
+  const px = 2;
+  const py = 10;
+  const rx = (x: number, y: number) => px + (x - px) * cs - (y - py) * sn;
+  const ry = (x: number, y: number) => py + (x - px) * sn + (y - py) * cs;
+  const tip = h.tipX - 3;
+  // interior
+  ctx.beginPath();
+  ctx.moveTo(px + 4, 10);
+  ctx.lineTo(h.tipX - 1, 8.5);
+  ctx.lineTo(rx(tip, 10), ry(tip, 10));
+  ctx.lineTo(rx(px + 4, 10), ry(px + 4, 10));
+  ctx.closePath();
+  ctx.fillStyle = '#6e1a26';
+  ctx.fill();
+  // tongue
+  ctx.beginPath();
+  ctx.ellipse(rx(tip * 0.62, 9), ry(tip * 0.62, 9) - 1.2, tip * 0.22, 2.4 * Math.min(1, m * 1.5), ang, 0, Math.PI * 2);
+  ctx.fillStyle = '#d65a6e';
+  ctx.fill();
+  // upper teeth hint
+  ctx.fillStyle = '#fffaf0';
+  for (const f of [0.55, 0.78]) {
+    const x = px + 4 + (h.tipX - px - 5) * f;
+    const y = 10 - 1.5 * f;
     ctx.beginPath();
-    ctx.moveTo(-2, -2);
-    ctx.quadraticCurveTo(h.tipX * 0.55, 8, h.tipX - 10, 0);
-    ctx.lineTo(h.tipX - 12, -4);
-    ctx.closePath();
-    ctx.fillStyle = c.shade;
-    ctx.fill();
-    ctx.strokeStyle = c.outline;
-    ctx.lineWidth = 2.4;
-    ctx.stroke();
-    ctx.restore();
-    ctx.beginPath();
-    ctx.moveTo(10, 10);
-    ctx.lineTo(h.tipX - 10, 8);
-    ctx.lineTo(h.tipX - 14, 12 + 10 * pose.mouth);
-    ctx.closePath();
-    ctx.fillStyle = '#7a1f2a';
+    ctx.moveTo(x - 1.6, y);
+    ctx.lineTo(x, y + 2.6);
+    ctx.lineTo(x + 1.6, y);
     ctx.fill();
   }
+  // lower jaw
+  ctx.beginPath();
+  ctx.moveTo(rx(px, 10), ry(px, 10));
+  ctx.lineTo(rx(tip, 10), ry(tip, 10));
+  ctx.quadraticCurveTo(rx(tip + 1, 13), ry(tip + 1, 13), rx(tip - 5, 15), ry(tip - 5, 15));
+  ctx.quadraticCurveTo(rx(tip * 0.5, 18), ry(tip * 0.5, 18), rx(px, 16), ry(px, 16));
+  ctx.closePath();
+  ctx.fillStyle = c.shade;
+  ctx.fill();
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(rx(px + 4, 15), ry(px + 4, 15));
+  ctx.quadraticCurveTo(rx(tip * 0.5, 16.5), ry(tip * 0.5, 16.5), rx(tip - 6, 14), ry(tip - 6, 14));
+  ctx.strokeStyle = c.belly;
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+}
+
+/** Saves the context and rotates by `a` about (x, y); the caller restores. */
+function lagAbout(ctx: Ctx, x: number, y: number, a: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+  ctx.translate(-x, -y);
+}
+
+/** Swallow: a small rounded bulge sliding down the throat line from `a` (jaw) to `b` (chest). */
+function swallowBulge(ctx: Ctx, c: Palette, a: Pt, b: Pt, u: number) {
+  const k = Math.sin(Math.PI * u);
+  const x = a[0] + (b[0] - a[0]) * u;
+  const y = a[1] + (b[1] - a[1]) * u;
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang);
+  ctx.beginPath();
+  ctx.ellipse(0, 1.5 * k, 7 * k + 1, 4.2 * k + 0.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = c.belly;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0, 1.5 * k, 7 * k + 1, 4.2 * k + 0.5, 0, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.strokeStyle = c.outline;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function headBase(ctx: Ctx, c: Palette, pose: DragonPose, h: HeadShape, st: StageRig) {
   const hg = ctx.createLinearGradient(0, -24, 0, 16);
   hg.addColorStop(0, c.body);
   hg.addColorStop(1, c.shade);
@@ -1699,6 +1825,7 @@ function headBase(ctx: Ctx, c: Palette, pose: DragonPose, h: HeadShape, st: Stag
   ctx.strokeStyle = c.outline;
   ctx.lineWidth = 2.2;
   ctx.stroke();
+  if (pose.mouth > 0.02) drawJaw(ctx, c, h, pose.mouth);
   ctx.beginPath();
   ctx.ellipse(h.tipX - 4, 0, 2.2, 1.4, -0.3, 0, Math.PI * 2);
   ctx.fillStyle = c.outline;
@@ -1746,16 +1873,9 @@ function drawEye(ctx: Ctx, c: Palette, pose: DragonPose, [ex, ey]: Pt, size: num
     ctx.stroke();
     return;
   }
-  if (pose.recoil > 0.35) {
-    ctx.beginPath();
-    ctx.moveTo(ex - 5, ey - 4);
-    ctx.lineTo(ex + 3, ey);
-    ctx.lineTo(ex - 5, ey + 4);
-    ctx.lineWidth = 2.6;
-    ctx.stroke();
-    return;
-  }
-  const open = 1 - pose.blink;
+  // wince / contentment: the lids narrow continuously (no swap to a different eye drawing)
+  const squint = Math.max(pose.squint, pose.recoil * 0.85);
+  const open = (1 - pose.blink) * (1 - 0.82 * squint);
   const shape = ART.eye;
   const sclera = eyePath(shape, size, open);
   ctx.save();
@@ -1852,8 +1972,8 @@ function drawEye(ctx: Ctx, c: Palette, pose: DragonPose, [ex, ey]: Pt, size: num
   // brow: lowered with focus; heavier for hooded and narrow eyes
   const focus = Math.max(pose.rush, pose.dash, pose.ability);
   ctx.beginPath();
-  ctx.moveTo(ex - 6, ey - 8 * size + 2 * focus);
-  ctx.quadraticCurveTo(ex + 1, ey - 12 * size + focus, ex + 8, ey - 8 * size + 3 * focus);
+  ctx.moveTo(ex - 6, ey - 8 * size + 2 * focus + 2.5 * squint);
+  ctx.quadraticCurveTo(ex + 1, ey - 12 * size + focus + 4 * squint, ex + 8, ey - 8 * size + 3 * focus + 1.5 * squint);
   ctx.strokeStyle = c.outline;
   ctx.lineWidth = shape === 'hooded' || shape === 'narrow' ? 3 : 2.4;
   ctx.stroke();
@@ -2166,7 +2286,7 @@ function whiskers(ctx: Ctx, c: Palette, h: HeadShape, st: StageRig, pose: Dragon
   ctx.strokeStyle = c.mark;
   ctx.lineWidth = 2;
   for (const k of [0, 1]) {
-    const w = Math.sin(pose.time * 2 + k) * 4;
+    const w = Math.sin(pose.time * 2 + k) * 4 + pose.frillLag * 22;
     ctx.beginPath();
     ctx.moveTo(h.tipX - 6, 4 + k * 4);
     ctx.bezierCurveTo(h.tipX + 4, 14 + k * 6 + w, h.tipX - len * 0.4, 20 + w, h.tipX - len, 26 + k * 8 + w);

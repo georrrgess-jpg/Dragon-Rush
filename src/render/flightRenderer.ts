@@ -104,8 +104,7 @@ export class FlightRenderer {
     this.glowVis = 0;
     this.abilityGlow = 0;
     this.look = { ...this.look, ...look };
-    this.anim = new DragonAnimator();
-    this.anim.setStage(this.look.stage);
+    this.anim = new DragonAnimator(false, Math.random(), { species: this.look.species, stage: this.look.stage });
     this.rockSprites.clear();
   }
 
@@ -309,7 +308,7 @@ export class FlightRenderer {
     this.flash = Math.max(0, this.flash - dt * 2.5);
     this.abilityGlow = Math.max(0, this.abilityGlow - dt * 1.5);
     this.glowVis = sim.rushActive ? Math.min(1, this.glowVis + dt * 4) : Math.max(0, this.glowVis - dt * 2);
-    this.anim.update(dt, { vy: sim.vy, maxVy: FLIGHT.maxVerticalSpeed, dashing: sim.dashActive, rush: sim.rushActive, perch: false });
+    this.anim.update(dt, { vy: sim.vy, maxVy: FLIGHT.maxVerticalSpeed, dashing: sim.dashActive, rush: sim.rushActive, perch: false, reducedMotion: this.reducedMotion });
 
     for (const p of this.particles) {
       p.life -= dt;
