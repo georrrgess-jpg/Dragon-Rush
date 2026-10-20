@@ -2674,11 +2674,25 @@ function buildStorm(): Scene {
 
 // --- public API -----------------------------------------------------------------------
 
+/**
+ * Built scenes, an LRU of at most two regions (one region's tiles are ~25 MB). An evicted
+ * scene is only dropped from the cache: Background instances that still hold it (a running
+ * flight, the Home weather) keep using it, and it is freed once they are gone.
+ */
+const SCENE_CACHE_MAX = 2;
 const scenes = new Map<RegionId, Scene>();
+
+/** Regions whose scenes are cached right now, least recently used first (tests, diagnostics). */
+export function cachedSceneRegions(): RegionId[] {
+  return [...scenes.keys()];
+}
 
 function scene(region: RegionId): Scene {
   let s = scenes.get(region);
-  if (!s) {
+  if (s) {
+    scenes.delete(region);
+    scenes.set(region, s);
+  } else {
     switch (region) {
       case 'canyon':
         s = buildCanyon();
@@ -2696,6 +2710,7 @@ function scene(region: RegionId): Scene {
         s = buildIsles();
     }
     scenes.set(region, s);
+    while (scenes.size > SCENE_CACHE_MAX) scenes.delete(scenes.keys().next().value as RegionId);
   }
   return s;
 }
@@ -2714,6 +2729,11 @@ export interface WeatherOptions {
   precipitation?: boolean;
   /** Draw the distant lightning flash (Stormspire). Default true. */
   flash?: boolean;
+  /**
+   * Blit the precipitation as device-scale copies of its tiles, 1:1 in device pixels, when the
+   * context is scaled (the unfiltered fast path instead of a per-frame resample). Default false.
+   */
+  deviceTiles?: boolean;
 }
 
 export class Background {
@@ -2751,7 +2771,11 @@ export class Background {
   drawWeather(ctx: Ctx, dist: number, time: number, opts: WeatherOptions = {}): void {
     const { layers, flash } = this.scene;
     const snap = snapper(ctx);
-    if (opts.precipitation !== false) for (const L of layers) if (L.fall) blitLayer(ctx, L, dist, time, snap, false);
+    if (opts.precipitation !== false)
+      for (const L of layers) {
+        if (!L.fall) continue;
+        if (!opts.deviceTiles || !blitFallDevice(ctx, L, dist, time)) blitLayer(ctx, L, dist, time, snap, false);
+      }
     if (flash && opts.flash !== false) drawFlash(ctx, flash, time);
   }
 
@@ -2798,6 +2822,47 @@ function blitLayer(ctx: Ctx, L: Layer, dist: number, t: number, snap: (v: number
     ctx.drawImage(c, -ox, L.y);
     if (tw - ox < W) ctx.drawImage(c, tw - ox, L.y);
   }
+}
+
+/** Device-scale copies of precipitation tiles (one per tile; dropped with the scene). */
+const deviceTileCache = new WeakMap<HTMLCanvasElement, { k: number; c: HTMLCanvasElement }>();
+
+/**
+ * A precipitation layer blitted 1:1 in device pixels from a tile pre-scaled to the context's
+ * scale. Returns false (nothing drawn) when the transform is unscaled or not a plain scale.
+ */
+function blitFallDevice(ctx: Ctx, L: Layer, dist: number, t: number): boolean {
+  const m = ctx.getTransform();
+  const k = m.a;
+  if (m.b || m.c || Math.abs(m.d - k) > 1e-6 || k <= 0 || Math.abs(k - 1) < 0.01) return false;
+  const src = L.canvas;
+  let hit = deviceTileCache.get(src);
+  if (!hit || hit.k !== k) {
+    const c = makeCanvas(src.width * k, src.height * k);
+    const g = c.getContext('2d')!;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, 0, 0, c.width, c.height);
+    if (hit) {
+      hit.c.width = 1;
+      hit.c.height = 1;
+    }
+    hit = { k, c };
+    deviceTileCache.set(src, hit);
+  }
+  const tile = hit.c;
+  const tw = tile.width;
+  const th = tile.height;
+  const ox = Math.round(mod((dist * L.factor + (L.drift ?? 0) * t) * k, tw));
+  const oy = Math.round(mod((L.fall ?? 0) * t * k, th));
+  const x0 = Math.round(m.e);
+  const y0 = Math.round(m.f);
+  const x1 = x0 + Math.ceil(W * k);
+  const y1 = y0 + Math.ceil(H * k);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let yy = y0 + oy - th; yy < y1; yy += th) for (let xx = x0 - ox; xx < x1; xx += tw) ctx.drawImage(tile, xx, yy);
+  ctx.restore();
+  return true;
 }
 
 function drawFlash(ctx: Ctx, f: Flash, t: number) {

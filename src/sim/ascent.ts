@@ -111,9 +111,9 @@ export function tierFor(m: number): number {
  * likely and calm air comes a little less often (every chunk is still proven and an intense
  * chunk is still always followed by calm air).
  */
-export function lateGrowth(tier: number): { intenseWeight: number; debtLimit: number } {
+export function lateGrowth(tier: number): { intenseWeight: number; debtLimit: number; shortCalm: boolean } {
   const k = Math.max(0, tier - 6);
-  return { intenseWeight: 1 + 0.4 * k, debtLimit: k >= 1 ? 5 : 4 };
+  return { intenseWeight: 1 + 0.4 * k, debtLimit: k >= 1 ? 5 : 4, shortCalm: k >= 1 };
 }
 
 /** Distance (m) at which each family is introduced (one at a time, each with a banner). */
@@ -652,7 +652,9 @@ export class AscentCourse {
     // 2. calm air after intense stretches
     if (this.debt >= growth.debtLimit || this.lastIntensity >= 3) {
       this.debt = 0;
-      this.append(CHUNK_BY_ID.get('recovery')!, this.rng.int(0, 2), false);
+      // late on, the calm air between hard stretches is shorter (variants 3-4, still ≥ 1 s)
+      const v = this.rng.int(0, 2);
+      this.append(CHUNK_BY_ID.get('recovery')!, growth.shortCalm ? 3 + (v % 2) : v, false);
       return;
     }
     // 3a. the first gale hawks: their own simple chunk and banner, after calm air
@@ -957,6 +959,8 @@ export class AscentSim {
 
   upgrades: Record<UpgradeId, number> = { mend: 0, spare: 0, shell: 0, reach: 0, quick: 0, grace: 0, battery: 0, blessing: 0, refresh: 0, breath: 0 };
   offers: UpgradeId[] = [];
+  /** Assist restored a ward at the shrine that is open now. */
+  shrineRestored = false;
   /** Total upgrades chosen this run (cheap change detection for the HUD). */
   upgradesTaken = 0;
   private upRng: Rng;
@@ -1190,7 +1194,8 @@ export class AscentSim {
       this.shrines.add(ch.index);
       this.keyDir = 0;
       // assist: every shrine restores one ward (before the offers, so Mend is offered only when useful)
-      if (this.assist && this.wards < this.maxWards) {
+      this.shrineRestored = this.assist && this.wards < this.maxWards;
+      if (this.shrineRestored) {
         this.wards += 1;
         this.events.push({ type: 'wardRestored', wards: this.wards });
       }

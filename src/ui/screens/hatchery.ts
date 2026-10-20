@@ -31,7 +31,7 @@ import { RARITY_ORDER, buildReel, cryptoRandom, markRevealed, nextOdds, openEggs
 import { DragonAnimator } from '../../render/dragonAnim';
 import { DEFAULT_POSE, drawDragon, type DragonPose } from '../../render/dragonArt';
 import { drawShellFragments, eggFracture } from '../../render/eggFracture';
-import { drawRarityFrame, drawRaritySymbol } from '../../render/rarityArt';
+import { drawRarityAura, drawRarityFrame, drawRaritySymbol } from '../../render/rarityArt';
 import { EGG_ART_REV, drawEgg, drawRarityPlaque, eggIcon, eggShellImage, eggStyle } from '../../render/eggs';
 import type { OpeningRecord } from '../../save';
 import { createRng } from '../../sim/rng';
@@ -76,6 +76,8 @@ const B_PITCH = 232;
 const B_PED_Y = 322;
 const B_EGG_H = 120;
 const B_PED_W = 150;
+/** A Legendary's pedestal grows to this width as it opens. */
+const B_PED_W_LEGEND = 178;
 const BATCH = { start: 0.25, gap: 0.36, wobble: 0.2, crack: 0.24, split: 0.36, hold: 0.35 };
 const BATCH_QUICK = { start: 0.1, gap: 0.22, wobble: 0.12, crack: 0.16, split: 0.3, hold: 0.2 };
 
@@ -122,6 +124,16 @@ function easeBack(x: number): number {
 
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
+const keysNeeded = (n: number, have: number) => `Needs ${n} key${n === 1 ? '' : 's'} (you have ${have})`;
+
+/**
+ * Attributes of an action that may be unavailable: it stays focusable (aria-disabled) and
+ * carries the reason as a tooltip (`data-tip`, on hover and keyboard focus) and description.
+ */
+function unavailable(ok: boolean, id: string, why: string): string {
+  return ok ? '' : `aria-disabled="true" aria-describedby="${id}" data-tip="${esc(why)}"`;
+}
+
 const iconUrls = new Map<string, string>();
 function eggIconUrl(id: SpeciesId, size: number): string {
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
@@ -154,6 +166,8 @@ const ELEMENT_RGB: Record<Elem, string> = {
 };
 /** Readable rarity tints on the dark stage (symbol + word are always shown too). */
 const RARITY_INK: Record<Rarity, string> = { common: '#c4d0dc', rare: '#7cc0ff', epic: '#cfa2ff', legendary: '#ffd25a' };
+/** How much light shows through an Open 5 egg's cracks, by rarity. */
+const CRACK_GLOW: Record<Rarity, number> = { common: 0.22, rare: 0.45, epic: 0.62, legendary: 0.85 };
 const RARITY_RGB: Record<Rarity, string> = { common: '196,208,220', rare: '110,180,255', epic: '190,140,255', legendary: '255,214,110' };
 
 /** Species expression on arrival (blended over the animator's pose). */
@@ -262,10 +276,35 @@ export class HatcheryScreen implements Screen {
     // Warm the reel's egg shells once so the reel never creates canvases while it runs.
     for (const id of SPECIES_IDS) eggShellImage(id, 0, this.cardEggPx);
     this.el.addEventListener('click', (e) => this.onClick(e));
+    window.addEventListener('keydown', this.onKey);
     bindGoal(this.el, ui);
     // Recovery: show any opening that was committed but never revealed (no charge, no award).
     const pending = unrevealed(ui.save);
     if (pending.length) this.begin(pending, true);
+  }
+
+  /** Escape in an Open 5 egg's details goes back to all of them (it never leaves the screen). */
+  private onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !this.el.isConnected) return;
+    if (this.phase !== 'result' || this.current.length < 2 || this.inspect === null) return;
+    if (document.querySelector('.modal, [role=dialog]:not([hidden])')) return;
+    e.preventDefault();
+    this.backToAll();
+  };
+
+  private backToAll() {
+    const i = this.inspect ?? 0;
+    this.inspect = null;
+    this.renderUi();
+    this.el.querySelector<HTMLButtonElement>(`[data-fk="bc-${i}"]`)?.focus({ preventScroll: true });
+  }
+
+  /** The stage was resized: a new backing store at the new stage scale; the opening carries on. */
+  resize(): void {
+    this.ctx = sizeCanvas(this.canvas, REEL_W, STAGE_H, this.ui.scale);
+    this.k = this.ctx.getTransform().a || 1;
+    this.grads.clear();
+    for (const id of SPECIES_IDS) eggShellImage(id, 0, this.cardEggPx);
   }
 
   private get reduced(): boolean {
@@ -284,6 +323,12 @@ export class HatcheryScreen implements Screen {
   private onClick(e: Event) {
     const b = (e.target as Element).closest<HTMLElement>('[data-a]');
     if (!b || (b as HTMLButtonElement).disabled) return;
+    if (b.getAttribute('aria-disabled') === 'true') {
+      // unavailable but focusable (so the reason is reachable): say why instead of acting
+      sfx.denied();
+      if (b.dataset.tip) this.ui.toast(`${b.dataset.tip}.`);
+      return;
+    }
     const a = b.dataset.a!;
     switch (a) {
       case 'open':
@@ -305,14 +350,10 @@ export class HatcheryScreen implements Screen {
         this.renderUi();
         this.el.querySelector<HTMLButtonElement>('[data-a=back]')?.focus({ preventScroll: true });
         return;
-      case 'back': {
+      case 'back':
         sfx.click();
-        const i = this.inspect ?? 0;
-        this.inspect = null;
-        this.renderUi();
-        this.el.querySelector<HTMLButtonElement>(`[data-fk="bc-${i}"]`)?.focus({ preventScroll: true });
+        this.backToAll();
         return;
-      }
       case 'done':
         sfx.click();
         this.finish(false);
@@ -375,6 +416,9 @@ export class HatcheryScreen implements Screen {
   }
 
   private begin(openings: OpeningRecord[], recovered: boolean) {
+    // Open 5 is shown from the most common to the rarest, so the best egg opens last (display
+    // order only: every record is already saved)
+    if (openings.length > 1) openings = [...openings].sort((a, b) => RARITIES[a.rarity].order - RARITIES[b.rarity].order);
     this.current = openings;
     this.t = 0;
     this.ht = 0;
@@ -391,7 +435,7 @@ export class HatcheryScreen implements Screen {
     // warm the caches the reveal uses (shell art, pedestal) before the first frame
     for (const o of openings) {
       eggShellImage(o.species, openings.length > 1 ? 1 : 2, (openings.length > 1 ? B_EGG_H : EGG_H) * this.k);
-      this.pedestal(SPECIES[o.species].element, openings.length > 1 ? B_PED_W : PED_W);
+      this.pedestal(SPECIES[o.species].element, openings.length > 1 ? (o.rarity === 'legendary' ? B_PED_W_LEGEND : B_PED_W) : PED_W);
       // the result card's egg picture (encoding it later would stall the reveal frame)
       eggIconUrl(o.species, openings.length > 1 ? 40 : 64);
     }
@@ -519,8 +563,9 @@ export class HatcheryScreen implements Screen {
         ui,
         `<div class="hatch-actions">
           <div class="keys">${icon('key')}<b>${s.wallet.keys}</b> Aether Key${s.wallet.keys === 1 ? '' : 's'}<div class="keybar">${bar(s.keyProgress, HATCHERY.secondsPerKey, 'teal')}<small>Next key: about ${fmtTime(keyLeft)} of active play</small></div></div>
-          <button class="btn gold big" data-a="open" data-fk="open" ${s.wallet.keys >= 1 ? '' : 'disabled'}>Open an egg (1 key)</button>
-          <button class="btn" data-a="open5" data-fk="open5" ${s.wallet.keys >= HATCHERY.batchSize ? '' : 'disabled'}>Open ${HATCHERY.batchSize}</button>
+          <button class="btn gold big" data-a="open" data-fk="open" ${unavailable(s.wallet.keys >= 1, 'why-open', keysNeeded(1, s.wallet.keys))}>Open an egg (1 key)</button>
+          <button class="btn" data-a="open5" data-fk="open5" ${unavailable(s.wallet.keys >= HATCHERY.batchSize, 'why-open5', keysNeeded(HATCHERY.batchSize, s.wallet.keys))}>Open ${HATCHERY.batchSize}</button>
+          ${s.wallet.keys >= 1 ? '' : `<span hidden id="why-open">${keysNeeded(1, s.wallet.keys)}</span>`}${s.wallet.keys >= HATCHERY.batchSize ? '' : `<span hidden id="why-open5">${keysNeeded(HATCHERY.batchSize, s.wallet.keys)}</span>`}
           <label class="hc-quick"><input type="checkbox" data-a="quick" data-fk="quick" ${this.quick ? 'checked' : ''}> Quick reveal</label>
         </div>`,
       );
@@ -584,7 +629,14 @@ export class HatcheryScreen implements Screen {
       const unowned = SPECIES_IDS.filter((id) => !s.dragons[id].owned).sort((a, b) => RARITIES[SPECIES[a].rarity].order - RARITIES[SPECIES[b].rarity].order);
       body = unowned.length
         ? `<p class="muted small">Work toward a favorite: unlock any dragon directly with Essence (${RARITY_ORDER.map((r) => `${RARITIES[r].name} ${HATCHERY.directPrice[r]}`).join(', ')}). You have ${s.wallet.essence} ${icon('essence', 'icon sm')}.</p>
-           <div class="catalog" data-scroll="cat">${unowned.map((id) => `<button class="cat-item r-${SPECIES[id].rarity}" data-a="buy" data-v="${id}" data-fk="buy-${id}" ${s.wallet.essence >= HATCHERY.directPrice[SPECIES[id].rarity] ? '' : 'disabled'}><img class="cat-egg" src="${eggIconUrl(id, 32)}" alt="" width="32" height="32"><b>${SPECIES[id].name}</b><span>${RARITIES[SPECIES[id].rarity].symbol} ${HATCHERY.directPrice[SPECIES[id].rarity]}</span></button>`).join('')}</div>`
+           <div class="catalog" data-scroll="cat">${unowned
+             .map((id) => {
+               const price = HATCHERY.directPrice[SPECIES[id].rarity];
+               const why = `Needs ${price} Essence (you have ${s.wallet.essence})`;
+               const ok = s.wallet.essence >= price;
+               return `<button class="cat-item r-${SPECIES[id].rarity}" data-a="buy" data-v="${id}" data-fk="buy-${id}" ${unavailable(ok, `why-buy-${id}`, why)}><img class="cat-egg" src="${eggIconUrl(id, 32)}" alt="" width="32" height="32"><b>${SPECIES[id].name}</b><span>${RARITIES[SPECIES[id].rarity].symbol} ${price}</span>${ok ? '' : `<span hidden id="why-buy-${id}">${why}</span>`}</button>`;
+             })
+             .join('')}</div>`
         : '<p>You own every species. Duplicates become Essence.</p>';
     }
     rerender(this.el.querySelector<HTMLElement>('.hatch-lower')!, `<div class="panel lower-panel"><div class="seg-tabs" role="tablist">${tabs}</div>${body}</div>`);
@@ -592,6 +644,7 @@ export class HatcheryScreen implements Screen {
 
   /** Leaving mid-animation: the result was already saved, so reveal it now (as a toast). */
   destroy(): void {
+    window.removeEventListener('keydown', this.onKey);
     if (this.phase === 'reel' || this.phase === 'hatch' || this.phase === 'batch') {
       this.holdWallet(false);
       this.ui.commit(markRevealed(this.ui.save, this.current.map((c) => c.tx)));
@@ -654,13 +707,15 @@ export class HatcheryScreen implements Screen {
     return c;
   }
 
-  private drawPedestalAt(ctx: Ctx, element: Elem, w: number, x: number, y: number, alpha = 1) {
+  /** Draws the cached w-wide pedestal, optionally shown at another width (`shownW`, a growing Legendary pedestal). */
+  private drawPedestalAt(ctx: Ctx, element: Elem, w: number, x: number, y: number, alpha = 1, shownW = w) {
     const c = this.pedestal(element, w);
-    const W = w + 40;
-    const H = w * 0.5 + 30;
+    const f = shownW / w;
+    const W = (w + 40) * f;
+    const H = (w * 0.5 + 30) * f;
     const a0 = ctx.globalAlpha;
     ctx.globalAlpha = a0 * alpha;
-    ctx.drawImage(c, x - W / 2, y - 18, W, H);
+    ctx.drawImage(c, x - W / 2, y - 18 * f, W, H);
     ctx.globalAlpha = a0;
   }
 
@@ -1896,24 +1951,42 @@ export class HatcheryScreen implements Screen {
 
   // --- Open 5 ---------------------------------------------------------------------------------------
 
+  /**
+   * Open 5 timeline of tile i: when it starts and how long its wobble and crack last. Eggs are
+   * shown from the most common to the rarest; the rarest (Epic or Legendary) opens last, after
+   * a short beat and with a slower, brighter crack.
+   */
+  private batchTiming(i: number): { t0: number; wobble: number; crack: number; split: number; hold: number } {
+    const B = this.quick ? BATCH_QUICK : BATCH;
+    const n = this.current.length;
+    const o = this.current[i];
+    const finale = i === n - 1 && n > 1 && (o.rarity === 'legendary' || o.rarity === 'epic');
+    const slow = !finale ? 1 : o.rarity === 'legendary' ? 1.7 : 1.3;
+    if (this.reduced) return { t0: B.start + i * 0.15 + (finale ? 0.2 : 0), wobble: 0, crack: 0.25, split: 0, hold: 0 };
+    return { t0: B.start + i * B.gap + (finale ? B.gap * 0.6 : 0), wobble: B.wobble * slow, crack: B.crack * slow, split: B.split, hold: B.hold * (finale ? 1.4 : 1) };
+  }
+
   private drawBatch(ctx: Ctx, dt: number) {
     const n = this.current.length;
     const reduced = this.reduced;
     this.ht += dt;
     const ht = this.ht;
     this.stepParticles(dt);
-    const B = this.quick ? BATCH_QUICK : BATCH;
-    const per = B.wobble + B.crack + B.split;
     const eggY = B_PED_Y - B_EGG_H / 2 + 4;
     this.drawStageGlow(ctx, 1);
     this.drawSpot(ctx, smooth(0, 0.4, ht));
+    let total = 0;
     for (let i = 0; i < n; i++) {
       const o = this.current[i];
       const sp = SPECIES[o.species];
       const x = CX + (i - (n - 1) / 2) * B_PITCH;
-      const t0 = B.start + i * (reduced ? 0.15 : B.gap);
-      const local = ht - t0;
+      const T = this.batchTiming(i);
+      total = Math.max(total, T.t0 + T.wobble + T.crack + T.split + T.hold);
+      const local = ht - T.t0;
       const dim = this.inspect !== null && this.inspect !== i ? 0.4 : 1;
+      const openAt = T.wobble + T.crack;
+      const opened = local >= openAt;
+      const ke = local - openAt;
       if (this.inspect === i) {
         ctx.fillStyle = 'rgba(255,226,122,0.12)';
         ctx.beginPath();
@@ -1922,33 +1995,45 @@ export class HatcheryScreen implements Screen {
       }
       ctx.save();
       ctx.globalAlpha = dim;
-      this.drawPedestalAt(ctx, sp.element, B_PED_W, x, B_PED_Y);
+      // lasting rarity treatment, from the moment the egg opens: a light behind the tile, a
+      // rim on the pedestal and (Legendary) a larger pedestal and the species' own motif
+      const tk = opened ? (reduced ? clamp01(ke / 0.25) : smooth(0, 0.5, ke)) : 0;
+      if (tk > 0) this.drawTileLight(ctx, o, x, tk * dim);
+      const pedW = o.rarity === 'legendary' && tk > 0 ? lerp(B_PED_W, B_PED_W_LEGEND, reduced ? 1 : easeBack(clamp01(ke / 0.45))) : B_PED_W;
+      this.drawPedestalAt(ctx, sp.element, o.rarity === 'legendary' ? B_PED_W_LEGEND : B_PED_W, x, B_PED_Y, 1, pedW);
+      if (tk > 0) this.drawTileRim(ctx, o, x, pedW, tk * dim);
       const anim = this.anims[i];
-      const opened = local >= (reduced ? 0.25 : B.wobble + B.crack);
+      const s = 0.82;
+      // the rarity aura (and Legendary motif) behind the hatchling, in miniature
+      if (tk > 0 && o.rarity !== 'common') {
+        ctx.globalAlpha = dim * tk;
+        drawRarityAura(ctx, o.species, x - 4 * s, B_PED_Y + 2 - FOOT * s, s, this.ht, reduced || this.low);
+        ctx.globalAlpha = dim;
+      }
       if (reduced) {
         const k = clamp01(local / 0.25);
         ctx.globalAlpha = dim * (1 - k);
         if (k < 1) drawEgg(ctx, o.species, x, eggY, B_EGG_H, { tier: 1, reducedMotion: true });
         ctx.globalAlpha = dim * k;
-        if (k > 0) this.drawHatchling(ctx, o, x, B_PED_Y + 2, 1, null, 0, 1, 1, 0, 0.82, EXPRESSION[o.species]);
+        if (k > 0) this.drawHatchling(ctx, o, x, B_PED_Y + 2, 1, null, 0, 1, 1, 0, s, EXPRESSION[o.species]);
       } else {
         anim?.update(dt, ANIM_IN);
         if (!opened) {
-          const kw = clamp01(local / B.wobble);
-          const kc = clamp01((local - B.wobble) / B.crack);
+          const kw = clamp01(local / T.wobble);
+          const kc = clamp01((local - T.wobble) / T.crack);
           const wob = kw > 0 && kw < 1 ? Math.sin(kw * Math.PI * 3) * 0.06 * Math.sin(kw * Math.PI) : 0;
-          drawEgg(ctx, o.species, x, eggY, B_EGG_H, { tier: 1, wobble: wob, crack: kc, glow: kc * 0.7 });
+          // the light through the cracks scales with rarity (a Common never outshines the rest)
+          drawEgg(ctx, o.species, x, eggY, B_EGG_H, { tier: 1, wobble: wob, crack: kc, glow: kc * CRACK_GLOW[o.rarity] });
         } else {
-          const kd = clamp01((local - B.wobble - B.crack) / B.split);
+          const kd = clamp01(ke / T.split);
           if (this.once(`b${i}`)) {
-            this.burst(o, x, eggY, 0.75);
+            this.burst(o, x, eggY, o.rarity === 'legendary' ? 1 : 0.75);
             anim?.celebrate(0.9);
             hatchSfx.batchPop(o.rarity, i);
-            if (o.rarity === 'legendary') this.spawn('mote', 10, x, eggY + 10, 50, 30, '#ffe7a0', 2.2, 1.4, 30);
+            if (o.rarity === 'legendary') this.spawn('mote', 14, x, eggY + 10, 60, 34, '#ffe7a0', 2.2, 1.6, 30);
           }
-          const ke = local - B.wobble - B.crack;
           const grow = ke < 0.35 ? 0.6 + 0.4 * easeOut(ke / 0.35) : 1;
-          // rarer eggs get a ring in their rarity colour as they open
+          // rarer eggs send out a ring in their rarity colour as they open
           if (o.rarity !== 'common' && !this.low && ke < 0.9) {
             const k = clamp01(ke / 0.9);
             ctx.save();
@@ -1961,7 +2046,7 @@ export class HatcheryScreen implements Screen {
             ctx.restore();
           }
           ctx.globalAlpha = dim * clamp01(ke / 0.12);
-          this.drawHatchling(ctx, o, x, B_PED_Y + 2, grow, anim ?? null, 0, 1, 1, 0, 0.82, EXPRESSION[o.species], smooth(0.2, 0.6, ke));
+          this.drawHatchling(ctx, o, x, B_PED_Y + 2, grow, anim ?? null, 0, 1, 1, 0, s, EXPRESSION[o.species], smooth(0.2, 0.6, ke));
           ctx.globalAlpha = dim;
           if (kd < 1) drawShellFragments(ctx, o.species, eggShellImage(o.species, 1, B_EGG_H * this.k), x, eggY, B_EGG_H, kd, { rim: eggStyle(o.species).rim, line: eggStyle(o.species).line, glow: null });
         }
@@ -1969,7 +2054,7 @@ export class HatcheryScreen implements Screen {
       ctx.restore();
       // labels once each egg has opened: status above, name and rarity below
       if (opened) {
-        const la = dim * smooth(0, 0.2, local - (reduced ? 0.25 : B.wobble + B.crack));
+        const la = dim * smooth(0, 0.2, ke);
         ctx.save();
         ctx.globalAlpha = la;
         ctx.font = "800 16px 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif";
@@ -1986,9 +2071,9 @@ export class HatcheryScreen implements Screen {
         ctx.lineWidth = 4;
         ctx.strokeStyle = 'rgba(6,16,28,0.7)';
         ctx.strokeText(sp.name, x, 386);
-        ctx.fillStyle = '#f4f8fb';
+        ctx.fillStyle = o.rarity === 'legendary' ? '#ffe7a0' : '#f4f8fb';
         ctx.fillText(sp.name, x, 386);
-        drawRarityPlaque(ctx, o.rarity, x, 416, 120);
+        drawRarityPlaque(ctx, o.rarity, x, 416, o.rarity === 'legendary' ? 136 : 120);
         ctx.restore();
       }
     }
@@ -2004,11 +2089,76 @@ export class HatcheryScreen implements Screen {
     ctx.fillStyle = '#f4f8fb';
     ctx.fillText(`${n} eggs`, CX, 52);
     ctx.restore();
-    const total = B.start + (n - 1) * (reduced ? 0.15 : B.gap) + (reduced ? 0.25 : per + B.hold);
     if (this.phase === 'batch' && ht > total) {
       this.phase = 'result';
       this.reveal();
     }
+  }
+
+  /** Lasting light behind a non-Common Open 5 tile: a soft column in the rarity colour (none on Low effects). */
+  private drawTileLight(ctx: Ctx, o: OpeningRecord, x: number, a: number) {
+    if (o.rarity === 'common' || this.low) return;
+    const strength = o.rarity === 'legendary' ? 1 : o.rarity === 'epic' ? 0.7 : 0.45;
+    const half = o.rarity === 'legendary' ? 92 : 74;
+    ctx.save();
+    ctx.globalAlpha = a * strength;
+    ctx.fillStyle = this.grad(`tilecol:${o.rarity}`, () => {
+      const g = ctx.createLinearGradient(0, 96, 0, B_PED_Y + 20);
+      g.addColorStop(0, `rgba(${RARITY_RGB[o.rarity]},0)`);
+      g.addColorStop(0.55, `rgba(${RARITY_RGB[o.rarity]},0.16)`);
+      g.addColorStop(1, `rgba(${RARITY_RGB[o.rarity]},0.3)`);
+      return g;
+    });
+    ctx.beginPath();
+    ctx.moveTo(x - half * 0.45, 96);
+    ctx.lineTo(x + half * 0.45, 96);
+    ctx.lineTo(x + half, B_PED_Y + 20);
+    ctx.lineTo(x - half, B_PED_Y + 20);
+    ctx.closePath();
+    ctx.fill();
+    // a floor pool under the pedestal
+    ctx.translate(x, B_PED_Y + 30);
+    ctx.scale(half * 1.25, 22);
+    ctx.fillStyle = this.grad(`tilepool:${o.rarity}`, () => {
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(${RARITY_RGB[o.rarity]},0.42)`);
+      g.addColorStop(1, `rgba(${RARITY_RGB[o.rarity]},0)`);
+      return g;
+    });
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** Rarity rim on the pedestal's top edge (Rare and up; Legendary a double gold rim). */
+  private drawTileRim(ctx: Ctx, o: OpeningRecord, x: number, pedW: number, a: number) {
+    if (o.rarity === 'common') return;
+    const rx = pedW / 2;
+    const ry = pedW * 0.13;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = RARITY_INK[o.rarity];
+    ctx.lineWidth = o.rarity === 'legendary' ? 3 : 2;
+    ctx.beginPath();
+    ctx.ellipse(x, B_PED_Y, rx + 2, ry + 1, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    if (o.rarity === 'legendary') {
+      ctx.globalAlpha = a * 0.6;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(x, B_PED_Y + pedW * 0.2, rx * 0.84 + 3, ry * 0.85 + 1, 0, 0, Math.PI);
+      ctx.stroke();
+      // four small gold studs around the rim
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#ffe7a0';
+      for (const ang of [0.15, 0.85, 2.29, 2.99]) {
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(ang) * (rx + 2), B_PED_Y + Math.sin(ang) * (ry + 1), 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 }
 

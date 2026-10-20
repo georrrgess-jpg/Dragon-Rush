@@ -537,7 +537,7 @@ export const ARENA_VICTORY_BONUS: Reward = { gold: 60, fruit: 20 };
 // ≈ 80 / 27), so Ascent pays like the other modes. Hard caps per qualified minute keep it there.
 // XP and key progress use the shared qualified-time rules below. Score and upgrades never touch
 // currency. A run counts toward `ascent.runs` (and the first-run milestone) only once it reached
-// `minRunMetres`: starting and leaving at once pays nothing extra. (Bests only ever rise.)
+// `minRunMetres` (bests too): starting and leaving at once pays nothing extra.
 export const ASCENT_REWARDS = { goldPerMinute: 100, fruitPerMinute: 45, minRunMetres: 100 } as const;
 
 /** Applies the per-qualified-minute caps to a cumulative Ascent report (idempotent). */
@@ -757,9 +757,12 @@ export function settleRun(save: SaveData, runId: string, report: RunReport, opts
     const dist = Math.max(0, Math.floor(a.distance));
     // counted once: the first settlement that reaches minRunMetres (every shrine is beyond it, so a
     // checkpoint always counts and the final settlement after one never counts again)
-    if (!marker.banked && dist >= ASCENT_REWARDS.minRunMetres) rec.runs += 1;
+    const counts = dist >= ASCENT_REWARDS.minRunMetres;
+    if (!marker.banked && counts) rec.runs += 1;
     const score = Math.max(0, Math.floor(a.score));
-    if (a.assist) {
+    if (!counts) {
+      // too short to be a run: no record either
+    } else if (a.assist) {
       if (dist > rec.bestAssist) {
         rec.bestAssist = dist;
         newBest = true;

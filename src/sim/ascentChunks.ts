@@ -307,8 +307,12 @@ export const CHUNKS: ChunkDef[] = [
     maxTier: 99,
     intensity: 0,
     weight: 0,
-    variants: 3,
-    build: (v) => new B(760).arc(150, MID + off(v, [0, -140, 140]), 620, MID + off(v, [-80, 0, 60]), off(v, [-40, 30, -20]), 5).done(),
+    // variants 0-2: the usual calm stretch; 3-4: the shorter calm used after 8 km
+    variants: 5,
+    build: (v) =>
+      v < 3
+        ? new B(760).arc(150, MID + off(v, [0, -140, 140]), 620, MID + off(v, [-80, 0, 60]), off(v, [-40, 30, -20]), 5).done()
+        : new B(560).arc(120, MID + (v === 3 ? -100 : 100), 440, MID, v === 3 ? -30 : 30, 4).done(),
   },
   {
     id: 'rest',

@@ -15,7 +15,14 @@
 // rays, a backlight behind the dragon and foreground framing (all baked into the surface); a
 // live layer of drifting cloud bands (cached sprites), motes and distant birds; the rarity
 // aura behind the dragon; and a calm crossfade between two reused surfaces when the region
-// changes (also across Home visits). Reduced motion / Low effects keep it still.
+// changes (also across Home visits). Reduced motion / Low effects keep it still (the cloud
+// bands are then baked into the surface).
+//
+// Cost: every cached layer is built at the destination's device scale and blitted 1:1. Home
+// draws with drawLayered() onto two stacked canvases: an opaque back canvas (layers 1–2 plus
+// the banner, back of the perch, contact shadow and aura), redrawn only when it changes — or
+// for the live layer every frame on small stages and at 30 Hz above a 1.25 device scale — and
+// a transparent front canvas with the dragon (redrawn only on change under reduced motion).
 import type { Stage } from '../content/progression';
 import { SPECIES } from '../content/species';
 import type { Family, RegionId, SpeciesId } from '../content/types';
@@ -47,8 +54,9 @@ export interface HeroState {
   /** Extra zoom for small views. */
   zoom?: number;
   /**
-   * 'low' renders the cached backdrop at 1× and drops the live weather overlay. Defaults to
-   * the App's Low effects setting (the `low-effects` body class).
+   * 'low' keeps the backdrop still (no live clouds, motes, birds or weather; banner and perch
+   * glints frozen) — the cached scene is still built at device scale, so its blit stays 1:1.
+   * Defaults to the App's Low effects setting (the `low-effects` body class).
    */
   quality?: 'high' | 'low';
   /**
@@ -87,6 +95,43 @@ const LEDGE_LIP = 42;
 
 /** Seconds of the calm backdrop crossfade when the region changes. */
 const REGION_FADE = 0.9;
+/** Above this device scale the live backdrop layer of drawLayered() updates at 30 Hz. */
+const LIVE_FULL_RATE_MAX_SCALE = 1.25;
+
+/** Per-frame layout shared by the back and front passes. */
+interface Frame {
+  quality: 'high' | 'low';
+  /** Reduced motion or Low effects: no time-driven backdrop motion. */
+  still: boolean;
+  /** Device px per view px of the destination (backing scale of the cached layers). */
+  k: number;
+  base: number;
+  scale: number;
+  pu: number;
+  cx: number;
+  baseY: number;
+  st: number;
+  foot: number;
+  hopK: number;
+  ox: number;
+  oy: number;
+  serpent: boolean;
+}
+
+/**
+ * Draws a layer rendered at backing scale `k` over the view: 1:1 in device pixels when the
+ * destination transform is that scale (the unfiltered fast path), otherwise scaled.
+ */
+function blitSurface(ctx: Ctx, c: HTMLCanvasElement, w: number, h: number, k: number) {
+  const m = ctx.getTransform();
+  if (!m.b && !m.c && Math.abs(m.a - k) < 1e-6 && Math.abs(m.d - k) < 1e-6) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(c, Math.round(m.e), Math.round(m.f));
+    ctx.restore();
+  } else ctx.drawImage(c, 0, 0, w, h);
+}
+
 /** Region the last Home overlook showed, so the next one can fade in from it. */
 let lastOverlookRegion: RegionId | null = null;
 
@@ -134,6 +179,10 @@ export class HeroView {
   private fadeT = -1;
   private weather: Background | null = null;
   private weatherRegion: RegionId | null = null;
+  /** drawLayered(): what the back / front canvases currently show, and when the back was drawn. */
+  private backSig = '';
+  private frontSig = '';
+  private backT = -1;
 
   constructor(
     readonly w: number,
@@ -273,48 +322,105 @@ export class HeroView {
     return p;
   }
 
+  /** Single-canvas draw (inspector, results): everything, every call. */
   draw(ctx: Ctx, s: HeroState): void {
-    const { w, h } = this;
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, this.w, this.h);
+    const F = this.frame(ctx, s);
+    this.drawBack(ctx, s, F);
+    this.drawFront(ctx, s, F, this.pose(s));
+  }
+
+  /**
+   * Home: two stacked canvases. `back` (opaque) holds the backdrop and everything behind the
+   * dragon (banner, back of the perch, contact shadow, aura); it is redrawn only when one of
+   * its inputs changes, or for the live layer (clouds, motes, weather, banner sway) every
+   * frame on small stages and at 30 Hz on large ones (device scale > 1.25). `front`
+   * (transparent) holds the dragon, the front of the perch and the feeding feedback; under
+   * reduced motion it is redrawn only when the pose or a transient effect changes, so a still
+   * Home costs nothing per frame.
+   */
+  drawLayered(back: Ctx, front: Ctx, s: HeroState): void {
+    const F = this.frame(back, s);
+    const sig = this.backSignature(s, F);
+    const due = !F.still && (F.k <= LIVE_FULL_RATE_MAX_SCALE || this.t - this.backT >= 1 / 30 - 0.002);
+    if (due || sig !== this.backSig) {
+      if (!s.backdrop) back.clearRect(0, 0, this.w, this.h);
+      this.drawBack(back, s, F);
+      this.backSig = sig;
+      this.backT = this.t;
+    }
+    const pose = this.pose(s);
+    const fsig = s.reducedMotion ? this.frontSignature(s, F, pose) : '';
+    if (!s.reducedMotion || fsig !== this.frontSig) {
+      front.clearRect(0, 0, this.w, this.h);
+      this.drawFront(front, s, F, pose);
+      this.frontSig = fsig;
+    }
+  }
+
+  /** Forces the next drawLayered() to repaint both layers (after a resize cleared the canvases). */
+  invalidate(): void {
+    this.backSig = '\0';
+    this.frontSig = '\0';
+  }
+
+  private backSignature(s: HeroState, F: Frame): string {
+    return `${s.region}|${F.k}|${F.quality}|${F.still ? 1 : 0}|${s.backdrop ? 1 : 0}|${s.perch}|${s.banner}|${s.species}|${s.stage}|${F.scale.toFixed(4)}|${F.cx.toFixed(1)}|${F.hopK.toFixed(3)}|${this.glowT > 0 ? this.glowT.toFixed(3) : 0}|${this.fadeT >= 0 ? this.fadeT.toFixed(3) : -1}|${s.overlook ? 1 : 0}|${s.aura ? 1 : 0}`;
+  }
+
+  private frontSignature(s: HeroState, F: Frame, pose: DragonPose): string {
+    let p = '';
+    for (const v of Object.values(pose)) p += typeof v === 'number' ? `${v.toFixed(3)},` : `${v},`;
+    return `${p}|${F.k}|${F.scale.toFixed(4)}|${F.ox.toFixed(1)}|${F.oy.toFixed(1)}|${s.species}|${s.stage}|${s.marking}|${s.perch}|${this.evo ? this.evo.t.toFixed(3) : -1}|${this.heartT > 0 ? this.heartT.toFixed(3) : 0}|${this.feedT.toFixed(3)}`;
+  }
+
+  /** Per-frame layout shared by the back and front passes. */
+  private frame(ctx: Ctx, s: HeroState): Frame {
     const quality = s.quality ?? (bodyFlag('low-effects') ? 'low' : 'high');
     const still = s.reducedMotion || quality === 'low';
     const { base, scale, pu, cx, baseY } = this.layout(s);
-    if (s.backdrop) {
-      // backing resolution follows the destination's device scale, so the per-frame blit is
-      // 1:1 (the unfiltered fast path) instead of a resample
-      const m = ctx.getTransform();
-      const dev = Math.min(2, Math.max(0.5, Math.hypot(m.a, m.b) || 1));
-      const k = quality === 'low' ? Math.min(1, dev) : dev;
-      if (s.overlook && !this.surface && lastOverlookRegion && lastOverlookRegion !== s.region && !s.reducedMotion) {
-        // a new Home opens after the region changed elsewhere: fade in from the last one shown
-        this.sceneSurface({ ...s, region: lastOverlookRegion }, quality, k, still, cx, baseY, pu);
-      }
-      if (s.overlook) lastOverlookRegion = s.region;
-      const surf = this.sceneSurface(s, quality, k, still, cx, baseY, pu);
-      if (this.prevSurface && this.fadeT >= 0) {
-        const f = Math.min(1, this.fadeT / REGION_FADE);
-        ctx.drawImage(this.prevSurface, 0, 0, w, h);
-        ctx.globalAlpha = f * f * (3 - 2 * f);
-        ctx.drawImage(surf, 0, 0, w, h);
-        ctx.globalAlpha = 1;
-      } else ctx.drawImage(surf, 0, 0, w, h);
-      if (s.overlook) drawOverlookLive(ctx, s.region, w, h, k, still ? 0 : this.t, still);
-      if (!still) this.drawWeather(ctx, s.region);
-    }
-    this.drawBanner(ctx, s.banner, w * 0.12, h * 0.08, base / REF_SCALE, s.reducedMotion);
-    if (!s.backdrop) groundShadow(ctx, s.perch, cx, baseY, pu);
-    drawPerch(ctx, s.perch, cx, baseY, pu, false, s.reducedMotion ? -1 : this.t);
-
+    // backing resolution of cached layers follows the destination's device scale in every
+    // quality, so the per-frame blits are 1:1 (the unfiltered fast path), never a resample
+    const m = ctx.getTransform();
+    const k = Math.min(2.5, Math.max(0.5, Math.hypot(m.a, m.b) || 1));
     const sp = SPECIES[s.species];
     const st = stageScale(s.stage);
     const foot = PERCH_FOOT_Y + (FOOT_ADJUST[sp.family] ?? 0);
     const hopK = !s.reducedMotion && this.feedT >= 0 && this.feedT < 0.6 ? Math.sin((Math.PI * this.feedT) / 0.6) : 0;
     const ox = cx - 10 * scale;
     const oy = baseY - foot * scale * st - hopK * 18 * pu;
+    return { quality, still, k, base, scale, pu, cx, baseY, st, foot, hopK, ox, oy, serpent: sp.family === 'serpent' };
+  }
+
+  /** Backdrop and everything behind the dragon. */
+  private drawBack(ctx: Ctx, s: HeroState, F: Frame): void {
+    const { w, h } = this;
+    const { still, k, scale, pu, cx, baseY, st, hopK, ox, oy } = F;
+    if (s.backdrop) {
+      if (s.overlook && !this.surface && lastOverlookRegion && lastOverlookRegion !== s.region && !s.reducedMotion) {
+        // a new Home opens after the region changed elsewhere: fade in from the last one shown
+        this.sceneSurface({ ...s, region: lastOverlookRegion }, F);
+      }
+      if (s.overlook) lastOverlookRegion = s.region;
+      const surf = this.sceneSurface(s, F);
+      if (this.prevSurface && this.fadeT >= 0) {
+        const f = Math.min(1, this.fadeT / REGION_FADE);
+        blitSurface(ctx, this.prevSurface, w, h, k);
+        ctx.globalAlpha = f * f * (3 - 2 * f);
+        blitSurface(ctx, surf, w, h, k);
+        ctx.globalAlpha = 1;
+      } else blitSurface(ctx, surf, w, h, k);
+      // still modes have the (motionless) cloud bands baked into the surface
+      if (s.overlook && !still) drawOverlookLive(ctx, s.region, w, h, k, this.t);
+      if (!still) this.drawWeather(ctx, s.region);
+    }
+    this.drawBanner(ctx, s.banner, w * 0.12, h * 0.08, F.base / REF_SCALE, still);
+    if (!s.backdrop) groundShadow(ctx, s.perch, cx, baseY, pu);
+    drawPerch(ctx, s.perch, cx, baseY, pu, false, still ? -1 : this.t);
 
     // contact shadow: fixed on the contact line, it only shrinks a little during the hop
     const shx = ox - 12 * scale * st;
-    const srx = (sp.family === 'serpent' ? 92 : 68) * scale * st * (1 - 0.25 * hopK);
+    const srx = (F.serpent ? 92 : 68) * scale * st * (1 - 0.25 * hopK);
     const sry = 10 * scale * st * (1 - 0.25 * hopK);
     const sg = ctx.createRadialGradient(shx, baseY, 0, shx, baseY, srx);
     sg.addColorStop(0, `rgba(28,18,12,${0.34 * (1 - 0.4 * hopK)})`);
@@ -345,8 +451,12 @@ export class HeroView {
 
     // Epic / Legendary menu aura behind the dragon (rarity art module; Home only)
     if (s.overlook || s.aura) drawRarityAura(ctx, s.species, ox, oy, scale, this.t, still);
+  }
 
-    const pose = this.pose(s);
+  /** The dragon, the front of the perch and the feeding feedback. */
+  private drawFront(ctx: Ctx, s: HeroState, F: Frame, pose: DragonPose): void {
+    const { w, h } = this;
+    const { scale, pu, cx, baseY, st, foot, hopK, ox, oy } = F;
     if (this.evo) {
       // evolution in place: the old form fades out as the new one gathers in, with a soft light
       const k = Math.min(1, this.evo.t / (s.reducedMotion ? 0.6 : 1.1));
@@ -369,7 +479,7 @@ export class HeroView {
       drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
       ctx.restore();
     } else drawDragon(ctx, s.species, ox, oy, scale, pose, { stage: s.stage, marking: s.marking });
-    drawPerch(ctx, s.perch, cx, baseY, pu, true, s.reducedMotion ? -1 : this.t);
+    drawPerch(ctx, s.perch, cx, baseY, pu, true, F.still ? -1 : this.t);
 
     // aim the fruit at where the jaw actually is in this pose
     const [mx, my] = mouthPoint(s.species, s.stage, pose);
@@ -401,8 +511,9 @@ export class HeroView {
   }
 
   /** The cached static scene; rebuilt only when one of its inputs changes. */
-  private sceneSurface(s: HeroState, quality: 'high' | 'low', k: number, still: boolean, cx: number, baseY: number, pu: number): HTMLCanvasElement {
+  private sceneSurface(s: HeroState, F: Frame): HTMLCanvasElement {
     const { w, h } = this;
+    const { quality, k, still, cx, baseY, pu } = F;
     const key = `${s.region}|${w}x${h}|${quality}|${k.toFixed(3)}|${still ? 1 : 0}|${s.perch}|${cx.toFixed(1)}|${baseY.toFixed(1)}|${pu.toFixed(4)}|${s.overlook ? s.stage : '-'}`;
     const bw = Math.max(1, Math.ceil(w * k));
     const bh = Math.max(1, Math.ceil(h * k));
@@ -422,7 +533,8 @@ export class HeroView {
       c.width = bw;
       c.height = bh;
     }
-    const g = c.getContext('2d')!;
+    // opaque: the painting covers every pixel, and opaque blits are plain copies
+    const g = c.getContext('2d', { alpha: false })!;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, bw, bh);
     g.imageSmoothingQuality = 'high';
@@ -438,6 +550,7 @@ export class HeroView {
     drawLedge(g, s.region, cx, baseY, pu, w, h);
     groundShadow(g, s.perch, cx, baseY, pu);
     if (s.overlook) overlookForeground(g, s.region, w, h);
+    if (s.overlook && still) drawOverlookLive(g, s.region, w, h, k, 0);
     this.surfaceKey = key;
     this.surfaceRegion = s.region;
     return c;
@@ -461,13 +574,13 @@ export class HeroView {
     }
     const bg = this.weather!;
     if (!bg.hasWeather) return;
-    // Precipitation is a uniform wrapping texture, so it is drawn unscaled (fast 1:1 blits)
-    // rather than through the painting's cover transform.
+    // Precipitation is a uniform wrapping texture, so it is drawn unscaled (1:1 device-pixel
+    // blits of device-scale tiles) rather than through the painting's cover transform.
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, this.w, this.h);
     ctx.clip();
-    bg.drawWeather(ctx, 1460, this.t);
+    bg.drawWeather(ctx, 1460, this.t, { deviceTiles: true });
     ctx.restore();
   }
 
@@ -2314,15 +2427,22 @@ function stormFrame(g: Ctx, rng: Rng, h: number) {
   grass(g, rng, 140, 260, h + 4, 70, ['#2c2650', '#3a3466']);
 }
 
-// Live layer: cloud bands are cached sprites (per region and device scale, bounded), drawn
-// at whole-device-pixel offsets; motes and birds are a few small shapes.
+// Live layer: cloud bands are cached sprites (per region and device scale; an LRU that keeps
+// at most two regions' bands, released on eviction), blitted 1:1 at whole device pixels;
+// motes and birds are a few small shapes.
 const cloudSprites = new Map<string, HTMLCanvasElement>();
 const CLOUD_W = 1400;
+/** Two kinds of band × two regions. */
+const CLOUD_CACHE_MAX = 4;
 
 function cloudBand(region: RegionId, kind: 'far' | 'mist', k: number): HTMLCanvasElement {
   const key = `${region}:${kind}:${k.toFixed(3)}`;
   let c = cloudSprites.get(key);
-  if (c) return c;
+  if (c) {
+    cloudSprites.delete(key);
+    cloudSprites.set(key, c);
+    return c;
+  }
   const m = MOODS[region];
   const bh = kind === 'far' ? 170 : 130;
   c = document.createElement('canvas');
@@ -2354,24 +2474,49 @@ function cloudBand(region: RegionId, kind: 'far' | 'mist', k: number): HTMLCanva
     }
   }
   cloudSprites.set(key, c);
-  while (cloudSprites.size > 12) cloudSprites.delete(cloudSprites.keys().next().value!);
+  while (cloudSprites.size > CLOUD_CACHE_MAX) {
+    const old = cloudSprites.keys().next().value!;
+    const oc = cloudSprites.get(old)!;
+    cloudSprites.delete(old);
+    // release the backing store now (nothing keeps a band beyond the frame that drew it)
+    oc.width = 1;
+    oc.height = 1;
+  }
   return c;
 }
 
-function drawBand(ctx: Ctx, c: HTMLCanvasElement, y: number, bh: number, off: number, w: number) {
-  const m = ctx.getTransform();
-  const px = Math.abs(m.a) || 1;
-  const o = Math.round((((off % CLOUD_W) + CLOUD_W) % CLOUD_W) * px) / px;
-  for (let x = -o; x < w; x += CLOUD_W) ctx.drawImage(c, x, y, CLOUD_W, bh);
+/** Number of cached cloud band sprites (tests). */
+export function cloudSpriteCount(): number {
+  return cloudSprites.size;
 }
 
-/** Live overlook layer; `t` is 0 and `still` true under reduced motion or low effects. */
-function drawOverlookLive(ctx: Ctx, region: RegionId, w: number, h: number, k: number, t: number, still: boolean) {
+function drawBand(ctx: Ctx, c: HTMLCanvasElement, y: number, bh: number, off: number, w: number, k: number) {
+  const m = ctx.getTransform();
+  if (m.b || m.c || Math.abs(m.a - k) > 1e-6 || Math.abs(m.d - k) > 1e-6) {
+    const px = Math.abs(m.a) || 1;
+    const o = Math.round((((off % CLOUD_W) + CLOUD_W) % CLOUD_W) * px) / px;
+    for (let x = -o; x < w; x += CLOUD_W) ctx.drawImage(c, x, y, CLOUD_W, bh);
+    return;
+  }
+  // 1:1 in device pixels; the sprite's own width is the wrap period
+  const sw = c.width;
+  const o = Math.round((((off * k) % sw) + sw) % sw);
+  const dy = Math.round(m.f + y * k);
+  const x0 = Math.round(m.e);
+  const x1 = x0 + Math.ceil(w * k);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let x = x0 - o; x < x1; x += sw) ctx.drawImage(c, x, dy);
+  ctx.restore();
+}
+
+/** Overlook live layer. `t` = 0 draws the still cloud bands only (baked into the surface in still modes). */
+function drawOverlookLive(ctx: Ctx, region: RegionId, w: number, h: number, k: number, t: number) {
   const m = MOODS[region];
   const s = h / 660;
-  drawBand(ctx, cloudBand(region, 'far', k), h * 0.1, 170, 260 + t * 7, w);
-  drawBand(ctx, cloudBand(region, 'mist', k), h - 120 * s, 130, 600 + t * 16, w);
-  if (still) return;
+  drawBand(ctx, cloudBand(region, 'far', k), h * 0.1, 170, 260 + t * 7, w, k);
+  drawBand(ctx, cloudBand(region, 'mist', k), h - 120 * s, 130, 600 + t * 16, w, k);
+  if (t === 0) return;
   // motes drifting through the light: pollen, embers, sea spray, ice glints or storm sparks
   const n = 16;
   for (let i = 0; i < n; i++) {

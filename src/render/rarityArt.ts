@@ -449,6 +449,24 @@ export function drawLegendaryEmblem(ctx: Ctx, id: SpeciesId, x: number, y: numbe
 // --- auras --------------------------------------------------------------------------------------
 
 /** Soft disc layer behind the dragon (cached per species/size/device scale). */
+/** Solpyre's sun rays around (cx, cy), turned by `rot`. */
+function sunRays(ctx: Ctx, cx: number, cy: number, R: number, rot: number) {
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 + rot;
+    const len = R * (i % 2 ? 0.72 : 0.98);
+    const rg = ctx.createLinearGradient(cx, cy, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+    rg.addColorStop(0, 'rgba(255,236,170,0.5)');
+    rg.addColorStop(1, 'rgba(255,214,120,0)');
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a - 0.06) * R * 0.25, cy + Math.sin(a - 0.06) * R * 0.25);
+    ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+    ctx.lineTo(cx + Math.cos(a + 0.06) * R * 0.25, cy + Math.sin(a + 0.06) * R * 0.25);
+    ctx.closePath();
+    ctx.fillStyle = rg;
+    ctx.fill();
+  }
+}
+
 function auraBase(ctx: Ctx, id: SpeciesId, R: number): HTMLCanvasElement {
   const ds = devScale(ctx);
   const size = Math.ceil(R * 2.2);
@@ -472,23 +490,6 @@ function auraBase(ctx: Ctx, id: SpeciesId, R: number): HTMLCanvasElement {
     }
     c.fillStyle = g;
     c.fillRect(0, 0, size, size);
-    if (id === 'solpyre') {
-      // long sun rays (static layer; rotated as a whole while drawing)
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        const len = R * (i % 2 ? 0.72 : 0.98);
-        const rg = c.createLinearGradient(cx, cx, cx + Math.cos(a) * len, cx + Math.sin(a) * len);
-        rg.addColorStop(0, 'rgba(255,236,170,0.5)');
-        rg.addColorStop(1, 'rgba(255,214,120,0)');
-        c.beginPath();
-        c.moveTo(cx + Math.cos(a - 0.06) * R * 0.25, cx + Math.sin(a - 0.06) * R * 0.25);
-        c.lineTo(cx + Math.cos(a) * len, cx + Math.sin(a) * len);
-        c.lineTo(cx + Math.cos(a + 0.06) * R * 0.25, cx + Math.sin(a + 0.06) * R * 0.25);
-        c.closePath();
-        c.fillStyle = rg;
-        c.fill();
-      }
-    }
   });
 }
 
@@ -521,11 +522,18 @@ export function drawRarityAura(ctx: Ctx, id: SpeciesId, x: number, y: number, sc
   }
   const R = (rar === 'legendary' ? 150 : 120) * scale;
   const base = auraBase(ctx, id, R);
-  const S = R * 2.2;
+  const ds = devScale(ctx);
+  const S = base.width / ds;
   ctx.globalAlpha = reduced ? 0.75 : 1;
-  ctx.translate(x, y - 10 * scale);
-  if (id === 'solpyre') ctx.rotate(t * 0.06);
-  ctx.drawImage(base, -S / 2, -S / 2, S, S);
+  const m = ctx.getTransform();
+  if (!m.b && !m.c && Math.abs(m.a - ds) < 1e-6 && Math.abs(m.d - ds) < 1e-6) {
+    // 1:1 in device pixels (the unfiltered fast path; the glow is rotation-symmetric)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(base, Math.round(m.a * (x - S / 2) + m.e), Math.round(m.d * (y - 10 * scale - S / 2) + m.f));
+    ctx.setTransform(m);
+  } else ctx.drawImage(base, x - S / 2, y - 10 * scale - S / 2, S, S);
+  // Solpyre's long sun rays turn slowly: drawn as shapes (cheap) instead of rotating a bitmap
+  if (id === 'solpyre') sunRays(ctx, x, y - 10 * scale, R, t * 0.06);
   ctx.restore();
   ctx.save();
   ctx.lineCap = 'round';

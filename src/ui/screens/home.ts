@@ -43,6 +43,9 @@ const glyph = (k: keyof typeof GLYPH, cls = 'g') => `<svg class="${cls}" viewBox
 export class HomeScreen implements Screen {
   el: HTMLElement;
   private hero = new HeroView(VIEW_W, VIEW_H);
+  /** Opaque backdrop layer (redrawn only when it changes, or for the live layer) and the dragon layer above it. */
+  private backCanvas: HTMLCanvasElement;
+  private backCtx: CanvasRenderingContext2D;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private ui0: HTMLElement;
@@ -56,14 +59,20 @@ export class HomeScreen implements Screen {
 
   constructor(private ui: UI) {
     this.el = el(`<section class="screen home3" aria-label="Home">
+      <canvas class="ov-canvas ov-back" aria-hidden="true"></canvas>
       <canvas class="ov-canvas" aria-hidden="true"></canvas>
       <div class="ov-ui"></div>
       <button class="hero-hit" data-a="hello" data-fk="hello"><span class="hello-tip" aria-hidden="true">Say hello</span></button>
       <div class="hero-bubble" role="status" aria-live="polite"></div>
     </section>`);
-    this.canvas = this.el.querySelector('canvas')!;
-    this.canvas.style.width = `${VIEW_W}px`;
-    this.canvas.style.height = `${VIEW_H}px`;
+    [this.backCanvas, this.canvas] = Array.from(this.el.querySelectorAll('canvas'));
+    for (const c of [this.backCanvas, this.canvas]) {
+      c.style.width = `${VIEW_W}px`;
+      c.style.height = `${VIEW_H}px`;
+    }
+    // the backdrop covers every pixel: an opaque canvas composites and blits as a plain copy
+    this.backCanvas.getContext('2d', { alpha: false });
+    this.backCtx = sizeCanvas(this.backCanvas, VIEW_W, VIEW_H, ui.scale);
     this.ctx = sizeCanvas(this.canvas, VIEW_W, VIEW_H, ui.scale);
     this.ui0 = this.el.querySelector('.ov-ui')!;
     this.hit = this.el.querySelector('.hero-hit')!;
@@ -306,6 +315,13 @@ export class HomeScreen implements Screen {
     Object.assign(this.bubble.style, { left: `${box.x + box.w * 0.62}px`, top: `${box.y - 6}px` });
   }
 
+  /** The stage was resized: new backing stores at the new stage scale; the state is kept. */
+  resize(): void {
+    this.backCtx = sizeCanvas(this.backCanvas, VIEW_W, VIEW_H, this.ui.scale);
+    this.ctx = sizeCanvas(this.canvas, VIEW_W, VIEW_H, this.ui.scale);
+    this.hero.invalidate();
+  }
+
   update(dt: number): void {
     const s = this.ui.save;
     const st = this.st;
@@ -313,7 +329,8 @@ export class HomeScreen implements Screen {
     st.reducedMotion = s.settings.reducedMotion;
     st.region = s.rush.region;
     this.hero.update(dt, st);
-    this.hero.draw(this.ctx, st);
+    // both layers are redrawn only when something on them changes (see HeroView.drawLayered)
+    this.hero.drawLayered(this.backCtx, this.ctx, st);
     if (this.bubbleT > 0) {
       this.bubbleT -= dt;
       if (this.bubbleT <= 0) {

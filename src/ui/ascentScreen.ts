@@ -131,16 +131,16 @@ const CSS = `
 .asc-end .asc-who{display:flex;align-items:center;gap:12px;margin:0 0 4px}
 .asc-end .asc-who img{width:120px;height:90px;object-fit:contain;border-radius:12px;background:rgba(255,255,255,.55)}
 .asc-end .asc-who b{display:block;font-size:18px}
-.asc-intro{width:720px;max-width:96%;text-align:left}
-.asc-intro h2{text-align:center}
-.asc-intro .goal{font-weight:800;font-size:18px}
-.asc-intro ul{margin:6px 0;padding-left:20px}
-.asc-intro li{margin:4px 0}
-.asc-intro .controls{list-style:none;padding:0}
-.asc-intro .controls li{display:flex;gap:10px;align-items:center}
-.asc-intro .controls li>span:first-child{min-width:150px;display:inline-flex;gap:3px}
-.asc-intro .assist{display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-radius:12px;background:rgba(95,212,230,.14);margin:8px 0}
-.asc-intro .assist input{width:20px;height:20px;margin-top:3px}
+.overlay .panel.asc-intro{width:820px;max-width:96%;text-align:left;padding:16px 26px 18px}
+.asc-intro h2{text-align:center;margin:0}
+.asc-intro .goal{font-weight:800;font-size:17px;text-align:center;margin:2px 0 6px}
+.asc-intro ul{margin:4px 0;padding-left:20px;font-size:15px}
+.asc-intro li{margin:3px 0;text-align:left}
+.asc-intro .controls{text-align:left;list-style:none;padding:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:center}
+.asc-intro .controls li{display:contents}
+.asc-intro .controls li>span:first-child{display:inline-flex;gap:3px;align-items:center;white-space:nowrap}
+.asc-intro .assist{display:flex;gap:10px;align-items:flex-start;padding:6px 12px;border-radius:12px;background:rgba(95,212,230,.14);margin:8px 0;font-size:15px;text-align:left}
+.asc-intro .assist input{width:20px;height:20px;margin-top:2px;flex:none}
 .upgrade-panel h2:focus{outline:none}
 .upgrade-card[aria-disabled=true]{opacity:.65;cursor:default}
 `;
@@ -370,7 +370,8 @@ export class AscentScreen {
       if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') {
         // a dash or confirm key still held from the flight must not pick a card: only a card
         // the player moved focus to (Tab) can be activated with Space/Enter, after the guard
-        const onCard = !!(document.activeElement as HTMLElement | null)?.classList?.contains('upgrade-card');
+        const f = document.activeElement as HTMLElement | null;
+        const onCard = !!f?.classList?.contains('upgrade-card') && f.matches(':focus-visible');
         return !onCard || repeat || this.choiceGuarded();
       }
     }
@@ -518,22 +519,25 @@ export class AscentScreen {
         <div class="panel upgrade-panel">
           <h2 id="asc-shrine-h" tabindex="-1">Aether shrine · ${s.distance.toLocaleString()} m</h2>
           <p>Choose one upgrade for this run (click, or press 1-3). Everything is paused; your progress so far has been banked.</p>
-          <p class="muted small">Wards ${s.wards}/${s.maxWards}${s.shell ? ' · shell ready' : ''}${s.assist ? ' · assist restored a ward' : ''}</p>
+          <p class="muted small">Wards ${s.wards}/${s.maxWards}${s.shell ? ' · shell ready' : ''}${s.shrineRestored ? ' · assist restored a ward' : ''}</p>
           <div class="upgrade-row">${cardsHtml}</div>
         </div>
       </div>`)!;
     const cards = Array.from(o.querySelectorAll<HTMLButtonElement>('.upgrade-card'));
+    const heading = $(o, '#asc-shrine-h');
     for (const b of cards)
       b.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.choose(Number(b.dataset.i));
+        // a click during the guard (a dash click from the flight) does nothing, not even focus a card
+        if (this.choiceGuarded()) heading.focus({ preventScroll: true });
+        else this.choose(Number(b.dataset.i));
       });
     // a click or dash press from the flight must not pick a card: guard briefly, then enable
     setTimeout(() => {
       if (this.overlay === o) for (const b of cards) b.removeAttribute('aria-disabled');
     }, CHOICE_GUARD_MS);
     // focus the heading (not a card), so the dash key cannot press a card
-    $(o, '#asc-shrine-h').focus({ preventScroll: true });
+    heading.focus({ preventScroll: true });
   }
 
   private choose(i: number) {
