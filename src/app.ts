@@ -21,6 +21,7 @@ import { Shell } from './ui/shell';
 import type { Overlay, Screen, Tab, UI } from './ui/types';
 import { MODES } from './content/modes';
 import { rushTip } from './sim/flight';
+import { arenaTip } from './sim/arena';
 // Update 5: Aether Ascent
 import { xpToNext } from './content/progression';
 import { HATCHERY, REGIONS } from './content/world';
@@ -669,6 +670,7 @@ export class App implements UI {
           this.go('play', 'arena');
         },
         onEnd: (r, reason) => this.endArena(r, reason),
+        onTutorialSeen: (id) => this.tutorialSeen(id),
       },
       {
         stats: arenaStats({ species: run.dragon, level: run.level, talents: d.talents }),
@@ -679,6 +681,8 @@ export class App implements UI {
         reducedMotion: s.reducedMotion,
         lowEffects: s.lowEffects,
         showHitboxes: s.showHitboxes,
+        screenShake: s.screenShake,
+        tutorialsSeen: this.save.prefs.tutorials,
       },
     );
   }
@@ -762,7 +766,7 @@ export class App implements UI {
     }
     if (!settlement) return this.go('home');
     sfx.music(null);
-    this.showResults({ kind: 'arena', settlement, arena: r, reason });
+    this.showResults({ kind: 'arena', settlement, arena: r, reason, tip: arenaTip(r, reason) });
   }
 
   private showResults(data: Omit<ResultsData, 'save'>) {
