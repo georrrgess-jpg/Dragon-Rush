@@ -119,7 +119,7 @@ export function drawMaterial(ctx: Ctx, m: Material, pts: SurfPt[], c: Palette, d
     case 'basalt': {
       // bevelled plates following the body; seams darker, lit top edges
       for (const p of pts) {
-        if (p.u % 2 || (!fine && p.v > 0.7)) continue;
+        if (p.u % 2 || p.v > (fine ? 0.7 : 0.5)) continue;
         const w = m === 'basalt' ? 9 : 7;
         const h = m === 'basalt' ? 6.5 : 5;
         ctx.save();
@@ -133,8 +133,8 @@ export function drawMaterial(ctx: Ctx, m: Material, pts: SurfPt[], c: Palette, d
         ctx.lineTo(w * 0.1, h);
         ctx.lineTo(-w * 0.8, h * 0.6);
         ctx.closePath();
-        ctx.lineWidth = m === 'basalt' ? 1.6 : 1.1;
-        ctx.strokeStyle = m === 'basalt' ? 'rgba(20,8,4,0.55)' : line;
+        ctx.lineWidth = m === 'basalt' ? 1.3 : 1.1;
+        ctx.strokeStyle = m === 'basalt' ? 'rgba(20,8,4,0.32)' : line;
         ctx.stroke();
         if (p.v < 0.6) {
           ctx.beginPath();
@@ -175,25 +175,24 @@ export function drawMaterial(ctx: Ctx, m: Material, pts: SurfPt[], c: Palette, d
       break;
     }
     case 'leaf': {
+      // soft leaf-shaped scales lying toward the tail: filled, no outlines (outlines read as chain)
       for (const p of pts) {
-        if (!fine && p.u % 2) continue;
+        if (p.u % 2 || p.v > 0.75 || (!fine && p.v > 0.5)) continue;
         ctx.save();
         ctx.translate(p.x, p.y);
-        ctx.rotate(p.a + Math.PI);
+        ctx.rotate(p.a + Math.PI + 0.25);
         ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(4, -3.2, 8, 0);
-        ctx.quadraticCurveTo(4, 3.2, 0, 0);
-        ctx.fillStyle = shade(c.membrane, p.v < 0.5 ? 0.15 : -0.1, 0.55);
+        ctx.moveTo(-1, 0);
+        ctx.quadraticCurveTo(4.5, -4, 10, 0);
+        ctx.quadraticCurveTo(4.5, 4, -1, 0);
+        ctx.fillStyle = shade(c.body, p.v < 0.4 ? 0.22 : 0.08, 0.6);
         ctx.fill();
-        ctx.strokeStyle = shade(c.outline, 0, 0.35);
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
         if (fine) {
           ctx.beginPath();
-          ctx.moveTo(1, 0);
-          ctx.lineTo(7, 0);
-          ctx.strokeStyle = shade(c.bone, 0, 0.5);
+          ctx.moveTo(0.5, 0);
+          ctx.lineTo(8, 0);
+          ctx.strokeStyle = shade(c.shade, -0.2, 0.35);
+          ctx.lineWidth = 0.7;
           ctx.stroke();
         }
         ctx.restore();
@@ -285,9 +284,9 @@ export function drawAccents(ctx: Ctx, accents: Accent[], pts: SurfPt[], c: Palet
         }
         break;
       case 'lavaSeams':
-        ctx.strokeStyle = `rgba(255,140,40,${0.55 + 0.35 * glow})`;
-        ctx.lineWidth = 1.4;
-        for (const p of pts.filter((q) => q.u % 4 === 2 && q.v < 0.7)) {
+        ctx.strokeStyle = `rgba(255,140,40,${0.5 + 0.4 * glow})`;
+        ctx.lineWidth = 1.3;
+        for (const p of pts.filter((q) => q.u % 5 === 2 && q.v > 0.25 && q.v < 0.6)) {
           ctx.beginPath();
           ctx.moveTo(p.x - 4, p.y + 4);
           ctx.lineTo(p.x, p.y);
@@ -297,11 +296,11 @@ export function drawAccents(ctx: Ctx, accents: Accent[], pts: SurfPt[], c: Palet
         break;
       case 'lumOrgans':
         // a deliberate row of luminous organs along the lateral line
-        for (const p of pts.filter((q) => Math.abs(q.v - 0.55) < 0.12 && q.u % 2 === 0)) {
-          const r = 1.8 + (p.u % 4 === 0 ? 0.8 : 0);
-          ctx.fillStyle = `rgba(${c.glow},0.25)`;
+        for (const p of pts.filter((q) => Math.abs(q.v - 0.6) < 0.09 && q.u % 3 === 0)) {
+          const r = 1.6 + (p.u % 6 === 0 ? 0.6 : 0);
+          ctx.fillStyle = `rgba(${c.glow},${0.14 + 0.2 * glow})`;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, r * 2.4, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, r * 2, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = c.mark;
           ctx.beginPath();
